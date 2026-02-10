@@ -27,6 +27,7 @@ import {
   providerStopSessionInputSchema,
   terminalCommandInputSchema,
   wsClientMessageSchema,
+  wsServerMessageSchema,
 } from "@acme/contracts";
 import { ProcessManager } from "../../desktop/src/processManager";
 import { ProviderManager } from "../../desktop/src/providerManager";
@@ -114,8 +115,13 @@ function sendMessage(socket: WebSocket, message: unknown): void {
     return;
   }
 
+  const parsedMessage = wsServerMessageSchema.safeParse(message);
+  if (!parsedMessage.success) {
+    return;
+  }
+
   try {
-    socket.send(JSON.stringify(message));
+    socket.send(JSON.stringify(parsedMessage.data));
   } catch {
     // Best-effort event delivery. Socket may have transitioned states.
   }
