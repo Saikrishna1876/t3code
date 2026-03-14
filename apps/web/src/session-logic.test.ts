@@ -10,6 +10,7 @@ import {
   deriveTimelineEntries,
   deriveWorkLogEntries,
   findLatestProposedPlan,
+  formatTurnWorkElapsedExcludingUserInputWait,
   hasToolActivityForTurn,
   isLatestTurnSettled,
 } from "./session-logic";
@@ -219,6 +220,126 @@ describe("derivePendingUserInputs", () => {
         ],
       },
     ]);
+  });
+});
+
+describe("formatTurnWorkElapsedExcludingUserInputWait", () => {
+  it("subtracts a fully resolved wait interval from total elapsed", () => {
+    const startIso = "2026-02-23T00:00:00.000Z";
+    const endIso = "2026-02-23T00:01:00.000Z";
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "wait-requested",
+        createdAt: "2026-02-23T00:00:10.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: { requestId: "req-wait-1" },
+      }),
+      makeActivity({
+        id: "wait-resolved",
+        createdAt: "2026-02-23T00:00:40.000Z",
+        kind: "user-input.resolved",
+        summary: "User input submitted",
+        tone: "info",
+        payload: { requestId: "req-wait-1" },
+      }),
+    ];
+
+    expect(formatTurnWorkElapsedExcludingUserInputWait(startIso, endIso, activities)).toBe("30s");
+  });
+
+  it("subtracts an open wait interval up to endIso (freezes elapsed at request time)", () => {
+    const startIso = "2026-02-23T00:00:00.000Z";
+    const endIso = "2026-02-23T00:01:00.000Z";
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "wait-requested-open",
+        createdAt: "2026-02-23T00:00:10.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: { requestId: "req-open-1" },
+      }),
+    ];
+
+    expect(formatTurnWorkElapsedExcludingUserInputWait(startIso, endIso, activities)).toBe("10s");
+  });
+
+  it("ignores malformed payloads / missing requestIds safely", () => {
+    const startIso = "2026-02-23T00:00:00.000Z";
+    const endIso = "2026-02-23T00:01:00.000Z";
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "wait-requested-missing",
+        createdAt: "2026-02-23T00:00:10.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: {},
+      }),
+      makeActivity({
+        id: "wait-resolved-missing",
+        createdAt: "2026-02-23T00:00:20.000Z",
+        kind: "user-input.resolved",
+        summary: "User input submitted",
+        tone: "info",
+        payload: {},
+      }),
+      makeActivity({
+        id: "wait-requested-non-string",
+        createdAt: "2026-02-23T00:00:30.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: { requestId: 123 },
+      }),
+    ];
+
+    expect(formatTurnWorkElapsedExcludingUserInputWait(startIso, endIso, activities)).toBe("1m");
+  });
+
+  it("handles multiple wait intervals (sum of overlaps)", () => {
+    const startIso = "2026-02-23T00:00:00.000Z";
+    const endIso = "2026-02-23T00:02:00.000Z";
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "wait-1-requested",
+        createdAt: "2026-02-23T00:00:10.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: { requestId: "req-multi-1" },
+      }),
+      makeActivity({
+        id: "wait-1-resolved",
+        createdAt: "2026-02-23T00:00:20.000Z",
+        kind: "user-input.resolved",
+        summary: "User input submitted",
+        tone: "info",
+        payload: { requestId: "req-multi-1" },
+      }),
+      makeActivity({
+        id: "wait-2-requested",
+        createdAt: "2026-02-23T00:01:00.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: { requestId: "req-multi-2" },
+      }),
+      makeActivity({
+        id: "wait-2-resolved",
+        createdAt: "2026-02-23T00:01:30.000Z",
+        kind: "user-input.resolved",
+        summary: "User input submitted",
+        tone: "info",
+        payload: { requestId: "req-multi-2" },
+      }),
+    ];
+
+    expect(formatTurnWorkElapsedExcludingUserInputWait(startIso, endIso, activities)).toBe(
+      "1m 20s",
+    );
   });
 });
 

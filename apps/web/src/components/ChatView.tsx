@@ -58,6 +58,7 @@ import {
   hasToolActivityForTurn,
   isLatestTurnSettled,
   formatElapsed,
+  formatTurnWorkElapsedExcludingUserInputWait,
 } from "../session-logic";
 import { isScrollContainerNearBottom } from "../chat-scroll";
 import {
@@ -568,7 +569,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const phase = derivePhase(activeThread?.session ?? null);
   const isSendBusy = sendPhase !== "idle";
   const isPreparingWorktree = sendPhase === "preparing-worktree";
-  const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
   const nowIso = new Date(nowTick).toISOString();
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
@@ -593,6 +593,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [threadActivities],
   );
   const activePendingUserInput = pendingUserInputs[0] ?? null;
+  const isWaitingForUserInput = activePendingUserInput !== null;
+  const isWorking =
+    (phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint) &&
+    !isWaitingForUserInput;
   const activePendingDraftAnswers = useMemo(
     () =>
       activePendingUserInput
@@ -862,14 +866,27 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!activeLatestTurn.completedAt) return null;
     if (!latestTurnHasToolActivity) return null;
 
-    const elapsed = formatElapsed(activeLatestTurn.startedAt, activeLatestTurn.completedAt);
+    const elapsed = formatTurnWorkElapsedExcludingUserInputWait(
+      activeLatestTurn.startedAt,
+      activeLatestTurn.completedAt,
+      threadActivities,
+    );
     return elapsed ? `Worked for ${elapsed}` : null;
   }, [
     activeLatestTurn?.completedAt,
     activeLatestTurn?.startedAt,
     latestTurnHasToolActivity,
     latestTurnSettled,
+    threadActivities,
   ]);
+  const workingForLabel = useMemo(() => {
+    if (!isWorking) return null;
+    if (!activeWorkStartedAt) return null;
+    return (
+      formatTurnWorkElapsedExcludingUserInputWait(activeWorkStartedAt, nowIso, threadActivities) ??
+      formatElapsed(activeWorkStartedAt, nowIso)
+    );
+  }, [activeWorkStartedAt, isWorking, nowIso, threadActivities]);
   const completionDividerBeforeEntryId = useMemo(() => {
     if (!latestTurnSettled) return null;
     if (!activeLatestTurn?.startedAt) return null;
@@ -1900,14 +1917,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
       : "local";
 
   useEffect(() => {
-    if (phase !== "running") return;
+    if (phase !== "running" || isWaitingForUserInput) return;
     const timer = window.setInterval(() => {
       setNowTick(Date.now());
     }, 1000);
     return () => {
       window.clearInterval(timer);
     };
-  }, [phase]);
+  }, [isWaitingForUserInput, phase]);
 
   const beginSendPhase = useCallback((nextPhase: Exclude<SendPhase, "idle">) => {
     setSendStartedAt((current) => current ?? new Date().toISOString());
@@ -3278,6 +3295,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
               key={activeThread.id}
               hasMessages={timelineEntries.length > 0}
               isWorking={isWorking}
+              isWaitingForUserInput={isWaitingForUserInput}
+              waitingStartedAt={activePendingUserInput?.createdAt ?? null}
+              workingForLabel={workingForLabel}
               activeTurnInProgress={isWorking || !latestTurnSettled}
               activeTurnStartedAt={activeWorkStartedAt}
               scrollContainer={messagesScrollElement}

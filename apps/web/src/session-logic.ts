@@ -116,6 +116,85 @@ export function formatElapsed(startIso: string, endIso: string | undefined): str
   return formatDuration(endedAt - startedAt);
 }
 
+function payloadFromActivity(
+  activity: OrchestrationThreadActivity,
+): Record<string, unknown> | null {
+  return activity.payload && typeof activity.payload === "object"
+    ? (activity.payload as Record<string, unknown>)
+    : null;
+}
+
+function requestIdFromPayload(payload: Record<string, unknown> | null): ApprovalRequestId | null {
+  return payload && typeof payload.requestId === "string"
+    ? ApprovalRequestId.makeUnsafe(payload.requestId)
+    : null;
+}
+
+export function formatTurnWorkElapsedExcludingUserInputWait(
+  startIso: string,
+  endIso: string,
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): string | null {
+  const startMs = Date.parse(startIso);
+  const endMs = Date.parse(endIso);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) {
+    return null;
+  }
+
+  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const openWaitStartByRequestId = new Map<ApprovalRequestId, number>();
+  let waitingMs = 0;
+
+  for (const activity of ordered) {
+    if (activity.kind !== "user-input.requested" && activity.kind !== "user-input.resolved") {
+      continue;
+    }
+
+    const payload = payloadFromActivity(activity);
+    const requestId = requestIdFromPayload(payload);
+    if (!requestId) {
+      continue;
+    }
+
+    const activityMs = Date.parse(activity.createdAt);
+    if (Number.isNaN(activityMs)) {
+      if (activity.kind === "user-input.resolved") {
+        openWaitStartByRequestId.delete(requestId);
+      }
+      continue;
+    }
+
+    if (activity.kind === "user-input.requested") {
+      if (!openWaitStartByRequestId.has(requestId)) {
+        openWaitStartByRequestId.set(requestId, activityMs);
+      }
+      continue;
+    }
+
+    const waitStartMs = openWaitStartByRequestId.get(requestId);
+    openWaitStartByRequestId.delete(requestId);
+    if (waitStartMs === undefined) {
+      continue;
+    }
+
+    const overlapStartMs = Math.max(startMs, waitStartMs);
+    const overlapEndMs = Math.min(endMs, activityMs);
+    if (overlapEndMs > overlapStartMs) {
+      waitingMs += overlapEndMs - overlapStartMs;
+    }
+  }
+
+  for (const waitStartMs of openWaitStartByRequestId.values()) {
+    const overlapStartMs = Math.max(startMs, waitStartMs);
+    if (endMs > overlapStartMs) {
+      waitingMs += endMs - overlapStartMs;
+    }
+  }
+
+  const effectiveMs = Math.max(0, endMs - startMs - waitingMs);
+  return formatDuration(effectiveMs);
+}
+
 type LatestTurnTiming = Pick<OrchestrationLatestTurn, "turnId" | "startedAt" | "completedAt">;
 type SessionActivityState = Pick<ThreadSession, "orchestrationStatus" | "activeTurnId">;
 
@@ -163,14 +242,8 @@ export function derivePendingApprovals(
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
 
   for (const activity of ordered) {
-    const payload =
-      activity.payload && typeof activity.payload === "object"
-        ? (activity.payload as Record<string, unknown>)
-        : null;
-    const requestId =
-      payload && typeof payload.requestId === "string"
-        ? ApprovalRequestId.makeUnsafe(payload.requestId)
-        : null;
+    const payload = payloadFromActivity(activity);
+    const requestId = requestIdFromPayload(payload);
     const requestKind =
       payload &&
       (payload.requestKind === "command" ||
@@ -268,14 +341,8 @@ export function derivePendingUserInputs(
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
 
   for (const activity of ordered) {
-    const payload =
-      activity.payload && typeof activity.payload === "object"
-        ? (activity.payload as Record<string, unknown>)
-        : null;
-    const requestId =
-      payload && typeof payload.requestId === "string"
-        ? ApprovalRequestId.makeUnsafe(payload.requestId)
-        : null;
+    const payload = payloadFromActivity(activity);
+    const requestId = requestIdFromPayload(payload);
 
     if (activity.kind === "user-input.requested" && requestId) {
       const questions = parseUserInputQuestions(payload);
