@@ -8,6 +8,7 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   deriveTimelineEntries,
+  deriveUserInputWaitIntervals,
   deriveWorkLogEntries,
   findLatestProposedPlan,
   formatTurnWorkElapsedExcludingUserInputWait,
@@ -246,7 +247,13 @@ describe("formatTurnWorkElapsedExcludingUserInputWait", () => {
       }),
     ];
 
-    expect(formatTurnWorkElapsedExcludingUserInputWait(startIso, endIso, activities)).toBe("30s");
+    expect(
+      formatTurnWorkElapsedExcludingUserInputWait(
+        startIso,
+        endIso,
+        deriveUserInputWaitIntervals(activities),
+      ),
+    ).toBe("30s");
   });
 
   it("subtracts an open wait interval up to endIso (freezes elapsed at request time)", () => {
@@ -263,7 +270,13 @@ describe("formatTurnWorkElapsedExcludingUserInputWait", () => {
       }),
     ];
 
-    expect(formatTurnWorkElapsedExcludingUserInputWait(startIso, endIso, activities)).toBe("10s");
+    expect(
+      formatTurnWorkElapsedExcludingUserInputWait(
+        startIso,
+        endIso,
+        deriveUserInputWaitIntervals(activities),
+      ),
+    ).toBe("10s");
   });
 
   it("ignores malformed payloads / missing requestIds safely", () => {
@@ -296,7 +309,13 @@ describe("formatTurnWorkElapsedExcludingUserInputWait", () => {
       }),
     ];
 
-    expect(formatTurnWorkElapsedExcludingUserInputWait(startIso, endIso, activities)).toBe("1m");
+    expect(
+      formatTurnWorkElapsedExcludingUserInputWait(
+        startIso,
+        endIso,
+        deriveUserInputWaitIntervals(activities),
+      ),
+    ).toBe("1m");
   });
 
   it("handles multiple wait intervals (sum of overlaps)", () => {
@@ -337,9 +356,63 @@ describe("formatTurnWorkElapsedExcludingUserInputWait", () => {
       }),
     ];
 
-    expect(formatTurnWorkElapsedExcludingUserInputWait(startIso, endIso, activities)).toBe(
-      "1m 20s",
-    );
+    expect(
+      formatTurnWorkElapsedExcludingUserInputWait(
+        startIso,
+        endIso,
+        deriveUserInputWaitIntervals(activities),
+      ),
+    ).toBe("1m 20s");
+  });
+
+  it("sorts intervals and preserves open waits for live timers", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "wait-requested-late",
+        createdAt: "2026-02-23T00:00:20.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: { requestId: "req-seq-1" },
+        sequence: 2,
+      }),
+      makeActivity({
+        id: "wait-resolved-late",
+        createdAt: "2026-02-23T00:00:30.000Z",
+        kind: "user-input.resolved",
+        summary: "User input submitted",
+        tone: "info",
+        payload: { requestId: "req-seq-1" },
+        sequence: 3,
+      }),
+      makeActivity({
+        id: "wait-requested-early",
+        createdAt: "2026-02-23T00:00:10.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: { requestId: "req-seq-2" },
+        sequence: 1,
+      }),
+      makeActivity({
+        id: "wait-requested-open",
+        createdAt: "2026-02-23T00:00:40.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: { requestId: "req-open-2" },
+        sequence: 4,
+      }),
+    ];
+
+    expect(deriveUserInputWaitIntervals(activities)).toEqual([
+      { startMs: Date.parse("2026-02-23T00:00:10.000Z"), endMs: null },
+      {
+        startMs: Date.parse("2026-02-23T00:00:20.000Z"),
+        endMs: Date.parse("2026-02-23T00:00:30.000Z"),
+      },
+      { startMs: Date.parse("2026-02-23T00:00:40.000Z"), endMs: null },
+    ]);
   });
 });
 

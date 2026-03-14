@@ -53,6 +53,7 @@ import {
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  deriveUserInputWaitIntervals,
   findLatestProposedPlan,
   deriveWorkLogEntries,
   hasToolActivityForTurn,
@@ -592,6 +593,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => derivePendingUserInputs(threadActivities),
     [threadActivities],
   );
+  const userInputWaitIntervals = useMemo(
+    () => deriveUserInputWaitIntervals(threadActivities),
+    [threadActivities],
+  );
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const isWaitingForUserInput = activePendingUserInput !== null;
   const isWorking =
@@ -869,7 +874,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const elapsed = formatTurnWorkElapsedExcludingUserInputWait(
       activeLatestTurn.startedAt,
       activeLatestTurn.completedAt,
-      threadActivities,
+      userInputWaitIntervals,
     );
     return elapsed ? `Worked for ${elapsed}` : null;
   }, [
@@ -877,16 +882,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
     activeLatestTurn?.startedAt,
     latestTurnHasToolActivity,
     latestTurnSettled,
-    threadActivities,
+    userInputWaitIntervals,
   ]);
   const workingForLabel = useMemo(() => {
     if (!isWorking) return null;
     if (!activeWorkStartedAt) return null;
     return (
-      formatTurnWorkElapsedExcludingUserInputWait(activeWorkStartedAt, nowIso, threadActivities) ??
-      formatElapsed(activeWorkStartedAt, nowIso)
+      formatTurnWorkElapsedExcludingUserInputWait(
+        activeWorkStartedAt,
+        nowIso,
+        userInputWaitIntervals,
+      ) ?? formatElapsed(activeWorkStartedAt, nowIso)
     );
-  }, [activeWorkStartedAt, isWorking, nowIso, threadActivities]);
+  }, [activeWorkStartedAt, isWorking, nowIso, userInputWaitIntervals]);
   const completionDividerBeforeEntryId = useMemo(() => {
     if (!latestTurnSettled) return null;
     if (!activeLatestTurn?.startedAt) return null;

@@ -56,6 +56,11 @@ export interface PendingUserInput {
   questions: ReadonlyArray<UserInputQuestion>;
 }
 
+export interface UserInputWaitInterval {
+  startMs: number;
+  endMs: number | null;
+}
+
 export interface ActivePlanState {
   createdAt: string;
   turnId: TurnId | null;
@@ -130,28 +135,12 @@ function requestIdFromPayload(payload: Record<string, unknown> | null): Approval
     : null;
 }
 
-export function formatTurnWorkElapsedExcludingUserInputWait(
-  startIso: string,
-  endIso: string,
+export function deriveUserInputWaitIntervals(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
-): string | null {
-  const startMs = Date.parse(startIso);
-  const endMs = Date.parse(endIso);
-  if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) {
-    return null;
-  }
-
+): UserInputWaitInterval[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const openWaitStartByRequestId = new Map<ApprovalRequestId, number>();
-  const waitIntervals: Array<{ startMs: number; endMs: number }> = [];
-
-  const recordWaitInterval = (waitStartMs: number, waitEndMs: number) => {
-    const overlapStartMs = Math.max(startMs, waitStartMs);
-    const overlapEndMs = Math.min(endMs, waitEndMs);
-    if (overlapEndMs > overlapStartMs) {
-      waitIntervals.push({ startMs: overlapStartMs, endMs: overlapEndMs });
-    }
-  };
+  const waitIntervals: UserInputWaitInterval[] = [];
 
   for (const activity of ordered) {
     if (activity.kind !== "user-input.requested" && activity.kind !== "user-input.resolved") {
@@ -185,32 +174,63 @@ export function formatTurnWorkElapsedExcludingUserInputWait(
       continue;
     }
 
-    recordWaitInterval(waitStartMs, activityMs);
-  }
-
-  for (const waitStartMs of openWaitStartByRequestId.values()) {
-    recordWaitInterval(waitStartMs, endMs);
-  }
-
-  const mergedWaitIntervals = waitIntervals.toSorted(
-    (left, right) => left.startMs - right.startMs || left.endMs - right.endMs,
-  );
-  let waitingMs = 0;
-  let currentInterval: { startMs: number; endMs: number } | null = null;
-
-  for (const interval of mergedWaitIntervals) {
-    if (!currentInterval) {
-      currentInterval = interval;
+    if (activityMs <= waitStartMs) {
       continue;
     }
 
-    if (interval.startMs <= currentInterval.endMs) {
-      currentInterval.endMs = Math.max(currentInterval.endMs, interval.endMs);
+    waitIntervals.push({ startMs: waitStartMs, endMs: activityMs });
+  }
+
+  for (const waitStartMs of openWaitStartByRequestId.values()) {
+    waitIntervals.push({ startMs: waitStartMs, endMs: null });
+  }
+
+  return waitIntervals.toSorted(
+    (left, right) =>
+      left.startMs - right.startMs ||
+      (left.endMs ?? Number.POSITIVE_INFINITY) - (right.endMs ?? Number.POSITIVE_INFINITY),
+  );
+}
+
+export function formatTurnWorkElapsedExcludingUserInputWait(
+  startIso: string,
+  endIso: string,
+  waitIntervals: ReadonlyArray<UserInputWaitInterval>,
+): string | null {
+  const startMs = Date.parse(startIso);
+  const endMs = Date.parse(endIso);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) {
+    return null;
+  }
+
+  let waitingMs = 0;
+  let currentInterval: { startMs: number; endMs: number } | null = null;
+
+  for (const interval of waitIntervals) {
+    const waitEndMs = interval.endMs ?? endMs;
+    const overlapStartMs = Math.max(startMs, interval.startMs);
+    const overlapEndMs = Math.min(endMs, waitEndMs);
+    if (overlapEndMs <= overlapStartMs) {
+      continue;
+    }
+
+    const overlappingInterval = {
+      startMs: overlapStartMs,
+      endMs: overlapEndMs,
+    };
+
+    if (!currentInterval) {
+      currentInterval = overlappingInterval;
+      continue;
+    }
+
+    if (overlappingInterval.startMs <= currentInterval.endMs) {
+      currentInterval.endMs = Math.max(currentInterval.endMs, overlappingInterval.endMs);
       continue;
     }
 
     waitingMs += currentInterval.endMs - currentInterval.startMs;
-    currentInterval = interval;
+    currentInterval = overlappingInterval;
   }
 
   if (currentInterval) {
