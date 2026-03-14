@@ -143,7 +143,15 @@ export function formatTurnWorkElapsedExcludingUserInputWait(
 
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const openWaitStartByRequestId = new Map<ApprovalRequestId, number>();
-  let waitingMs = 0;
+  const waitIntervals: Array<{ startMs: number; endMs: number }> = [];
+
+  const recordWaitInterval = (waitStartMs: number, waitEndMs: number) => {
+    const overlapStartMs = Math.max(startMs, waitStartMs);
+    const overlapEndMs = Math.min(endMs, waitEndMs);
+    if (overlapEndMs > overlapStartMs) {
+      waitIntervals.push({ startMs: overlapStartMs, endMs: overlapEndMs });
+    }
+  };
 
   for (const activity of ordered) {
     if (activity.kind !== "user-input.requested" && activity.kind !== "user-input.resolved") {
@@ -177,18 +185,36 @@ export function formatTurnWorkElapsedExcludingUserInputWait(
       continue;
     }
 
-    const overlapStartMs = Math.max(startMs, waitStartMs);
-    const overlapEndMs = Math.min(endMs, activityMs);
-    if (overlapEndMs > overlapStartMs) {
-      waitingMs += overlapEndMs - overlapStartMs;
-    }
+    recordWaitInterval(waitStartMs, activityMs);
   }
 
   for (const waitStartMs of openWaitStartByRequestId.values()) {
-    const overlapStartMs = Math.max(startMs, waitStartMs);
-    if (endMs > overlapStartMs) {
-      waitingMs += endMs - overlapStartMs;
+    recordWaitInterval(waitStartMs, endMs);
+  }
+
+  const mergedWaitIntervals = waitIntervals.toSorted(
+    (left, right) => left.startMs - right.startMs || left.endMs - right.endMs,
+  );
+  let waitingMs = 0;
+  let currentInterval: { startMs: number; endMs: number } | null = null;
+
+  for (const interval of mergedWaitIntervals) {
+    if (!currentInterval) {
+      currentInterval = interval;
+      continue;
     }
+
+    if (interval.startMs <= currentInterval.endMs) {
+      currentInterval.endMs = Math.max(currentInterval.endMs, interval.endMs);
+      continue;
+    }
+
+    waitingMs += currentInterval.endMs - currentInterval.startMs;
+    currentInterval = interval;
+  }
+
+  if (currentInterval) {
+    waitingMs += currentInterval.endMs - currentInterval.startMs;
   }
 
   const effectiveMs = Math.max(0, endMs - startMs - waitingMs);
