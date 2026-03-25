@@ -250,15 +250,20 @@ describe("when: branch is clean, ahead, and has no open PR", () => {
 });
 
 describe("when: branch is clean, up to date, and has no open PR", () => {
-  it("resolveQuickAction returns disabled no-action state", () => {
+  it("resolveQuickAction runs create PR", () => {
     const quick = resolveQuickAction(
       status({ aheadCount: 0, behindCount: 0, hasWorkingTreeChanges: false, pr: null }),
       false,
     );
-    assert.deepInclude(quick, { kind: "show_hint", label: "Commit", disabled: true });
+    assert.deepInclude(quick, {
+      kind: "run_action",
+      action: "commit_push_pr",
+      label: "Create PR",
+      disabled: false,
+    });
   });
 
-  it("buildMenuItems disables commit, push, and create PR", () => {
+  it("buildMenuItems disables commit/push and enables create PR", () => {
     const items = buildMenuItems(status({ aheadCount: 0, behindCount: 0, pr: null }), false);
     assert.deepEqual(items, [
       {
@@ -280,7 +285,7 @@ describe("when: branch is clean, up to date, and has no open PR", () => {
       {
         id: "pr",
         label: "Create PR",
-        disabled: true,
+        disabled: false,
         icon: "pr",
         kind: "open_dialog",
         dialogAction: "create_pr",
@@ -442,6 +447,33 @@ describe("when: on default branch without open PR", () => {
       action: "commit_push",
       label: "Push",
       disabled: false,
+    });
+  });
+
+  it("resolveQuickAction does not suggest create PR when branch is up to date", () => {
+    const quick = resolveQuickAction(
+      status({ branch: "main", aheadCount: 0, pr: null }),
+      false,
+      true,
+    );
+    assert.deepInclude(quick, { kind: "show_hint", label: "Commit", disabled: true });
+  });
+
+  it("buildMenuItems disables create PR on default branch", () => {
+    const items = buildMenuItems(
+      status({ branch: "main", aheadCount: 0, pr: null }),
+      false,
+      true,
+      true,
+    );
+    const prItem = items.find((item) => item.id === "pr");
+    assert.deepEqual(prItem, {
+      id: "pr",
+      label: "Create PR",
+      disabled: true,
+      icon: "pr",
+      kind: "open_dialog",
+      dialogAction: "create_pr",
     });
   });
 });
