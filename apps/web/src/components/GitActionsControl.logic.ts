@@ -36,6 +36,38 @@ export type DefaultBranchConfirmableAction = "commit_push" | "commit_push_pr";
 const SHORT_SHA_LENGTH = 7;
 const TOAST_DESCRIPTION_MAX = 72;
 
+function resolvePrActionUnavailableHintForStatus(gitStatus: GitStatusResult): string | null {
+  const availability = gitStatus.prActionAvailability;
+  if (!availability || availability.available) {
+    return null;
+  }
+
+  if (availability.message) {
+    return availability.message;
+  }
+
+  if (availability.reason === "gh_missing") {
+    return "GitHub CLI (`gh`) is required but not available on PATH.";
+  }
+
+  if (availability.reason === "gh_unauthenticated") {
+    return "GitHub CLI is not authenticated. Run `gh auth login` and retry.";
+  }
+
+  return "Create PR is currently unavailable.";
+}
+
+function isPrActionAvailable(gitStatus: GitStatusResult): boolean {
+  return gitStatus.prActionAvailability?.available ?? true;
+}
+
+export function resolvePrActionUnavailableHint(gitStatus: GitStatusResult | null): string | null {
+  if (!gitStatus) {
+    return null;
+  }
+  return resolvePrActionUnavailableHintForStatus(gitStatus);
+}
+
 function shortenSha(sha: string | undefined): string | null {
   if (!sha) return null;
   return sha.slice(0, SHORT_SHA_LENGTH);
@@ -122,6 +154,7 @@ export function buildMenuItems(
   const hasChanges = gitStatus.hasWorkingTreeChanges;
   const hasOpenPr = gitStatus.pr?.state === "open";
   const isBehind = gitStatus.behindCount > 0;
+  const prActionAvailable = isPrActionAvailable(gitStatus);
   const canPushWithoutUpstream = hasOriginRemote && !gitStatus.hasUpstream;
   const canCommit = !isBusy && hasChanges;
   const canPush =
@@ -139,6 +172,7 @@ export function buildMenuItems(
     !hasChanges &&
     !hasOpenPr &&
     !isBehind &&
+    prActionAvailable &&
     (gitStatus.hasUpstream || canPushWithoutUpstream) &&
     canCreatePrFromBranch;
   const canOpenPr = !isBusy && hasOpenPr;
@@ -201,6 +235,8 @@ export function resolveQuickAction(
   const hasBranch = gitStatus.branch !== null;
   const hasChanges = gitStatus.hasWorkingTreeChanges;
   const hasOpenPr = gitStatus.pr?.state === "open";
+  const prActionAvailable = isPrActionAvailable(gitStatus);
+  const prUnavailableHint = resolvePrActionUnavailableHintForStatus(gitStatus);
   const isAhead = gitStatus.aheadCount > 0;
   const isBehind = gitStatus.behindCount > 0;
   const isDiverged = isAhead && isBehind;
@@ -218,7 +254,7 @@ export function resolveQuickAction(
     if (!gitStatus.hasUpstream && !hasOriginRemote) {
       return { label: "Commit", disabled: false, kind: "run_action", action: "commit" };
     }
-    if (hasOpenPr || isDefaultBranch) {
+    if (hasOpenPr || isDefaultBranch || !prActionAvailable) {
       return { label: "Commit & push", disabled: false, kind: "run_action", action: "commit_push" };
     }
     return {
@@ -255,6 +291,9 @@ export function resolveQuickAction(
     if (hasOpenPr || isDefaultBranch) {
       return { label: "Push", disabled: false, kind: "run_action", action: "commit_push" };
     }
+    if (!prActionAvailable) {
+      return { label: "Push", disabled: false, kind: "run_action", action: "commit_push" };
+    }
     return {
       label: "Push & create PR",
       disabled: false,
@@ -281,7 +320,7 @@ export function resolveQuickAction(
   }
 
   if (isAhead) {
-    if (hasOpenPr || isDefaultBranch) {
+    if (hasOpenPr || isDefaultBranch || !prActionAvailable) {
       return { label: "Push", disabled: false, kind: "run_action", action: "commit_push" };
     }
     return {
@@ -297,11 +336,19 @@ export function resolveQuickAction(
   }
 
   if (!hasOpenPr && !isDefaultBranch && gitStatus.hasUpstream) {
+    if (prActionAvailable) {
+      return {
+        label: "Create PR",
+        disabled: false,
+        kind: "run_action",
+        action: "commit_push_pr",
+      };
+    }
     return {
       label: "Create PR",
-      disabled: false,
-      kind: "run_action",
-      action: "commit_push_pr",
+      disabled: true,
+      kind: "show_hint",
+      hint: prUnavailableHint ?? "Create PR is currently unavailable.",
     };
   }
 

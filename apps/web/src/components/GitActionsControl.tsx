@@ -17,6 +17,7 @@ import {
   type DefaultBranchConfirmableAction,
   requiresDefaultBranchConfirmation,
   resolveDefaultBranchActionDialogCopy,
+  resolvePrActionUnavailableHint,
   resolveQuickAction,
   summarizeGitResult,
 } from "./GitActionsControl.logic";
@@ -176,7 +177,11 @@ function getMenuActionDisabledReason({
   if (!gitStatus.hasUpstream && !hasOriginRemote) {
     return 'Add an "origin" remote before creating a PR.';
   }
-  if (!isAhead) {
+  const prUnavailableHint = resolvePrActionUnavailableHint(gitStatus);
+  if (prUnavailableHint) {
+    return prUnavailableHint;
+  }
+  if (!isAhead && !gitStatus.hasUpstream) {
     return "No local commits to include in a PR.";
   }
   if (isBehind) {
