@@ -177,7 +177,6 @@ describe("previewWindowOpenAction", () => {
 
 const {
   browserWindowConstructor,
-  clipboardItemConstructor,
   createFromPath,
   fromId,
   getFocusedWebContents,
@@ -185,32 +184,23 @@ const {
   showItemInFolder,
   webviewSend,
   writeFile,
-  writeClipboard,
+  writeImage,
 } = vi.hoisted(() => ({
   browserWindowConstructor: vi.fn(),
-  clipboardItemConstructor: vi.fn(),
-  createFromPath: vi.fn((): { readonly isEmpty: () => boolean; readonly toPNG: () => Buffer } => ({
-    isEmpty: () => false,
-    toPNG: () => Buffer.from("png"),
-  })),
+  createFromPath: vi.fn((): { readonly isEmpty: () => boolean } => ({ isEmpty: () => false })),
   fromId: vi.fn<(_id?: number) => Electron.WebContents | null>((_id?: number) => null),
   getFocusedWebContents: vi.fn(() => null),
   mkdir: vi.fn((_path: string) => undefined),
   showItemInFolder: vi.fn(),
   webviewSend: vi.fn(),
   writeFile: vi.fn((_path: string, _data: Uint8Array) => undefined),
-  writeClipboard: vi.fn(async () => undefined),
+  writeImage: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
   BrowserWindow: browserWindowConstructor,
-  ClipboardItem: class {
-    constructor(data: Record<string, unknown>) {
-      clipboardItemConstructor(data);
-    }
-  },
   clipboard: {
-    write: writeClipboard,
+    writeImage,
   },
   nativeImage: {
     createFromPath,
@@ -545,8 +535,7 @@ describe("PreviewManager", () => {
     mkdir.mockClear();
     writeFile.mockClear();
     showItemInFolder.mockClear();
-    clipboardItemConstructor.mockClear();
-    writeClipboard.mockClear();
+    writeImage.mockClear();
     createFromPath.mockClear();
     webviewSend.mockClear();
   });
@@ -3793,10 +3782,7 @@ describe("PreviewManager", () => {
         yield* manager.copyArtifactToClipboard(artifactPath);
 
         expect(createFromPath).toHaveBeenCalledWith(artifactPath);
-        expect(clipboardItemConstructor).toHaveBeenCalledWith({
-          "image/png": expect.any(Blob),
-        });
-        expect(writeClipboard).toHaveBeenCalledOnce();
+        expect(writeImage).toHaveBeenCalledOnce();
         const exit = yield* Effect.exit(
           manager.copyArtifactToClipboard("/tmp/t3/dev/settings.json"),
         );
@@ -3810,10 +3796,7 @@ describe("PreviewManager", () => {
         });
         expect("cause" in error).toBe(false);
 
-        createFromPath.mockReturnValueOnce({
-          isEmpty: () => true,
-          toPNG: () => Buffer.from("invalid"),
-        });
+        createFromPath.mockReturnValueOnce({ isEmpty: () => true });
         const invalidImageExit = yield* Effect.exit(manager.copyArtifactToClipboard(artifactPath));
         expect(Exit.isFailure(invalidImageExit)).toBe(true);
         if (Exit.isSuccess(invalidImageExit)) return;
@@ -3823,7 +3806,9 @@ describe("PreviewManager", () => {
         });
 
         const writeCause = new Error("clipboard write failed");
-        writeClipboard.mockRejectedValueOnce(writeCause);
+        writeImage.mockImplementationOnce(() => {
+          throw writeCause;
+        });
         const writeExit = yield* Effect.exit(manager.copyArtifactToClipboard(artifactPath));
         expect(Exit.isFailure(writeExit)).toBe(true);
         if (Exit.isSuccess(writeExit)) return;

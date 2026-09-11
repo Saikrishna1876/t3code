@@ -36,7 +36,7 @@ const REMOTE_EDITOR_PROTOCOLS = new Set(
 );
 
 // Zed's host sits in the first path segment, so it needs its own userinfo ban.
-const ZED_SSH_PATHNAME = /^\/[^/@:]+\/.+$/;
+const ZED_SSH_PATHNAME = /^\/[^/@:]+\/.*$/;
 
 const isRemoteEditorUrl = (url: URL) =>
   REMOTE_EDITOR_PROTOCOLS.has(url.protocol) &&
@@ -94,7 +94,13 @@ export const make = ElectronShell.of({
       ),
     ),
   copyText: (text) =>
-    Effect.promise(() => Electron.clipboard.writeText(text).catch(() => undefined)),
+    Effect.promise(async () => {
+      try {
+        await (Electron.clipboard.writeText(text) as unknown);
+      } catch {
+        // ignore clipboard failure
+      }
+    }),
 });
 
 export const layer = Layer.succeed(ElectronShell, make);
