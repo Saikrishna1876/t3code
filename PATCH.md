@@ -18,7 +18,7 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 - Observed local HEAD: `bb5e824c9fcbd76c93ef15b304f89f8b6999f32c`.
 - Compatibility changes are uncommitted on that base. Creating a worktree from HEAD alone omits them.
 - Last behaviorally verified baseline: unknown. No install, build, test, or graphics check was run during setup.
-- Observed integrated upstream baseline: `bb5e824c9fcbd76c93ef15b304f89f8b6999f32c`. Live fetch on 2026-09-11 confirmed it is an ancestor of upstream `main`. The review merge remains uncommitted, so the landed baseline is unchanged.
+- Observed integrated upstream baseline: `bb5e824c9fcbd76c93ef15b304f89f8b6999f32c`. Live fetch on 2026-09-11 confirmed it is an ancestor of upstream `main`. Upstream target `02297e3dbd896ef619d5c916938c751e343e76a8` landed through merge commit `7318d06b6` on main after user approval.
 
 ## P001: Preserve the compatible Electron runtime
 
@@ -44,19 +44,20 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 ## Latest attempt
 
 - Date: 2026-09-11.
-- Status: prepared, automated checks passed; runtime acceptance pending. Merge is staged and uncommitted with `MERGE_HEAD` present.
+- Status: landed on `main` through merge commit `7318d06b6` after explicit user approval. Automated checks passed; runtime acceptance pending.
 - Starting HEAD and previous integrated upstream baseline: `bb5e824c9fcbd76c93ef15b304f89f8b6999f32c`.
 - Target: `02297e3dbd896ef619d5c916938c751e343e76a8`, resolved through live `git ls-remote --symref origin HEAD` and `git fetch origin main`. Includes 34 upstream commits.
 - Review branch: `patch/upstream-20260911`.
 - Review worktree: `/Users/saikrishnaambeti/Documents/opensource/t3code-upstream-review-20260911`.
-- Canonical review specification: this worktree's root `PATCH.md`.
+- Canonical specification after landing: `/Users/saikrishnaambeti/Documents/opensource/t3code/PATCH.md`.
 - P001 and P002 carried forward with three-way application of the captured binary diff. All six pending modified files and the original specification were included. No edits excluded; no conflicts or semantic adaptations needed. Upstream's Zed URL change and mobile Reanimated patch are retained.
 - `vp i`: passed. Lockfile unchanged by package-manager validation. Desktop manifest, lockfile importer, and installed Electron package resolve to `43.6.0`. Install warned that shell Node `26.8.1` differs from the declared `^24.13.1` engine.
 - `./node_modules/.bin/vp test run apps/desktop/src/preview/Manager.test.ts apps/desktop/src/electron/ElectronShell.test.ts`: passed, 100 tests across two suites. Initial global `vp test` attempts failed before collecting tests because the global runner used Vitest `4.1.10` while the local installation uses `4.1.11`; using the repository-local executable passed without source changes.
 - `vp run --filter @t3tools/desktop typecheck`: passed, with Effect suggestions.
 - `./node_modules/.bin/vp lint apps/desktop/src/electron/ElectronShell.ts apps/desktop/src/preview/Manager.ts apps/desktop/src/preview/Manager.test.ts`: passed.
 - Local patch whitespace check against the exact target: passed. Whole merge whitespace check reports upstream whitespace in `patches/react-native-reanimated@4.5.1.patch`; retained verbatim to preserve patch content and hash.
-- Original staged diff, unstaged diff, status, and specification match captured bytes. Original branch and HEAD remain unchanged.
+- Before landing, original staged diff, unstaged diff, status, and specification matched captured bytes. The original edits remain in a backup stash named `backup: local compatibility patches before reviewed upstream merge`; main was fast-forwarded to the reviewed merge.
 - Capture evidence: `/var/folders/26/8qwghqmn5sq9fsv3qw8_wlhm0000gn/T/t3-upstream-wuej_hi2`.
-- Pending: installed Electron binary is absent in this review installation; packaged runtime, target-Mac GPU status, rendering performance, and interactive clipboard checks were not run. No application or browser launched. These checks remain required for behavioral acceptance.
-- Last behaviorally verified baseline: unknown and unchanged. This is an automated-checks-passed candidate, not a landed or hardware-verified update.
+- Release build on main: `vp run dist:desktop:dmg:x64` passed under Node `24.21.0`. Unsigned Intel macOS app version `0.0.40`; packaged Electron framework `43.6.0` confirmed in staged app and final ZIP metadata. `hdiutil verify release/T3-Code-0.0.40-x64.dmg` passed. Artifacts: `release/T3-Code-0.0.40-x64.dmg` and `release/T3-Code-0.0.40-x64.zip`, with blockmaps. Build log: `/tmp/t3-release-20260911.log`.
+- Pending: target-Mac GPU status, rendering performance, and interactive clipboard checks. No application or browser launched. These checks remain required for behavioral acceptance.
+- Last behaviorally verified baseline: unknown and unchanged. Integration is landed; hardware acceptance remains unverified.
