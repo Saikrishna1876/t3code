@@ -15,10 +15,10 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 
 ## Baseline
 
-- Observed local HEAD: `bb5e824c9fcbd76c93ef15b304f89f8b6999f32c`.
-- Compatibility changes are uncommitted on that base. Creating a worktree from HEAD alone omits them.
-- Last behaviorally verified baseline: unknown. No install, build, test, or graphics check was run during setup.
-- Observed integrated upstream baseline: `bb5e824c9fcbd76c93ef15b304f89f8b6999f32c`. Live fetch on 2026-09-11 confirmed it is an ancestor of upstream `main`. Upstream target `02297e3dbd896ef619d5c916938c751e343e76a8` landed through merge commit `7318d06b6` on main after user approval.
+- Observed integrated upstream baseline: `2ec59ca1fad6d9eb6ae36714b76b6130e63201e6`, committed through merge `63e1810b1b31627ed8bb6714a2863de6582efc04` on `patch/upstream-20260913`.
+- Previous integrated upstream baseline: `02297e3dbd896ef619d5c916938c751e343e76a8`, landed through `7318d06b6`.
+- Compatibility patches are committed. No pending local edits existed when this update started.
+- Last behaviorally verified baseline: unknown. Automated checks pass; target-Mac graphics and interactive clipboard acceptance remain pending.
 
 ## P001: Preserve the compatible Electron runtime
 
@@ -32,16 +32,17 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 ## P002: Keep clipboard behavior compatible with P001
 
 - Status: active, observed alongside the runtime downgrade.
-- Required behavior: text copying remains tolerant of clipboard failures and a synchronous return value. Preview image copying works without relying on `ClipboardItem`; invalid images and clipboard write failures retain meaningful errors.
+- Required behavior: text copying remains tolerant of clipboard failures and a synchronous return value. Preview image copying works without relying on `ClipboardItem`; invalid images and clipboard write failures retain meaningful errors. Automated preview paste preserves text, HTML, RTF, PNG, and custom formats using the pinned runtime, excluding Electron internal formats.
 - Implementation hints: `apps/desktop/src/electron/ElectronShell.ts` awaits `clipboard.writeText` inside try/catch without calling `.catch` on its return value. `apps/desktop/src/preview/Manager.ts` uses `clipboard.writeImage` through the synchronous error wrapper. `apps/desktop/src/preview/Manager.test.ts` covers that clipboard path and synchronous failure.
-- Verification from repo root: `./node_modules/.bin/vp test run apps/desktop/src/preview/Manager.test.ts apps/desktop/src/electron/ElectronShell.test.ts` and `vp run --filter @t3tools/desktop typecheck`. Confirm text and preview-image copying in the desktop application when runtime testing is authorized.
+- Paste implementation: `apps/desktop/src/preview/Clipboard.ts` uses synchronous format readers. `Manager.ts` wraps read failures with the existing operation error wrapper. Upstream's zero-argument `clipboard.read()` requires the newer API and cannot run on Electron 43.
+- Verification from repo root: `./node_modules/.bin/vp test run apps/desktop/src/preview/Clipboard.test.ts apps/desktop/src/preview/Manager.test.ts apps/desktop/src/electron/ElectronShell.test.ts` and `vp run --filter @t3tools/desktop typecheck`. Confirm text and preview-image copying in the desktop application when runtime testing is authorized.
 - Retirement: the selected runtime supports an equivalent upstream implementation and clipboard checks pass.
 
 ## Validation policy
 
 Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use requires the authorization described there. Keep runtime state away from the live install. Record manual graphics and clipboard checks as pending when unavailable.
 
-## Latest attempt
+## Previous update and release
 
 - Date: 2026-09-11.
 - Status: landed on `main` through merge commit `7318d06b6` after explicit user approval. Automated checks passed; runtime acceptance pending.
@@ -61,3 +62,21 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Release build on main: `vp run dist:desktop:dmg:x64` passed under Node `24.21.0`. Unsigned Intel macOS app version `0.0.40`; packaged Electron framework `43.6.0` confirmed in staged app and final ZIP metadata. `hdiutil verify release/T3-Code-0.0.40-x64.dmg` passed. Artifacts: `release/T3-Code-0.0.40-x64.dmg` and `release/T3-Code-0.0.40-x64.zip`, with blockmaps. Build log: `/tmp/t3-release-20260911.log`.
 - Pending: target-Mac GPU status, rendering performance, and interactive clipboard checks. No application or browser launched. These checks remain required for behavioral acceptance.
 - Last behaviorally verified baseline: unknown and unchanged. Integration is landed; hardware acceptance remains unverified.
+
+## Latest attempt
+
+- Date: 2026-09-13.
+- Status: integrated locally through merge `63e1810b1b31627ed8bb6714a2863de6582efc04`. User requested updating `fork/main`; this reviewed branch is prepared for that push. Original checkout remains unchanged.
+- Starting HEAD and rollback reference: `a87a284c7c307c45404fbe8597ac15852112654a`.
+- Previous upstream baseline: `02297e3dbd896ef619d5c916938c751e343e76a8`.
+- Exact target: `2ec59ca1fad6d9eb6ae36714b76b6130e63201e6`, resolved live with `git ls-remote --symref origin HEAD` and `git fetch origin main`. Baseline ancestry verified; 82 upstream commits included.
+- Review branch: `patch/upstream-20260913`.
+- Review worktree and canonical specification: `/Users/saikrishnaambeti/Documents/opensource/t3code-upstream-review-20260913/PATCH.md`.
+- Merge completed without conflicts. All committed fork changes preserved. No pending edits to carry or exclude. P001 retains exact Electron `43.6.0`. P002 adapts upstream preview paste to synchronous clipboard readers; copy paths remain intact.
+- `vp i`: passed; lockfile unchanged by installation. Desktop manifest, lockfile importer, installed package, and installed framework plist all report `43.6.0`. `node apps/desktop/scripts/ensure-electron-runtime.mjs` passed without launching the application.
+- Repository-local `vp test run` for `Clipboard.test.ts`, `Manager.test.ts`, and `ElectronShell.test.ts`: passed, 103 tests in three suites. The three clipboard tests passed again after correcting their import to `vite-plus/test`.
+- `vp run --filter @t3tools/desktop typecheck`: passed with Effect suggestions after that test import correction.
+- Targeted lint for the five patch source and test files: passed. Patch whitespace check against the exact upstream target: passed.
+- Evidence logs: `/tmp/t3-patch-20260913-install.log`, `/tmp/t3-patch-20260913-tests.log`, `/tmp/t3-patch-20260913-clipboard-tests.log`, `/tmp/t3-patch-20260913-typecheck.log`, `/tmp/t3-patch-20260913-electron.log`.
+- Scope: compatibility adaptation affects desktop preview paste, including remotely requested automation. No new contracts or provider behavior. Upstream web, mobile, and other changes retained without additional fork modifications.
+- No release package built during this update. Previous release evidence above applies only to the previous baseline. GPU status, target-Mac rendering performance, and interactive copy/paste acceptance remain pending. Last behaviorally verified baseline remains unknown.
