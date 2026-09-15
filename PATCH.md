@@ -66,7 +66,7 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 ## Latest attempt
 
 - Date: 2026-09-15.
-- Status: integrated locally through merge `8928da0d4c10fb614bb6cc51197173215686a6af`, ready for the user-requested push to `fork/main` and local `main` fast-forward.
+- Status: landed on `fork/main` and local `main` at `873dc60601a74249afcee2a334efcffc15aaee9f`, including merge `8928da0d4c10fb614bb6cc51197173215686a6af`. Remote SHA verified after pushing.
 - Starting fork HEAD and rollback reference: `1bb440d58eae64070c5fa98366a18448bf16ba64`. Original local `main`: `a87a284c7c307c45404fbe8597ac15852112654a`. Both checkouts were clean.
 - Previous upstream baseline: `2ec59ca1fad6d9eb6ae36714b76b6130e63201e6`.
 - Exact target: `50ff4c371eab927a9650c114975241999f4cd7b1`, fetched live from the explicitly requested `origin/main`. Baseline ancestry verified; 99 upstream commits included.
@@ -77,4 +77,5 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - `vp run --filter @t3tools/desktop typecheck`: passed with Effect suggestions. Targeted lint for the five compatibility source and test files passed. Patch whitespace check against the exact upstream target passed.
 - Logs: `/tmp/t3-patch-20260915-install.log`, `/tmp/t3-patch-20260915-tests.log`, `/tmp/t3-patch-20260915-typecheck.log`.
 - Scope: no new fork UI, contracts, providers, or connection behavior. Existing desktop copy/paste paths preserved, including remotely requested preview automation. Upstream changes across all clients retained.
-- User requested an Intel macOS release build after integration. Build pending. Target-Mac GPU status, rendering performance, and interactive clipboard acceptance remain pending. Last behaviorally verified baseline remains unknown.
+- Release built from `873dc60601a74249afcee2a334efcffc15aaee9f` with Node `24.21.0` using `node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20260915`. Unsigned macOS `0.0.40` DMG and ZIP, with blockmaps, are in `release/20260915` in the main checkout. Packaged Electron framework is `43.6.0`; ZIP integrity and `hdiutil verify` passed. Logs: `/tmp/t3-release-20260915.log` and `/tmp/t3-release-20260915-verify.log`.
+- Target-Mac GPU status, rendering performance, and interactive clipboard acceptance remain pending. Last behaviorally verified baseline remains unknown.
