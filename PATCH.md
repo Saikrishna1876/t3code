@@ -10,13 +10,13 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 - Upstream URL: https://github.com/pingdotgg/t3code.git
 - Upstream remote: `origin`. The `fork` remote is the user's fork, not the update source.
 - Target: latest upstream default branch, resolved live to an exact commit each update. Cached default branch at setup: `main`.
-- Integration: merge into a new local review branch in a separate worktree; leave uncommitted with `--no-ff --no-commit`.
+- Integration: prepare with `--no-ff --no-commit` in a separate worktree. Commit and push when the user requests updating `fork/main`; otherwise leave the result for review.
 - Preserve original staged, unstaged, and untracked work. Carry the pending compatibility changes below and this specification into the review result.
 
 ## Baseline
 
-- Observed integrated upstream baseline: `2ec59ca1fad6d9eb6ae36714b76b6130e63201e6`, committed through merge `63e1810b1b31627ed8bb6714a2863de6582efc04` on `patch/upstream-20260913`.
-- Previous integrated upstream baseline: `02297e3dbd896ef619d5c916938c751e343e76a8`, landed through `7318d06b6`.
+- Observed integrated upstream baseline: `50ff4c371eab927a9650c114975241999f4cd7b1`, committed through merge `8928da0d4c10fb614bb6cc51197173215686a6af` on `patch/upstream-20260915`.
+- Previous integrated upstream baseline: `2ec59ca1fad6d9eb6ae36714b76b6130e63201e6`, landed on `fork/main` through `63e1810b1b31627ed8bb6714a2863de6582efc04`. That update added synchronous preview paste readers and passed 103 focused tests, desktop typecheck, and targeted lint.
 - Compatibility patches are committed. No pending local edits existed when this update started.
 - Last behaviorally verified baseline: unknown. Automated checks pass; target-Mac graphics and interactive clipboard acceptance remain pending.
 
@@ -65,18 +65,16 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 
 ## Latest attempt
 
-- Date: 2026-09-13.
-- Status: integrated locally through merge `63e1810b1b31627ed8bb6714a2863de6582efc04`. User requested updating `fork/main`; this reviewed branch is prepared for that push. Original checkout remains unchanged.
-- Starting HEAD and rollback reference: `a87a284c7c307c45404fbe8597ac15852112654a`.
-- Previous upstream baseline: `02297e3dbd896ef619d5c916938c751e343e76a8`.
-- Exact target: `2ec59ca1fad6d9eb6ae36714b76b6130e63201e6`, resolved live with `git ls-remote --symref origin HEAD` and `git fetch origin main`. Baseline ancestry verified; 82 upstream commits included.
-- Review branch: `patch/upstream-20260913`.
-- Review worktree and canonical specification: `/Users/saikrishnaambeti/Documents/opensource/t3code-upstream-review-20260913/PATCH.md`.
-- Merge completed without conflicts. All committed fork changes preserved. No pending edits to carry or exclude. P001 retains exact Electron `43.6.0`. P002 adapts upstream preview paste to synchronous clipboard readers; copy paths remain intact.
-- `vp i`: passed; lockfile unchanged by installation. Desktop manifest, lockfile importer, installed package, and installed framework plist all report `43.6.0`. `node apps/desktop/scripts/ensure-electron-runtime.mjs` passed without launching the application.
-- Repository-local `vp test run` for `Clipboard.test.ts`, `Manager.test.ts`, and `ElectronShell.test.ts`: passed, 103 tests in three suites. The three clipboard tests passed again after correcting their import to `vite-plus/test`.
-- `vp run --filter @t3tools/desktop typecheck`: passed with Effect suggestions after that test import correction.
-- Targeted lint for the five patch source and test files: passed. Patch whitespace check against the exact upstream target: passed.
-- Evidence logs: `/tmp/t3-patch-20260913-install.log`, `/tmp/t3-patch-20260913-tests.log`, `/tmp/t3-patch-20260913-clipboard-tests.log`, `/tmp/t3-patch-20260913-typecheck.log`, `/tmp/t3-patch-20260913-electron.log`.
-- Scope: compatibility adaptation affects desktop preview paste, including remotely requested automation. No new contracts or provider behavior. Upstream web, mobile, and other changes retained without additional fork modifications.
-- No release package built during this update. Previous release evidence above applies only to the previous baseline. GPU status, target-Mac rendering performance, and interactive copy/paste acceptance remain pending. Last behaviorally verified baseline remains unknown.
+- Date: 2026-09-15.
+- Status: integrated locally through merge `8928da0d4c10fb614bb6cc51197173215686a6af`, ready for the user-requested push to `fork/main` and local `main` fast-forward.
+- Starting fork HEAD and rollback reference: `1bb440d58eae64070c5fa98366a18448bf16ba64`. Original local `main`: `a87a284c7c307c45404fbe8597ac15852112654a`. Both checkouts were clean.
+- Previous upstream baseline: `2ec59ca1fad6d9eb6ae36714b76b6130e63201e6`.
+- Exact target: `50ff4c371eab927a9650c114975241999f4cd7b1`, fetched live from the explicitly requested `origin/main`. Baseline ancestry verified; 99 upstream commits included.
+- Review branch: `patch/upstream-20260915`. Worktree: `/Users/saikrishnaambeti/Documents/opensource/t3code-upstream-review-20260915`.
+- One lockfile conflict resolved by retaining upstream Clerk `0.0.42` and regenerating with `vp i` for Electron `43.6.0`. No source adaptations needed. All existing desktop compatibility files match the starting fork.
+- `vp i`: passed. Desktop manifest, lockfile importer, installed Electron package, and framework `CFBundleVersion` agree on `43.6.0`. Runtime integrity script passed without launching the application. Installation warned about shell Node `26.8.1` versus required `^24.13.1` and peer dependencies.
+- Repository-local `vp test run` for `Clipboard.test.ts`, `Manager.test.ts`, and `ElectronShell.test.ts`: passed, 103 tests in three suites.
+- `vp run --filter @t3tools/desktop typecheck`: passed with Effect suggestions. Targeted lint for the five compatibility source and test files passed. Patch whitespace check against the exact upstream target passed.
+- Logs: `/tmp/t3-patch-20260915-install.log`, `/tmp/t3-patch-20260915-tests.log`, `/tmp/t3-patch-20260915-typecheck.log`.
+- Scope: no new fork UI, contracts, providers, or connection behavior. Existing desktop copy/paste paths preserved, including remotely requested preview automation. Upstream changes across all clients retained.
+- User requested an Intel macOS release build after integration. Build pending. Target-Mac GPU status, rendering performance, and interactive clipboard acceptance remain pending. Last behaviorally verified baseline remains unknown.
