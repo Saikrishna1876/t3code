@@ -15,8 +15,8 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 
 ## Baseline
 
-- Observed integrated upstream baseline: `50ff4c371eab927a9650c114975241999f4cd7b1`, committed through merge `8928da0d4c10fb614bb6cc51197173215686a6af` on `patch/upstream-20260915`.
-- Previous integrated upstream baseline: `2ec59ca1fad6d9eb6ae36714b76b6130e63201e6`, landed on `fork/main` through `63e1810b1b31627ed8bb6714a2863de6582efc04`. That update added synchronous preview paste readers and passed 103 focused tests, desktop typecheck, and targeted lint.
+- Observed integrated upstream baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda`, committed through merge `2af1dc896` on `patch/upstream-20260918`.
+- Previous integrated upstream baseline: `50ff4c371eab927a9650c114975241999f4cd7b1`, landed on `fork/main` through `8928da0d4c10fb614bb6cc51197173215686a6af`. That update preserved Electron 43 compatibility and passed 103 focused tests, desktop typecheck, and targeted lint.
 - Compatibility patches are committed. No pending local edits existed when this update started.
 - Last behaviorally verified baseline: unknown. Automated checks pass; target-Mac graphics and interactive clipboard acceptance remain pending.
 
@@ -63,7 +63,7 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Pending: target-Mac GPU status, rendering performance, and interactive clipboard checks. No application or browser launched. These checks remain required for behavioral acceptance.
 - Last behaviorally verified baseline: unknown and unchanged. Integration is landed; hardware acceptance remains unverified.
 
-## Latest attempt
+### Previous update: 2026-09-15
 
 - Date: 2026-09-15.
 - Status: landed on `fork/main` and local `main` at `873dc60601a74249afcee2a334efcffc15aaee9f`, including merge `8928da0d4c10fb614bb6cc51197173215686a6af`. Remote SHA verified after pushing.
@@ -78,4 +78,19 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Logs: `/tmp/t3-patch-20260915-install.log`, `/tmp/t3-patch-20260915-tests.log`, `/tmp/t3-patch-20260915-typecheck.log`.
 - Scope: no new fork UI, contracts, providers, or connection behavior. Existing desktop copy/paste paths preserved, including remotely requested preview automation. Upstream changes across all clients retained.
 - Release built from `873dc60601a74249afcee2a334efcffc15aaee9f` with Node `24.21.0` using `node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20260915`. Unsigned macOS `0.0.40` DMG and ZIP, with blockmaps, are in `release/20260915` in the main checkout. Packaged Electron framework is `43.6.0`; ZIP integrity and `hdiutil verify` passed. Logs: `/tmp/t3-release-20260915.log` and `/tmp/t3-release-20260915-verify.log`.
+- Target-Mac GPU status, rendering performance, and interactive clipboard acceptance remain pending. Last behaviorally verified baseline remains unknown.
+
+## Latest attempt
+
+- Date: 2026-09-18.
+- Status: landed on `fork/main` and local `main` through merge `2af1dc896`. Remote SHA verified after pushing.
+- Starting fork HEAD and rollback reference: `7d22399511914e0ea6f4b96cabadb7996d5b1b2e`. Both checkouts were clean.
+- Previous upstream baseline: `50ff4c371eab927a9650c114975241999f4cd7b1`.
+- Exact target: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda`, fetched live from the explicitly requested `origin/main`. Baseline ancestry verified; 143 upstream commits included.
+- Review branch: `patch/upstream-20260918`. Worktree: `/Users/saikrishnaambeti/Documents/opensource/t3code-upstream-review-20260918`.
+- One lockfile conflict resolved by retaining upstream catalog updates (Effect rc.115, Clerk, Reanimated) and regenerating with `vp i` for Electron `43.6.0`. No source adaptations needed. All existing desktop compatibility files match the starting fork.
+- `vp i`: passed. Desktop manifest, lockfile importer, and installed Electron package agree on `43.6.0`.
+- Repository-local `vp test run` for `Clipboard.test.ts`, `Manager.test.ts`, and `ElectronShell.test.ts`: passed, 103 tests in three suites.
+- `vp run --filter @t3tools/desktop typecheck`: passed with Effect suggestions. Targeted lint for compatibility source and test files passed.
+- Scope: no new fork UI, contracts, providers, or connection behavior. Existing desktop copy/paste paths preserved, including preview automation. Upstream changes across all clients retained.
 - Target-Mac GPU status, rendering performance, and interactive clipboard acceptance remain pending. Last behaviorally verified baseline remains unknown.
