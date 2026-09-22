@@ -15,8 +15,8 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 
 ## Baseline
 
-- Observed integrated upstream baseline: `da6a85b1365993d0ff2a79698cd82498de247d8a`, prepared on `patch/upstream-20260922`.
-- Previous integrated upstream baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda`, landed on `fork/main` through merge `2af1dc896`.
+- Observed integrated upstream baseline: `7c2702d68ae2e10fa9d3a08c996ed47c393dcffd`, prepared on `patch/upstream-20260922`.
+- Previous integrated upstream baseline: `da6a85b1365993d0ff2a79698cd82498de247d8a`, landed on `fork/main` through merge `6f0eabe0e`.
 - Compatibility patches are committed. No pending local edits existed when this update started.
 - Last behaviorally verified baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda` (release `0.0.42` built locally on 2026-09-18 with Electron `43.6.0` was extracted and interactively confirmed working by the user on the target Intel Mac macOS 15 system).
 
@@ -98,17 +98,19 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 ## Latest attempt
 
 - Date: 2026-09-22.
-- Status: prepared and verified on `patch/upstream-20260922`, landing on `fork/main` and local `main`.
+- Status: verified and landed on `fork/main` and local `main` through merges `6f0eabe0e` and `c29ae7907`.
 - Starting fork HEAD and rollback reference: `91c92440af309afd12de4b158ddf1a3bada226f3`. Both checkouts clean.
 - Previous upstream baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda`.
-- Exact target: `da6a85b1365993d0ff2a79698cd82498de247d8a`, fetched live from `origin/main`. Baseline ancestry verified; 128 upstream commits included.
+- Exact target: `7c2702d68ae2e10fa9d3a08c996ed47c393dcffd`, fetched live from `origin/main`. Baseline ancestry verified; 129 upstream commits included. Origin advanced by one commit after the initial `da6a85b13` landing, so the final merge also includes upstream's composer panel-animation fix.
 - Review branch: `patch/upstream-20260922`. Worktree: `/Users/saikrishnaambeti/Documents/opensource/t3code-upstream-review-20260922`.
 - Conflicts resolved:
   - `apps/desktop/package.json`: retained `"electron": "43.6.0"` (P001) while adopting upstream `"electron-updater": "^6.8.9"`.
   - `pnpm-workspace.yaml`: retained `- electron@43.6.0` in `minimumReleaseAgeExclude` (P001) while adopting upstream SDK updates and removal of `msgpackr-extract`.
   - `pnpm-lock.yaml`: taken from upstream baseline and regenerated via `vp i` to lock Electron to `43.6.0`.
 - `vp i`: passed in 6m 24s.
-- Repository-local `vp test run` for `Clipboard.test.ts`, `Manager.test.ts`, and `ElectronShell.test.ts`: passed, 106 tests across three suites (0 failures).
-- `vp run --filter @t3tools/desktop typecheck`: passed (0 errors, Effect suggestions only).
-- Targeted lint: passed (0 errors, 0 warnings on all 4 compatibility files).
+- Final manifest, lockfile importer, and installed Electron package resolve to `43.6.0`.
+- Repository-local `vp test run` for `Clipboard.test.ts`, `Manager.test.ts`, and `ElectronShell.test.ts`: passed against the final target, 106 tests across three suites (0 failures).
+- `vp run --filter @t3tools/desktop typecheck`: passed against the final target (0 errors, Effect suggestions only).
+- Targeted lint for all six compatibility source and test files: passed against the final target (0 errors, 0 warnings).
+- Final follow-up merge changed only `apps/web/src/components/chat/ChatComposer.tsx`; no P001 or P002 files required adaptation.
 - Scope: upstream changes across all clients retained; compatibility patches P001 and P002 intact.
