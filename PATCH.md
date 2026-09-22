@@ -15,10 +15,10 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 
 ## Baseline
 
-- Observed integrated upstream baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda`, committed through merge `2af1dc896` on `patch/upstream-20260918`.
-- Previous integrated upstream baseline: `50ff4c371eab927a9650c114975241999f4cd7b1`, landed on `fork/main` through `8928da0d4c10fb614bb6cc51197173215686a6af`. That update preserved Electron 43 compatibility and passed 103 focused tests, desktop typecheck, and targeted lint.
+- Observed integrated upstream baseline: `da6a85b1365993d0ff2a79698cd82498de247d8a`, prepared on `patch/upstream-20260922`.
+- Previous integrated upstream baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda`, landed on `fork/main` through merge `2af1dc896`.
 - Compatibility patches are committed. No pending local edits existed when this update started.
-- Last behaviorally verified baseline: unknown. Automated checks pass; target-Mac graphics and interactive clipboard acceptance remain pending.
+- Last behaviorally verified baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda` (release `0.0.42` built locally on 2026-09-18 with Electron `43.6.0` was extracted and interactively confirmed working by the user on the target Intel Mac macOS 15 system).
 
 ## P001: Preserve the compatible Electron runtime
 
@@ -80,10 +80,10 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Release built from `873dc60601a74249afcee2a334efcffc15aaee9f` with Node `24.21.0` using `node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20260915`. Unsigned macOS `0.0.40` DMG and ZIP, with blockmaps, are in `release/20260915` in the main checkout. Packaged Electron framework is `43.6.0`; ZIP integrity and `hdiutil verify` passed. Logs: `/tmp/t3-release-20260915.log` and `/tmp/t3-release-20260915-verify.log`.
 - Target-Mac GPU status, rendering performance, and interactive clipboard acceptance remain pending. Last behaviorally verified baseline remains unknown.
 
-## Latest attempt
+### Previous update: 2026-09-18
 
 - Date: 2026-09-18.
-- Status: landed on `fork/main` and local `main` through merge `2af1dc896`. Remote SHA verified after pushing.
+- Status: landed on `fork/main` and local `main` through merge `2af1dc896` and docs commit `91c92440a`. Remote SHA verified after pushing.
 - Starting fork HEAD and rollback reference: `7d22399511914e0ea6f4b96cabadb7996d5b1b2e`. Both checkouts were clean.
 - Previous upstream baseline: `50ff4c371eab927a9650c114975241999f4cd7b1`.
 - Exact target: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda`, fetched live from the explicitly requested `origin/main`. Baseline ancestry verified; 143 upstream commits included.
@@ -93,4 +93,22 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Repository-local `vp test run` for `Clipboard.test.ts`, `Manager.test.ts`, and `ElectronShell.test.ts`: passed, 103 tests in three suites.
 - `vp run --filter @t3tools/desktop typecheck`: passed with Effect suggestions. Targeted lint for compatibility source and test files passed.
 - Scope: no new fork UI, contracts, providers, or connection behavior. Existing desktop copy/paste paths preserved, including preview automation. Upstream changes across all clients retained.
-- Target-Mac GPU status, rendering performance, and interactive clipboard acceptance remain pending. Last behaviorally verified baseline remains unknown.
+- Release build: `0.0.42` built locally via `node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20260918`. `hdiutil verify` on DMG and `unzip -tq` on ZIP passed. Packaged Electron framework `43.6.0` confirmed. User extracted the release on the target Intel Mac and confirmed interactive functionality and rendering performance work properly.
+
+## Latest attempt
+
+- Date: 2026-09-22.
+- Status: prepared and verified on `patch/upstream-20260922`, landing on `fork/main` and local `main`.
+- Starting fork HEAD and rollback reference: `91c92440af309afd12de4b158ddf1a3bada226f3`. Both checkouts clean.
+- Previous upstream baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda`.
+- Exact target: `da6a85b1365993d0ff2a79698cd82498de247d8a`, fetched live from `origin/main`. Baseline ancestry verified; 128 upstream commits included.
+- Review branch: `patch/upstream-20260922`. Worktree: `/Users/saikrishnaambeti/Documents/opensource/t3code-upstream-review-20260922`.
+- Conflicts resolved:
+  - `apps/desktop/package.json`: retained `"electron": "43.6.0"` (P001) while adopting upstream `"electron-updater": "^6.8.9"`.
+  - `pnpm-workspace.yaml`: retained `- electron@43.6.0` in `minimumReleaseAgeExclude` (P001) while adopting upstream SDK updates and removal of `msgpackr-extract`.
+  - `pnpm-lock.yaml`: taken from upstream baseline and regenerated via `vp i` to lock Electron to `43.6.0`.
+- `vp i`: passed in 6m 24s.
+- Repository-local `vp test run` for `Clipboard.test.ts`, `Manager.test.ts`, and `ElectronShell.test.ts`: passed, 106 tests across three suites (0 failures).
+- `vp run --filter @t3tools/desktop typecheck`: passed (0 errors, Effect suggestions only).
+- Targeted lint: passed (0 errors, 0 warnings on all 4 compatibility files).
+- Scope: upstream changes across all clients retained; compatibility patches P001 and P002 intact.
