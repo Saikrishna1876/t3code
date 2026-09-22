@@ -114,3 +114,4 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Targeted lint for all six compatibility source and test files: passed against the final target (0 errors, 0 warnings).
 - Final follow-up merge changed only `apps/web/src/components/chat/ChatComposer.tsx`; no P001 or P002 files required adaptation.
 - Scope: upstream changes across all clients retained; compatibility patches P001 and P002 intact.
+- Release build: unsigned Intel macOS `0.0.42` built from `e5434039e` with Node `24.21.0` via `node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20260922`. `hdiutil verify` on the DMG and `unzip -tq` on the ZIP passed. Packaged Electron framework `43.6.0` confirmed. Build log: `/tmp/t3-release-20260922.log`. Target-Mac interactive acceptance remains pending.
