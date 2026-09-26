@@ -15,8 +15,8 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 
 ## Baseline
 
-- Observed integrated upstream baseline: `7c2702d68ae2e10fa9d3a08c996ed47c393dcffd`, prepared on `patch/upstream-20260922`.
-- Previous integrated upstream baseline: `da6a85b1365993d0ff2a79698cd82498de247d8a`, landed on `fork/main` through merge `6f0eabe0e`.
+- Observed integrated upstream baseline: `95030dc674883f0f2a7fd034b32ce742c8cf55d0`, landed on `fork/main` through merge `371e3bf00112eb2341d37f15c05f9cb027a929b5`.
+- Previous integrated upstream baseline: `7c2702d68ae2e10fa9d3a08c996ed47c393dcffd`, landed through merge `c29ae7907`.
 - Compatibility patches are committed. No pending local edits existed when this update started.
 - Last behaviorally verified baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda` (release `0.0.42` built locally on 2026-09-18 with Electron `43.6.0` was extracted and interactively confirmed working by the user on the target Intel Mac macOS 15 system).
 
@@ -95,7 +95,7 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Scope: no new fork UI, contracts, providers, or connection behavior. Existing desktop copy/paste paths preserved, including preview automation. Upstream changes across all clients retained.
 - Release build: `0.0.42` built locally via `node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20260918`. `hdiutil verify` on DMG and `unzip -tq` on ZIP passed. Packaged Electron framework `43.6.0` confirmed. User extracted the release on the target Intel Mac and confirmed interactive functionality and rendering performance work properly.
 
-## Latest attempt
+### Previous update: 2026-09-22
 
 - Date: 2026-09-22.
 - Status: verified and landed on `fork/main` and local `main` through merges `6f0eabe0e` and `c29ae7907`.
@@ -115,3 +115,17 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Final follow-up merge changed only `apps/web/src/components/chat/ChatComposer.tsx`; no P001 or P002 files required adaptation.
 - Scope: upstream changes across all clients retained; compatibility patches P001 and P002 intact.
 - Release build: unsigned Intel macOS `0.0.42` built from `e5434039e` with Node `24.21.0` via `node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20260922`. `hdiutil verify` on the DMG and `unzip -tq` on the ZIP passed. Packaged Electron framework `43.6.0` confirmed. Build log: `/tmp/t3-release-20260922.log`. Target-Mac interactive acceptance remains pending.
+
+## Latest attempt
+
+- Date: 2026-09-26.
+- Status: landed on `fork/main` through merge `371e3bf00112eb2341d37f15c05f9cb027a929b5`; remote SHA verified after push. Focused checks and local release build passed.
+- Starting fork HEAD and rollback reference: `9e947368987ae4a0366cc273501fcdac5ea13d23`. Original checkout clean.
+- Previous upstream baseline: `7c2702d68ae2e10fa9d3a08c996ed47c393dcffd`.
+- Exact target: `95030dc674883f0f2a7fd034b32ce742c8cf55d0`, resolved through live `git ls-remote --symref origin HEAD` and `git fetch origin main`. Baseline ancestry verified; 199 upstream commits included.
+- Review branch: `patch/upstream-20260926`. Worktree: `/private/tmp/t3code-upstream-review-20260926`.
+- Merge had no conflicts. P001 retains Electron `43.6.0` in the desktop manifest, release-age exception, and desktop lockfile importer. P002 retains synchronous clipboard reads and image writes while accepting upstream's changes to preview manager. Upstream's `boot.cjs` desktop entry point is retained.
+- `vp i`: passed. Lockfile regenerated for transitive dependencies. Installed Electron package resolves to `43.6.0`.
+- Repository-local `vp test run` for `Clipboard.test.ts`, `Manager.test.ts`, and `ElectronShell.test.ts`: passed, 106 tests across three suites. Desktop typecheck and targeted lint for all six compatibility source and test files passed.
+- Release: unsigned Intel macOS `0.0.42` DMG and ZIP built from the merged tree with Node `24.21.0` using `node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20260926`. `hdiutil verify` and `unzip -tq` passed. The packaged Electron framework reports `43.6.0`. Artifacts are in `release/20260926` in the main checkout.
+- No browser or application launched. Target-Mac GPU status, rendering performance, and interactive clipboard checks remain pending.
