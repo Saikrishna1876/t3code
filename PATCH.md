@@ -116,7 +116,7 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Scope: upstream changes across all clients retained; compatibility patches P001 and P002 intact.
 - Release build: unsigned Intel macOS `0.0.42` built from `e5434039e` with Node `24.21.0` via `node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20260922`. `hdiutil verify` on the DMG and `unzip -tq` on the ZIP passed. Packaged Electron framework `43.6.0` confirmed. Build log: `/tmp/t3-release-20260922.log`. Target-Mac interactive acceptance remains pending.
 
-## Latest attempt
+### Previous update: 2026-09-26
 
 - Date: 2026-09-26.
 - Status: landed on `fork/main` through merge `371e3bf00112eb2341d37f15c05f9cb027a929b5`; remote SHA verified after push. Focused checks and local release build passed.
@@ -129,3 +129,19 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Repository-local `vp test run` for `Clipboard.test.ts`, `Manager.test.ts`, and `ElectronShell.test.ts`: passed, 106 tests across three suites. Desktop typecheck and targeted lint for all six compatibility source and test files passed.
 - Release: unsigned Intel macOS `0.0.42` DMG and ZIP built from the merged tree with Node `24.21.0` using `node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20260926`. `hdiutil verify` and `unzip -tq` passed. The packaged Electron framework reports `43.6.0`. Artifacts are in `release/20260926` in the main checkout.
 - No browser or application launched. Target-Mac GPU status, rendering performance, and interactive clipboard checks remain pending.
+
+## Latest attempt
+
+- Date: 2026-10-01.
+- Status: merge prepared; installation and focused automated checks passed. Code review, release build, and push are pending.
+- Starting fork HEAD and rollback reference: `abc123f0cfe4c449a1a744dffb235358e02ef0ca`. Original checkout clean.
+- Previous upstream baseline: `95030dc674883f0f2a7fd034b32ce742c8cf55d0`.
+- Exact target: `bd89c1302026255c62cc09278207bfaf2664da4a`, resolved through live `git ls-remote --symref origin HEAD` and `git fetch origin main`. Baseline ancestry verified; 53 upstream commits included.
+- Review branch: `patch/upstream-20261001`. Worktree: `/private/tmp/t3code-upstream-review-20261001`.
+- One lockfile conflict removed an obsolete TypeScript 6 MSW snapshot as upstream did. Regenerating the lockfile with `vp i` preserves the Electron `43.6.0` pin while adopting upstream dependencies. P001 and P002 source and tests match the starting fork.
+- Scope: upstream changes across web, desktop, mobile, contracts, providers, and connection modes retained. Fork changes remain desktop compatibility patches and this specification.
+- `vp i`: passed. Lockfile regenerated; desktop manifest, lockfile importer, and installed package resolve to `43.6.0`. Installation reported missing Vite/Vitest executable shims, but the repository-local `vp` ran the checks successfully.
+- Repository-local `vp test run` for `Clipboard.test.ts`, `Manager.test.ts`, `ElectronShell.test.ts`, and `build-desktop-artifact.test.ts`: passed, 181 tests across four suites. Desktop typecheck and targeted lint for all six compatibility source and test files passed. Patch whitespace check against the exact upstream target passed.
+- Review profile: `personal`, explicitly selected by the user for CodeRabbit and Greptile.
+- Release target: local unsigned Intel macOS `0.0.44` DMG and ZIP in `release/20261001` in the main checkout.
+- No browser or application launched. Target-Mac GPU status, rendering performance, and interactive clipboard acceptance remain pending. Last behaviorally verified baseline unchanged.
