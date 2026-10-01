@@ -15,8 +15,8 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 
 ## Baseline
 
-- Observed integrated upstream baseline: `95030dc674883f0f2a7fd034b32ce742c8cf55d0`, landed on `fork/main` through merge `371e3bf00112eb2341d37f15c05f9cb027a929b5`.
-- Previous integrated upstream baseline: `7c2702d68ae2e10fa9d3a08c996ed47c393dcffd`, landed through merge `c29ae7907`.
+- Observed integrated upstream baseline: `bd89c1302026255c62cc09278207bfaf2664da4a`, landed on `fork/main` through merge `a2f6cbabc1279ca3815345e85cfbb5442de39e08`.
+- Previous integrated upstream baseline: `95030dc674883f0f2a7fd034b32ce742c8cf55d0`, landed through merge `371e3bf00112eb2341d37f15c05f9cb027a929b5`.
 - Compatibility patches are committed. No pending local edits existed when this update started.
 - Last behaviorally verified baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda` (release `0.0.42` built locally on 2026-09-18 with Electron `43.6.0` was extracted and interactively confirmed working by the user on the target Intel Mac macOS 15 system).
 
@@ -133,7 +133,7 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 ## Latest attempt
 
 - Date: 2026-10-01.
-- Status: merge prepared; installation and focused automated checks passed. Code review, release build, and push are pending.
+- Status: landed on `fork/main` and local `main` through merge `a2f6cbabc1279ca3815345e85cfbb5442de39e08`; remote SHA verified after push. Focused checks, CodeRabbit review, and local release build passed.
 - Starting fork HEAD and rollback reference: `abc123f0cfe4c449a1a744dffb235358e02ef0ca`. Original checkout clean.
 - Previous upstream baseline: `95030dc674883f0f2a7fd034b32ce742c8cf55d0`.
 - Exact target: `bd89c1302026255c62cc09278207bfaf2664da4a`, resolved through live `git ls-remote --symref origin HEAD` and `git fetch origin main`. Baseline ancestry verified; 53 upstream commits included.
@@ -142,6 +142,8 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Scope: upstream changes across web, desktop, mobile, contracts, providers, and connection modes retained. Fork changes remain desktop compatibility patches and this specification.
 - `vp i`: passed. Lockfile regenerated; desktop manifest, lockfile importer, and installed package resolve to `43.6.0`. Installation reported missing Vite/Vitest executable shims, but the repository-local `vp` ran the checks successfully.
 - Repository-local `vp test run` for `Clipboard.test.ts`, `Manager.test.ts`, `ElectronShell.test.ts`, and `build-desktop-artifact.test.ts`: passed, 181 tests across four suites. Desktop typecheck and targeted lint for all six compatibility source and test files passed. Patch whitespace check against the exact upstream target passed.
-- Review profile: `personal`, explicitly selected by the user for CodeRabbit and Greptile.
-- Release target: local unsigned Intel macOS `0.0.44` DMG and ZIP in `release/20261001` in the main checkout.
+- Review profile: `personal`, explicitly selected by the user. CodeRabbit reviewed all nine fork-diff files against the exact upstream target and reported zero findings. Greptile could not review because `Saikrishna1876/t3code` is not connected; the user explicitly approved proceeding with CodeRabbit alone.
+- Electron runtime integrity script passed after restoring the missing binary. Installed framework `CFBundleVersion` is `43.6.0`.
+- Whole merge whitespace check reports upstream whitespace in `patches/alchemy@2.0.0-beta.79.patch`; retained verbatim to preserve its hash.
+- Release: local unsigned Intel macOS `0.0.44` DMG and ZIP, with blockmaps, built from merged source at `a2f6cbabc1279ca3815345e85cfbb5442de39e08` using `T3CODE_DESKTOP_SIGNED=false node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20261001`. Artifacts are in `release/20261001` in the main checkout. `hdiutil verify` on the DMG and `unzip -tq` on the ZIP passed. ZIP metadata confirms app version `0.0.44`, Electron framework `43.6.0`, and an x64 Mach-O executable. Build log: `/tmp/t3-release-20261001.log`.
 - No browser or application launched. Target-Mac GPU status, rendering performance, and interactive clipboard acceptance remain pending. Last behaviorally verified baseline unchanged.
