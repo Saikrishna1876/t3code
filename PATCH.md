@@ -15,8 +15,8 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 
 ## Baseline
 
-- Observed integrated upstream baseline: `bd89c1302026255c62cc09278207bfaf2664da4a`, landed on `fork/main` through merge `a2f6cbabc1279ca3815345e85cfbb5442de39e08`.
-- Previous integrated upstream baseline: `95030dc674883f0f2a7fd034b32ce742c8cf55d0`, landed through merge `371e3bf00112eb2341d37f15c05f9cb027a929b5`.
+- Observed integrated upstream baseline: `4ee6bfd50ef4a089440d5c3662db2298da9cc50e`, landed on `fork/main` and local `main` through merge `9a869ff32704edeb267abc558de44611edf7c815`. Remote SHA verified after pushing.
+- Previous integrated upstream baseline: `bd89c1302026255c62cc09278207bfaf2664da4a`, landed through merge `a2f6cbabc1279ca3815345e85cfbb5442de39e08`.
 - Compatibility patches are committed. No pending local edits existed when this update started.
 - Last behaviorally verified baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda` (release `0.0.42` built locally on 2026-09-18 with Electron `43.6.0` was extracted and interactively confirmed working by the user on the target Intel Mac macOS 15 system).
 
@@ -151,7 +151,7 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 ## Latest attempt
 
 - Date: 2026-10-04.
-- Status: checks-passed candidate in a separate review worktree. The merge remains uncommitted with staged changes and `MERGE_HEAD`; no unmerged paths remain. Focused checks, CodeRabbit review, and local release build passed. Local `main` and `fork/main` remain unchanged; the landed upstream baseline has not advanced.
+- Status: landed on `fork/main` and local `main` through merge `9a869ff32704edeb267abc558de44611edf7c815` after the user requested updating the fork. Remote SHA verified after pushing. Focused checks, CodeRabbit review, and local release build passed. The committed merge tree exactly matches the tested candidate, `62719a4f249149d9dfb256a93505bfeb586db68c`.
 - Starting HEAD and rollback reference: `8786496b1e4d30a84eb78a72b2314a6b80b6fa98`. Original checkout clean; no pending edits to carry or exclude.
 - Previous integrated upstream baseline: `bd89c1302026255c62cc09278207bfaf2664da4a`.
 - Exact target: `4ee6bfd50ef4a089440d5c3662db2298da9cc50e`, resolved through live `git ls-remote --symref origin HEAD` and `git fetch origin main`. Baseline ancestry verified; 187 upstream commits included.
@@ -164,7 +164,7 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Desktop typecheck and targeted lint for all six compatibility source and test files passed. Patch whitespace check against the exact upstream target passed. Whole-merge whitespace checks report upstream patch-file whitespace; those files remain byte-for-byte upstream to preserve their hashes.
 - Review profile: `personal`, explicitly selected by the user. CodeRabbit reviewed all nine fork-diff files against the exact target and reported zero findings. Greptile reports the repository is not connected; the user explicitly approved CodeRabbit alone for this update.
 - Logs: `/tmp/t3-patch-20261004-install.log`, `/tmp/t3-patch-20261004-tests.log`, `/tmp/t3-patch-20261004-packaging-clean-env.log`, `/tmp/t3-patch-20261004-typecheck.log`, `/tmp/t3-patch-20261004-lint.log`, and `/tmp/t3-patch-20261004-coderabbit.log`.
-- Release: local unsigned Intel macOS `0.0.45` DMG and ZIP, with blockmaps, built from this uncommitted merged candidate using `T3CODE_DESKTOP_SIGNED=false node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20261004`. Artifacts are in `release/20261004` in the original checkout. Build log: `/tmp/t3-release-20261004.log`.
+- Release: local unsigned Intel macOS `0.0.45` DMG and ZIP, with blockmaps, built from the reviewed candidate now committed as `9a869ff32704edeb267abc558de44611edf7c815` using `T3CODE_DESKTOP_SIGNED=false node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20261004`. Artifacts are in `release/20261004` in the original checkout. Build log: `/tmp/t3-release-20261004.log`.
 - `hdiutil verify` on the DMG and `unzip -tq` on the ZIP passed. ZIP metadata confirms app version `0.0.45`, Electron framework `43.6.0`, and an x64 Mach-O executable. Verification logs: `/tmp/t3-release-20261004-dmg-verify.log`, `/tmp/t3-release-20261004-zip-verify.log`, and `/tmp/t3-release-20261004-metadata.json`.
-- Canonical specification for this candidate: `/Users/saikrishnaambeti/Documents/opensource/t3code-upstream-review-20261004/PATCH.md`. The original checkout's specification still describes its landed baseline.
+- Canonical specification after landing: `/Users/saikrishnaambeti/Documents/opensource/t3code/PATCH.md`. The review worktree retains the same specification and implementation.
 - No browser or application launched. Target-Mac GPU status, rendering performance, and interactive clipboard acceptance remain pending. Last behaviorally verified baseline unchanged.
