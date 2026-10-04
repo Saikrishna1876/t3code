@@ -24,7 +24,7 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 
 - Status: active. Version observed in the user's existing patch, runtime result not independently verified.
 - Required behavior: preserve desktop usability on the target Intel Mac. Retain exact Electron `43.6.0` until another version is verified on that machine and the constraint is deliberately revised.
-- Implementation hints: `apps/desktop/package.json` changes Electron from `44.1.0` to `43.6.0`; `pnpm-workspace.yaml` aligns the minimum-release-age exception; `pnpm-lock.yaml` resolves the desktop importer and affected peer snapshots to `43.6.0`.
+- Implementation hints: `apps/desktop/package.json` pins Electron to `43.6.0` instead of upstream's `44.4.2`; `pnpm-workspace.yaml` aligns the minimum-release-age exception; `pnpm-lock.yaml` resolves the desktop importer and affected peer snapshots to `43.6.0`.
 - Regenerate the lockfile through the current package manager when dependencies change. The current lockfile still contains `44.1.0` entries, so checking for that string globally is not a valid test of the active desktop runtime.
 - Verification: confirm the desktop manifest, resolved importer, installed Electron binary, and packaged runtime agree. On the target machine, inspect Electron GPU feature status and renderer information, then check representative scrolling, chat rendering, and CPU use against the user's working baseline. Do not claim acceleration based only on compilation or a version number.
 - Retirement: a newer runtime satisfies these hardware checks, or the user changes the hardware requirement. If upstream requires incompatible APIs, adapt those call sites or report the concrete blocker; do not silently upgrade Electron.
@@ -130,7 +130,7 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Release: unsigned Intel macOS `0.0.42` DMG and ZIP built from the merged tree with Node `24.21.0` using `node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20260926`. `hdiutil verify` and `unzip -tq` passed. The packaged Electron framework reports `43.6.0`. Artifacts are in `release/20260926` in the main checkout.
 - No browser or application launched. Target-Mac GPU status, rendering performance, and interactive clipboard checks remain pending.
 
-## Latest attempt
+### Previous update: 2026-10-01
 
 - Date: 2026-10-01.
 - Status: landed on `fork/main` and local `main` through merge `a2f6cbabc1279ca3815345e85cfbb5442de39e08`; remote SHA verified after push. Focused checks, CodeRabbit review, and local release build passed.
@@ -146,4 +146,25 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Electron runtime integrity script passed after restoring the missing binary. Installed framework `CFBundleVersion` is `43.6.0`.
 - Whole merge whitespace check reports upstream whitespace in `patches/alchemy@2.0.0-beta.79.patch`; retained verbatim to preserve its hash.
 - Release: local unsigned Intel macOS `0.0.44` DMG and ZIP, with blockmaps, built from merged source at `a2f6cbabc1279ca3815345e85cfbb5442de39e08` using `T3CODE_DESKTOP_SIGNED=false node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20261001`. Artifacts are in `release/20261001` in the main checkout. `hdiutil verify` on the DMG and `unzip -tq` on the ZIP passed. ZIP metadata confirms app version `0.0.44`, Electron framework `43.6.0`, and an x64 Mach-O executable. Build log: `/tmp/t3-release-20261001.log`.
+- No browser or application launched. Target-Mac GPU status, rendering performance, and interactive clipboard acceptance remain pending. Last behaviorally verified baseline unchanged.
+
+## Latest attempt
+
+- Date: 2026-10-04.
+- Status: checks-passed candidate in a separate review worktree. The merge remains uncommitted with staged changes and `MERGE_HEAD`; no unmerged paths remain. Focused checks, CodeRabbit review, and local release build passed. Local `main` and `fork/main` remain unchanged; the landed upstream baseline has not advanced.
+- Starting HEAD and rollback reference: `8786496b1e4d30a84eb78a72b2314a6b80b6fa98`. Original checkout clean; no pending edits to carry or exclude.
+- Previous integrated upstream baseline: `bd89c1302026255c62cc09278207bfaf2664da4a`.
+- Exact target: `4ee6bfd50ef4a089440d5c3662db2298da9cc50e`, resolved through live `git ls-remote --symref origin HEAD` and `git fetch origin main`. Baseline ancestry verified; 187 upstream commits included.
+- Review branch: `patch/upstream-20261004`. Worktree: `/Users/saikrishnaambeti/Documents/opensource/t3code-upstream-review-20261004`.
+- Dependency conflicts resolved by retaining upstream Expo 58 changes in `pnpm-workspace.yaml`, preserving the Electron `43.6.0` release-age exception, and regenerating upstream's lockfile through `vp i` for the pinned desktop runtime.
+- P002 merged with upstream preview changes. Synchronous clipboard reads, text copying, image writes, and failure handling remain intact. Existing fork changes beyond this specification remain limited to P001 and P002.
+- Scope: upstream changes across web, desktop, mobile, contracts, providers, and connection modes retained. Desktop clipboard entry points and preview automation preserved; no new fork UI or wire behavior.
+- `vp i`: passed in 6m 3s. Desktop manifest, lockfile importer, installed Electron package, and framework `CFBundleVersion` agree on `43.6.0`. Electron runtime integrity script passed. Installation reported missing Vite/Vitest executable shims; repository-local `vp` ran successfully.
+- Repository-local `vp test run` for `Clipboard.test.ts`, `Manager.test.ts`, and `ElectronShell.test.ts`: passed, 109 tests. Packaging suite `build-desktop-artifact.test.ts`: passed, 76 tests, with `env -u ELECTRON_RUN_AS_NODE`. The initial combined run had 184 passing tests and one Windows cross-architecture assertion failure because the T3 Code environment inherits `ELECTRON_RUN_AS_NODE=1`; the clean-environment packaging run passed without source edits.
+- Desktop typecheck and targeted lint for all six compatibility source and test files passed. Patch whitespace check against the exact upstream target passed. Whole-merge whitespace checks report upstream patch-file whitespace; those files remain byte-for-byte upstream to preserve their hashes.
+- Review profile: `personal`, explicitly selected by the user. CodeRabbit reviewed all nine fork-diff files against the exact target and reported zero findings. Greptile reports the repository is not connected; the user explicitly approved CodeRabbit alone for this update.
+- Logs: `/tmp/t3-patch-20261004-install.log`, `/tmp/t3-patch-20261004-tests.log`, `/tmp/t3-patch-20261004-packaging-clean-env.log`, `/tmp/t3-patch-20261004-typecheck.log`, `/tmp/t3-patch-20261004-lint.log`, and `/tmp/t3-patch-20261004-coderabbit.log`.
+- Release: local unsigned Intel macOS `0.0.45` DMG and ZIP, with blockmaps, built from this uncommitted merged candidate using `T3CODE_DESKTOP_SIGNED=false node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20261004`. Artifacts are in `release/20261004` in the original checkout. Build log: `/tmp/t3-release-20261004.log`.
+- `hdiutil verify` on the DMG and `unzip -tq` on the ZIP passed. ZIP metadata confirms app version `0.0.45`, Electron framework `43.6.0`, and an x64 Mach-O executable. Verification logs: `/tmp/t3-release-20261004-dmg-verify.log`, `/tmp/t3-release-20261004-zip-verify.log`, and `/tmp/t3-release-20261004-metadata.json`.
+- Canonical specification for this candidate: `/Users/saikrishnaambeti/Documents/opensource/t3code-upstream-review-20261004/PATCH.md`. The original checkout's specification still describes its landed baseline.
 - No browser or application launched. Target-Mac GPU status, rendering performance, and interactive clipboard acceptance remain pending. Last behaviorally verified baseline unchanged.
