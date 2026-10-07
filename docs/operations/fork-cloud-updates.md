@@ -9,9 +9,9 @@ task is due. This is not a GitHub cron job that runs while T3 is offline.
 
 ## Enable the task
 
-The task is initially disabled with a daily placeholder schedule. Choose its time
-and enable it in T3's scheduled tasks UI. It posts run results into the original
-thread. GitHub CLI on the T3 environment must be authenticated as `Saikrishna1876`
+These steps assume the fork-update scheduled task already exists in T3. The
+repository does not create it. Choose its time and enable it in T3's scheduled
+tasks UI. It posts run results into its original thread. GitHub CLI on the T3 environment must be authenticated as `Saikrishna1876`
 with repository, workflow, and Codespaces access:
 
 ```sh
