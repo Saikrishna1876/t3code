@@ -57,7 +57,7 @@ jobs:
         if: steps.meta.outputs.skip != 'true'
         env:
           SOURCE_SHA: ${{ steps.meta.outputs.sha }}
-          GIT_TERMINAL_PROMPT: '0'
+          GIT_TERMINAL_PROMPT: "0"
         run: |
           set -euo pipefail
           git init .
@@ -88,7 +88,7 @@ jobs:
           vp install --filter=t3... --filter=@t3tools/web... --filter=@t3tools/desktop... --filter=@t3tools/scripts...
           vp run --filter @t3tools/desktop ensure:electron
           node -e "if (require('./apps/desktop/node_modules/electron/package.json').version !== '43.6.0') throw Error('Installed Electron pin changed')"
-          ./node_modules/.bin/vp test run apps/desktop/src/preview/Clipboard.test.ts apps/desktop/src/preview/Manager.test.ts apps/desktop/src/electron/ElectronShell.test.ts
+          ./node_modules/.bin/vp test run apps/desktop/src/preview/Manager.test.ts apps/desktop/src/electron/ElectronShell.test.ts apps/desktop/src/preview/DesktopBrowserHost.test.ts apps/server/src/preview/ServerBrowser.test.ts
           vp run --filter @t3tools/desktop typecheck
 
       - name: Set release version and public configuration

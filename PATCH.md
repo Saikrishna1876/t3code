@@ -32,10 +32,10 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 ## P002: Keep clipboard behavior compatible with P001
 
 - Status: active, observed alongside the runtime downgrade.
-- Required behavior: text copying remains tolerant of clipboard failures and a synchronous return value. Preview image copying works without relying on `ClipboardItem`; invalid images and clipboard write failures retain meaningful errors. Automated preview paste preserves text, HTML, RTF, PNG, and custom formats using the pinned runtime, excluding Electron internal formats.
+- Required behavior: text copying remains tolerant of clipboard failures and a synchronous return value. Preview image copying works without relying on `ClipboardItem`; invalid images and clipboard write failures retain meaningful errors. Desktop preview paste uses native Chromium clipboard handling through upstream server-owned browser automation, preserving native formats without Electron 44 clipboard APIs.
 - Implementation hints: `apps/desktop/src/electron/ElectronShell.ts` awaits `clipboard.writeText` inside try/catch without calling `.catch` on its return value. `apps/desktop/src/preview/Manager.ts` uses `clipboard.writeImage` through the synchronous error wrapper. `apps/desktop/src/preview/Manager.test.ts` covers that clipboard path and synchronous failure.
-- Paste implementation: `apps/desktop/src/preview/Clipboard.ts` uses synchronous format readers. `Manager.ts` wraps read failures with the existing operation error wrapper. Upstream's zero-argument `clipboard.read()` requires the newer API and cannot run on Electron 43.
-- Verification from repo root: `./node_modules/.bin/vp test run apps/desktop/src/preview/Clipboard.test.ts apps/desktop/src/preview/Manager.test.ts apps/desktop/src/electron/ElectronShell.test.ts` and `vp run --filter @t3tools/desktop typecheck`. Confirm text and preview-image copying in the desktop application when runtime testing is authorized.
+- Paste implementation: upstream `ac8e9453c` moved automation to `apps/server/src/preview/ServerBrowserPage.ts`, whose `press` uses Playwright keyboard events against desktop tabs through the CDP relay. The old synchronous format reader and its tests are retired because that Electron clipboard API path no longer exists. Interactive native-format paste acceptance remains pending.
+- Verification from repo root: `./node_modules/.bin/vp test run apps/desktop/src/preview/Manager.test.ts apps/desktop/src/electron/ElectronShell.test.ts apps/desktop/src/preview/DesktopBrowserHost.test.ts apps/server/src/preview/ServerBrowser.test.ts` and `vp run --filter @t3tools/desktop typecheck`. Confirm text and preview-image copying in the desktop application when runtime testing is authorized.
 - Retirement: the selected runtime supports an equivalent upstream implementation and clipboard checks pass.
 
 ## P003: Cloud releases for the Intel Mac fork
@@ -157,7 +157,7 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Release: local unsigned Intel macOS `0.0.44` DMG and ZIP, with blockmaps, built from merged source at `a2f6cbabc1279ca3815345e85cfbb5442de39e08` using `T3CODE_DESKTOP_SIGNED=false node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --output-dir /Users/saikrishnaambeti/Documents/opensource/t3code/release/20261001`. Artifacts are in `release/20261001` in the main checkout. `hdiutil verify` on the DMG and `unzip -tq` on the ZIP passed. ZIP metadata confirms app version `0.0.44`, Electron framework `43.6.0`, and an x64 Mach-O executable. Build log: `/tmp/t3-release-20261001.log`.
 - No browser or application launched. Target-Mac GPU status, rendering performance, and interactive clipboard acceptance remain pending. Last behaviorally verified baseline unchanged.
 
-## Latest attempt
+### Previous update: 2026-10-04
 
 - Date: 2026-10-04.
 - Status: landed on `fork/main` and local `main` through merge `9a869ff32704edeb267abc558de44611edf7c815` after the user requested updating the fork. Remote SHA verified after pushing. Focused checks, CodeRabbit review, and local release build passed. The committed merge tree exactly matches the tested candidate, `62719a4f249149d9dfb256a93505bfeb586db68c`.
@@ -177,3 +177,17 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - `hdiutil verify` on the DMG and `unzip -tq` on the ZIP passed. ZIP metadata confirms app version `0.0.45`, Electron framework `43.6.0`, and an x64 Mach-O executable. Verification logs: `/tmp/t3-release-20261004-dmg-verify.log`, `/tmp/t3-release-20261004-zip-verify.log`, and `/tmp/t3-release-20261004-metadata.json`.
 - Canonical specification after landing: `/Users/saikrishnaambeti/Documents/opensource/t3code/PATCH.md`. The review worktree retains the same specification and implementation.
 - No browser or application launched. Target-Mac GPU status, rendering performance, and interactive clipboard acceptance remain pending. Last behaviorally verified baseline unchanged.
+
+## Latest attempt
+
+- Date: 2026-10-07.
+- Status: focused checks and CodeRabbit review passed in the isolated worktree; fork push and local release pending.
+- Starting fork HEAD and rollback reference: `ba4aa5855a9ef6a453b443b9f9a9225419fd823a`. Original local main: `3ea74dcbad0c6d22f6e3507874996a990bde24b9`. Both clean. The fork's cloud-release configuration is included.
+- Previous integrated upstream baseline: `4ee6bfd50ef4a089440d5c3662db2298da9cc50e`.
+- Exact target: `bfec2387b8102975c84690f99be0f5f834fd0cbe`, resolved live from origin/main and fetched. Baseline ancestry verified; 196 upstream commits included.
+- Review branch: `patch/upstream-20261007`. Worktree: `/private/tmp/t3code-upstream-review-20261007`.
+- P001 retains Electron `43.6.0`. P002 retains tolerant text copying and synchronous image writes. The obsolete preview automation block and clipboard format helper were removed in favor of upstream's server-owned browser and native clipboard handling. P003 retains the workflow and devcontainer; workflow tests follow the new automation path.
+- Review profile: `personal`, selected by the user. CodeRabbit reviewed all ten fork-diff files against the exact upstream target and reported zero findings. Greptile was interrupted after making no review progress; committed candidate review remains pending.
+- `vp i` regenerated the lockfile and passed. Desktop manifest, importer, and installed Electron package resolve to `43.6.0`.
+- Focused tests passed: 208 tests across desktop preview, ElectronShell, DesktopBrowserHost, mocked ServerBrowser, and packaging suites. Desktop typecheck and targeted source/test lint passed. Patch whitespace check passed.
+- Local Intel macOS release requested. No cloud release dispatched. Hardware rendering and interactive clipboard acceptance remain pending; the behaviorally verified baseline is unchanged.
