@@ -10,7 +10,7 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 - Upstream URL: https://github.com/pingdotgg/t3code.git
 - Upstream remote: `origin`. The `fork` remote is the user's fork, not the update source.
 - Target: latest upstream default branch, resolved live to an exact commit each update. Cached default branch at setup: `main`.
-- Integration: prepare with `--no-ff --no-commit` in a separate worktree. Commit and push when the user requests updating `fork/main`; otherwise leave the result for review.
+- Integration: manual updates prepare with `--no-ff --no-commit` in a separate worktree. The user also authorizes the T3 scheduled cloud task to integrate in a disposable GitHub Codespace, preserve every patch, run focused checks, commit, push `Saikrishna1876/t3code` main without force, and dispatch `fork-macos-release.yml`. Scheduled integration and release builds must not run on the local Mac. See [cloud update operation](docs/operations/fork-cloud-updates.md).
 - Preserve original staged, unstaged, and untracked work. Carry the pending compatibility changes below and this specification into the review result.
 
 ## Baseline
@@ -37,6 +37,15 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 - Paste implementation: `apps/desktop/src/preview/Clipboard.ts` uses synchronous format readers. `Manager.ts` wraps read failures with the existing operation error wrapper. Upstream's zero-argument `clipboard.read()` requires the newer API and cannot run on Electron 43.
 - Verification from repo root: `./node_modules/.bin/vp test run apps/desktop/src/preview/Clipboard.test.ts apps/desktop/src/preview/Manager.test.ts apps/desktop/src/electron/ElectronShell.test.ts` and `vp run --filter @t3tools/desktop typecheck`. Confirm text and preview-image copying in the desktop application when runtime testing is authorized.
 - Retirement: the selected runtime supports an equivalent upstream implementation and clipboard checks pass.
+
+## P003: Cloud releases for the Intel Mac fork
+
+- Status: active automation configuration. Hardware acceptance remains subject to P001 and P002.
+- Required behavior: the T3 scheduled task performs integration and validation in a disposable GitHub Codespace. GitHub Actions builds the Intel Mac release, embeds `Saikrishna1876/t3code` as the update repository, verifies the packaged Electron `43.6.0` runtime, and publishes a DMG, ZIP, channel manifest, blockmaps, and checksums. Preserve the custom workflow and updater devcontainer across upstream merges.
+- Implementation: `.github/workflows/fork-macos-release.yml` and `.devcontainer/fork-update/devcontainer.json`. Releases use increasing stable numeric versions and retain the exact source SHA in their notes. Duplicate source releases are skipped; partial uploads stay draft.
+- Signing: builds remain downloadable without Apple credentials. Automatic macOS installation requires signing configured through the repository's Apple secrets and team variable. Do not claim an unsigned artifact has verified automatic installation.
+- Verification: focused clipboard tests and desktop typecheck in the Codespace and Mac runner; archive integrity, packaged runtime, and embedded update repository in the workflow. Runtime graphics and clipboard acceptance on the target Mac stay separate.
+- Retirement: the user replaces the cloud release process or no longer needs the Intel compatibility fork.
 
 ## Validation policy
 

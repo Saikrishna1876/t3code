@@ -1,0 +1,14 @@
+{
+  "name": "T3 fork updater",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/node:2": { "version": "24" },
+    "ghcr.io/devcontainers/features/rust:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/sshd:1": {}
+  },
+  "hostRequirements": { "cpus": 2, "memory": "8gb", "storage": "32gb" },
+  "containerEnv": { "T3CODE_HOME": "${containerWorkspaceFolder}/.t3" },
+  "onCreateCommand": "bash .devcontainer/on-create.sh",
+  "remoteUser": "vscode"
+}
