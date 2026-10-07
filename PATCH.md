@@ -15,8 +15,8 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 
 ## Baseline
 
-- Observed integrated upstream baseline: `4ee6bfd50ef4a089440d5c3662db2298da9cc50e`, landed on `fork/main` and local `main` through merge `9a869ff32704edeb267abc558de44611edf7c815`. Remote SHA verified after pushing.
-- Previous integrated upstream baseline: `bd89c1302026255c62cc09278207bfaf2664da4a`, landed through merge `a2f6cbabc1279ca3815345e85cfbb5442de39e08`.
+- Observed integrated upstream baseline: `bfec2387b8102975c84690f99be0f5f834fd0cbe`, committed through merge `27be76116afa6baaf67620d536da4ec185e4c762`. The user requested advancing fork/main and local main to this validated integration.
+- Previous integrated upstream baseline: `4ee6bfd50ef4a089440d5c3662db2298da9cc50e`, landed through merge `9a869ff32704edeb267abc558de44611edf7c815`.
 - Compatibility patches are committed. No pending local edits existed when this update started.
 - Last behaviorally verified baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda` (release `0.0.42` built locally on 2026-09-18 with Electron `43.6.0` was extracted and interactively confirmed working by the user on the target Intel Mac macOS 15 system).
 
@@ -54,7 +54,7 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 ## Latest attempt
 
 - Date: 2026-10-07.
-- Status: focused checks and CodeRabbit review passed in the isolated worktree; fork push and local release pending.
+- Status: integration committed through merge `27be76116afa6baaf67620d536da4ec185e4c762`. Focused checks, CodeRabbit review, local release build, and archive verification passed. Branches are ready for normal fast-forward updates.
 - Starting fork HEAD and rollback reference: `ba4aa5855a9ef6a453b443b9f9a9225419fd823a`. Original local main: `3ea74dcbad0c6d22f6e3507874996a990bde24b9`. Both clean. The fork's cloud-release configuration is included.
 - Previous integrated upstream baseline: `4ee6bfd50ef4a089440d5c3662db2298da9cc50e`.
 - Exact target: `bfec2387b8102975c84690f99be0f5f834fd0cbe`, resolved live from origin/main and fetched. Baseline ancestry verified; 196 upstream commits included.
@@ -63,4 +63,7 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Review profile: `personal`, selected by the user. CodeRabbit reviewed all ten fork-diff files against the exact upstream target and reported zero findings. Greptile reviewed the pre-merge committed fork diff and reported two documentation findings, both addressed. Its merged-candidate review failed because code reviews are not enabled for this organization. The merged source is covered by CodeRabbit.
 - `vp i` regenerated the lockfile and passed. Desktop manifest, importer, and installed Electron package resolve to `43.6.0`.
 - Focused tests passed: 208 tests across desktop preview, ElectronShell, DesktopBrowserHost, mocked ServerBrowser, and packaging suites. Desktop typecheck and targeted source/test lint passed. Patch whitespace check passed.
-- Local Intel macOS release requested. No cloud release dispatched. Hardware rendering and interactive clipboard acceptance remain pending; the behaviorally verified baseline is unchanged.
+- Local unsigned Intel macOS `0.0.45` DMG and ZIP, blockmaps, update manifest, and SHA-256 checksums are in `release/20261007` in the original checkout. Built from `49b07dc3cb8e105c69ed93885ba0e6e80990762b` with Node `24.21.0`, signing disabled, and update repository `Saikrishna1876/t3code`.
+- `hdiutil verify` and `unzip -tq` passed. Archive metadata confirms app version `0.0.45`, Electron framework `43.6.0`, x64 Mach-O, and the fork update feed. Electron runtime integrity repair passed before packaging.
+- Logs: `/tmp/t3-patch-20261007-{install,tests,typecheck,lint,coderabbit,greptile}.log` and `/tmp/t3-release-20261007.log`. Metadata: `/tmp/t3-release-20261007-metadata.json`.
+- No cloud release dispatched or application/browser launched. Hardware rendering and interactive native-format clipboard acceptance remain pending; the behaviorally verified baseline is unchanged.
