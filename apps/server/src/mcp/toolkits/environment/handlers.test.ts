@@ -12,7 +12,9 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import { Tool } from "effect/ai";
 
+import * as Codespaces from "../../../codespaces/Codespaces.ts";
 import * as Environment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -26,6 +28,96 @@ import { EnvironmentToolkit } from "./tools.ts";
 const environmentId = EnvironmentId.make("environment:preferences");
 const threadId = ThreadId.make("thread:preferences");
 
+it.effect(
+  "exposes object parameters and requires explicit agent opt-in for Codespaces writes",
+  () =>
+    Effect.gen(function* () {
+      const enabled = yield* Ref.make(false);
+      const runs = yield* Ref.make(0);
+      const input = {
+        action: "stop" as const,
+        name: "test-space",
+        clientRequestId: "stop-request-1",
+      };
+      const dependencies = Layer.mergeAll(
+        ThreadCommandExecutor.layer,
+        Layer.succeed(McpInvocationContext.McpInvocationContext, {
+          environmentId,
+          requestNamespace: "provider:codespaces",
+          thread: {
+            threadId,
+            providerSessionId: "provider:codespaces",
+            providerInstanceId: ProviderInstanceId.make("codex"),
+          },
+          client: undefined,
+          capabilities: new Set(["orchestration" as const]),
+          issuedAt: 0,
+        }),
+        Layer.mock(ThreadManagement.ThreadManagementService)({
+          getThreadShell: () => Effect.succeed(liveThreadShell(threadId)),
+        }),
+        Layer.mock(Environment.ServerEnvironment)({
+          getDescriptor: Effect.succeed({
+            environmentId,
+            label: "Test",
+            platform: { os: "linux", arch: "x64" },
+            serverVersion: "0.0.0",
+            capabilities: { repositoryIdentity: false, codespaces: true },
+          }),
+        }),
+        Layer.mock(Settings.ServerSettingsService)({}),
+        Layer.mock(Codespaces.Codespaces)({
+          snapshot: Ref.get(enabled).pipe(
+            Effect.map((agentAccessEnabled) => ({
+              configuration: {
+                releaseBaseUrl: "",
+                archiveVersion: "",
+                remoteScriptPath: "",
+                publicUrlTemplate: "",
+                networkAccess: false,
+                agentAccessEnabled,
+              },
+              operations: [],
+              environments: [],
+            })),
+          ),
+          run: () =>
+            Ref.update(runs, (value) => value + 1).pipe(
+              Effect.as({
+                ...input,
+                status: "running" as const,
+                stage: "accepted",
+                message: "Accepted",
+                createdAt: "2026-10-08T00:00:00Z",
+              }),
+            ),
+        }),
+      );
+      // The MCP registrar rejects a union at the root of tool parameters.
+      expect(Tool.getJsonSchema(EnvironmentToolkit.tools.codespaces_run).type).toBe("object");
+      yield* Effect.gen(function* () {
+        const toolkit = yield* EnvironmentToolkit;
+        const denied = yield* toolkit
+          .handle("codespaces_run", { input })
+          .pipe(Stream.unwrap, Stream.runCollect);
+        expect(denied.at(-1)?.result).toMatchObject({ code: "capability_denied" });
+        expect(yield* Ref.get(runs)).toBe(0);
+        yield* Ref.set(enabled, true);
+        const accepted = yield* toolkit
+          .handle("codespaces_run", { input })
+          .pipe(Stream.unwrap, Stream.runCollect);
+        expect(accepted.at(-1)?.result).toMatchObject({ action: "stop", status: "running" });
+        expect(yield* Ref.get(runs)).toBe(1);
+      }).pipe(
+        Effect.provide(
+          McpToolAccess.HandlersLayer.layer(EnvironmentHandlers.layer).pipe(
+            Layer.provideMerge(dependencies),
+          ),
+        ),
+      );
+    }),
+);
+
 it.effect("refuses a preferences update when the caller's turn ends while it waits", () =>
   Effect.gen(function* () {
     const caller = yield* Ref.make<OrchestrationV2ThreadShell>(liveThreadShell(threadId));
@@ -34,6 +126,7 @@ it.effect("refuses a preferences update when the caller's turn ends while it wai
     const checked = yield* Deferred.make<void>();
     const layerDependencies = Layer.mergeAll(
       ThreadCommandExecutor.layer,
+      Layer.mock(Codespaces.Codespaces)({}),
       Layer.succeed(McpInvocationContext.McpInvocationContext, {
         environmentId,
         requestNamespace: "provider:preferences",

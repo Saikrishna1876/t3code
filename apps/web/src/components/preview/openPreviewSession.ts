@@ -45,7 +45,7 @@ export async function openPreviewSession<E>(
   if (defaults instanceof BrowserSettingsReadError) {
     return AsyncResult.failure(Cause.fail(defaults));
   }
-  const runtime = input.runtime ?? previewRuntimeFor(input.threadRef.environmentId);
+  const runtime = input.runtime ?? previewRuntimeFor(input.threadRef.environmentId, input.url);
   const result = await input.openPreview({
     environmentId: input.threadRef.environmentId,
     input: {
@@ -64,7 +64,8 @@ export async function openPreviewSession<E>(
   if (input.url !== undefined) {
     rememberPreviewUrl(
       input.threadRef,
-      snapshot.navStatus._tag === "Idle" ? input.url : snapshot.navStatus.url,
+      snapshot.sourceUrl ??
+        (snapshot.navStatus._tag === "Idle" ? input.url : snapshot.navStatus.url),
     );
   }
   return result;

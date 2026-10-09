@@ -91,6 +91,7 @@ import {
 } from "./EnvironmentRow";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { LoadBalancingSettings } from "./LoadBalancingSettings";
+import { CodespacesSettings } from "./CodespacesSettings";
 import { GitHubRoutingSettings } from "./GitHubRoutingSettings";
 import { Input } from "../ui/input";
 import { CommandShortcut } from "../ui/command";
@@ -4128,6 +4129,19 @@ export function ConnectionsSettings() {
                           })
                         : null}
                     </div>
+                    {!routeTarget ? (
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setAddBackendDialogOpen(false);
+                          document
+                            .getElementById("connections-codespaces")
+                            ?.scrollIntoView({ block: "start" });
+                        }}
+                      >
+                        GitHub Codespaces
+                      </Button>
+                    ) : null}
                     <AnimatedHeight>
                       {savedBackendMode === "ssh" ? renderSshFields() : renderRemoteModeBody()}
                     </AnimatedHeight>
@@ -4168,6 +4182,7 @@ export function ConnectionsSettings() {
           }}
         />
       ) : null}
+      <CodespacesSettings environments={loadBalancingEnvironments} />
       <LoadBalancingSettings environments={loadBalancingEnvironments} />
       <GitHubRoutingSettings environments={loadBalancingEnvironments} />
     </SettingsPageContainer>

@@ -1,3 +1,5 @@
+import { useEnvironmentQuery } from "../../state/query";
+import { codespacesEnvironment } from "../../state/codespaces";
 import { useAtomValue } from "@effect/atom-react";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
@@ -228,6 +230,27 @@ export function NewTaskDraftScreen(props: {
   const taskPermissionReason =
     environmentConnected && !canOperate ? "This connection cannot start tasks." : null;
   const modelUnavailable = environmentConnected && flow.selectedModelOption?.isUnavailable === true;
+  const canRunCodespaces = useAtomValue(
+    codespacesEnvironment.run.permissionAtom(
+      selectedProject?.environmentId ?? flow.selectedEnvironmentId,
+    ),
+  );
+  const codespace = useEnvironmentQuery(
+    selectedProject && selectedEnvironmentServerConfig?.environment.capabilities.codespaces
+      ? codespacesEnvironment.project({
+          environmentId: selectedProject.environmentId,
+          input: { projectId: selectedProject.id },
+        })
+      : null,
+  );
+  const canPickEnvironment =
+    flow.environments.length > 1 ||
+    Boolean(
+      canRunCodespaces &&
+      selectedProject &&
+      selectedEnvironmentServerConfig?.environment.capabilities.codespaces,
+    );
+
   // A project added by cloning exists before its files do: the prompt can be
   // written meanwhile, but Start waits for the clone.
   const projectCloneState = useProjectClone(
@@ -1237,11 +1260,14 @@ export function NewTaskDraftScreen(props: {
         selectedEnvironmentServerConfig,
         draft.modelSelection ?? null,
       ) ?? flow.selectedModel;
-    const workspaceMode = draft.workspaceSelection?.mode ?? flow.workspaceMode;
+    const workspaceMode = flow.canChooseWorkspace
+      ? (draft.workspaceSelection?.mode ?? flow.workspaceMode)
+      : "local";
     const selectedBranchName = draft.workspaceSelection?.branch ?? flow.selectedBranchName;
     const initialMessageText = draft.text.trim();
 
     if (
+      flow.workspaceLocationBlockReason !== null ||
       attachmentBlockReason !== null ||
       !modelSelection ||
       initialMessageText.length === 0 ||
@@ -1393,6 +1419,7 @@ export function NewTaskDraftScreen(props: {
     !isImportingContext &&
     !cloneBlocksStart &&
     taskPermissionReason === null &&
+    flow.workspaceLocationBlockReason === null &&
     attachmentBlockReason === null &&
     !modelUnavailable &&
     Boolean(flow.selectedProject) &&
@@ -1501,9 +1528,14 @@ export function NewTaskDraftScreen(props: {
     navigation.dispatch(StackActions.push(routeName));
   };
 
+  const executionLocation = codespace.data?.name
+    ? codespace.data.connected
+      ? "Codespace"
+      : "Codespace unavailable"
+    : selectedEnvironmentLabel;
   const environmentControl = (
     <ComposerInlineControl
-      accessibilityLabel={`Environment: ${selectedEnvironmentLabel}`}
+      accessibilityLabel={`Environment: ${executionLocation}`}
       chevronDirection="right"
       disabled={isComposerInteractionLocked || voiceInput.isBusy}
       renderIcon={(size) => (
@@ -1513,13 +1545,11 @@ export function NewTaskDraftScreen(props: {
           tintColorClassName="accent-icon-muted"
         />
       )}
-      label={`on ${selectedEnvironmentLabel}`}
+      label={codespace.data?.name ? executionLocation : `on ${executionLocation}`}
       maxWidth={flow.isScratchDraft ? 170 : 260}
-      onPress={
-        flow.environments.length > 1 ? () => openContextPicker("NewTaskEnvironment") : undefined
-      }
-      showChevron={flow.environments.length > 1}
-      static={flow.environments.length <= 1}
+      onPress={canPickEnvironment ? () => openContextPicker("NewTaskEnvironment") : undefined}
+      showChevron={canPickEnvironment}
+      static={!canPickEnvironment}
     />
   );
   // A thread without a project has no project to name, so it asks plainly,
@@ -1596,7 +1626,7 @@ export function NewTaskDraftScreen(props: {
       <ComposerInlineControl
         accessibilityHint={`Switches to ${flow.workspaceMode === "local" ? "a new worktree" : "the current checkout"}`}
         accessibilityLabel={workspaceLabel}
-        disabled={isComposerInteractionLocked || voiceInput.isBusy}
+        disabled={isComposerInteractionLocked || voiceInput.isBusy || !flow.canChooseWorkspace}
         renderIcon={(size) => (
           <NewTaskWorkspaceIcon
             workspaceMode={flow.workspaceMode}
@@ -1613,7 +1643,7 @@ export function NewTaskDraftScreen(props: {
       <ComposerInlineControl
         accessibilityLabel={`${flow.workspaceMode === "worktree" ? "Base branch" : "Branch"}: ${selectedBranchLabel}`}
         chevronDirection="right"
-        disabled={isComposerInteractionLocked}
+        disabled={isComposerInteractionLocked || !flow.canChooseWorkspace}
         icon="arrow.triangle.branch"
         label={showBranchLoading ? "Loading branches…" : selectedBranchLabel}
         maxWidth={190}
@@ -1668,10 +1698,21 @@ export function NewTaskDraftScreen(props: {
           />
         </View>
       ) : null}
-      {flow.canChooseWorkspace ? <View className="pb-1">{workspaceControls}</View> : null}
+      {!flow.isScratchDraft ? <View className="pb-1">{workspaceControls}</View> : null}
 
       {taskPermissionReason ? (
         <Text className="px-3 py-2 text-xs text-muted-foreground">{taskPermissionReason}</Text>
+      ) : null}
+
+      {flow.workspaceLocationBlockReason ? (
+        <View className="px-3 py-2">
+          <Text className="text-xs text-muted-foreground">{flow.workspaceLocationBlockReason}</Text>
+          {codespace.error && !codespace.isPending ? (
+            <Pressable accessibilityRole="button" onPress={codespace.refresh} className="py-2">
+              <Text className="text-sm text-foreground">Retry execution location</Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
 
       {modelUnavailable ? (
@@ -1814,6 +1855,7 @@ export function NewTaskDraftScreen(props: {
                 <ComposerActionButton
                   accessibilityLabel={
                     taskPermissionReason ??
+                    flow.workspaceLocationBlockReason ??
                     attachmentBlockReason ??
                     (cloneBlocksStart
                       ? projectClone === null || projectClone.phase === "running"

@@ -1,3 +1,7 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
+import * as GitHubCredentials from "../sourceControl/GitHubCredentials.ts";
+import * as Option from "effect/Option";
+import * as Redacted from "effect/Redacted";
 import * as NodeModule from "node:module";
 import * as NodeNet from "node:net";
 
@@ -259,8 +263,55 @@ export const make = Effect.fn("NodePtyAdapter.make")(function* () {
     ),
   );
 
+  const credentialService = Option.getOrUndefined(
+    yield* Effect.serviceOption(GitHubCredentials.GitHubCredentials),
+  );
   return PtyAdapter.PtyAdapter.of({
     spawn: Effect.fn("NodePtyAdapter.spawn")(function* (input) {
+      const service = Option.getOrUndefined(
+        yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+      );
+      const target = service ? yield* service.lookup(input.cwd) : null;
+      if (target) {
+        if (!target.executor || !target.remoteCwd)
+          return yield* new PtyAdapter.PtySpawnError({
+            adapter: "Codespace disconnected",
+            shell: "gh codespace ssh",
+          });
+        if (!credentialService)
+          return yield* new PtyAdapter.PtySpawnError({
+            adapter: "Codespace GitHub credentials unavailable",
+          });
+        const credential = yield* credentialService
+          .get("github.com")
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new PtyAdapter.PtySpawnError({ adapter: "Codespace GitHub authentication", cause }),
+            ),
+          );
+        const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+        input = {
+          ...input,
+          shell: "gh",
+          args: [
+            "codespace",
+            "ssh",
+            "--codespace",
+            target.name,
+            "--",
+            "-t",
+            `cd ${quote(target.remoteCwd)} && exec bash -l`,
+          ],
+          env: {
+            ...input.env,
+            GH_TOKEN: Redacted.value(credential.token),
+            GH_HOST: "github.com",
+            GH_DEBUG: "",
+            GH_PROMPT_DISABLED: "1",
+          },
+        };
+      }
       yield* ensureNodePtySpawnHelperExecutableCached;
       // node-pty only writes `name` into the child's TERM on the Unix path;
       // the ConPTY path leaves the environment untouched, so Windows children

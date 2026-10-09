@@ -1,3 +1,4 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
@@ -79,13 +80,17 @@ export type ProviderSessionReleaseReason = typeof ProviderSessionReleaseReason.T
 export class ProviderSessionOpenError extends Schema.TaggedError<ProviderSessionOpenError>()(
   "ProviderSessionOpenError",
   {
+    reason: Schema.optional(Schema.String),
     instanceId: ProviderInstanceId,
     providerSessionId: ProviderSessionId,
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
-    return `Failed to open provider instance ${this.instanceId} session ${this.providerSessionId}.`;
+    return (
+      this.reason ??
+      `Failed to open provider instance ${this.instanceId} session ${this.providerSessionId}.`
+    );
   }
 }
 
@@ -341,6 +346,9 @@ export const layerWithOptions = (
     ProviderSessionManagerV2,
     Effect.gen(function* () {
       const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
+      const workspaceService = Option.getOrUndefined(
+        yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+      );
       const fileSystem = yield* FileSystem.FileSystem;
       const mcpSessionRegistry = yield* McpSessionRegistry.McpSessionRegistry;
       const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
@@ -463,6 +471,30 @@ export const layerWithOptions = (
       const isMcpCredentialReserved = (threadId: ThreadId, mcpCredentialId: string) =>
         (mcpCredentialReservations.get(mcpReservationKey(threadId, mcpCredentialId)) ?? 0) > 0;
       const mcpPrepareLock = yield* KeyedLock.make<ThreadId>();
+      const threadWorkspace = (threadId: ThreadId, cwd?: string | null) =>
+        Effect.gen(function* () {
+          if (!workspaceService) return null;
+          const thread = yield* projectionStore.getThreadShell(threadId);
+          const binding = thread
+            ? (yield* workspaceService.bindings).find(
+                (entry) => entry.projectId === thread.projectId,
+              )
+            : undefined;
+          if (binding) {
+            const cwdTarget = cwd ? yield* workspaceService.lookup(cwd) : null;
+            return cwdTarget?.projectId === binding.projectId
+              ? cwdTarget
+              : yield* workspaceService.lookup(binding.localRoot);
+          }
+          return cwd ? yield* workspaceService.lookup(cwd) : null;
+        });
+      const acquireWorkspaceWork = (threadId: ThreadId) =>
+        Effect.gen(function* () {
+          if (!workspaceService) return;
+          const thread = yield* projectionStore.getThreadShell(threadId);
+          if (thread) yield* workspaceService.acquireWork(thread.projectId);
+        });
+
       /**
        * Resolves (or mints) the thread's MCP credential and returns it with a
        * reservation held; the caller must drop the reservation exactly once.
@@ -491,6 +523,23 @@ export const layerWithOptions = (
                 const capabilities = new Set<
                   import("../mcp/McpInvocationContext.ts").McpCapability
                 >(["orchestration", "worktree", "pull-requests"]);
+                if (workspaceService && Option.isSome(projectService)) {
+                  const remoteBound = yield* projectionStore.getThreadShell(threadId).pipe(
+                    Effect.flatMap((thread) =>
+                      thread
+                        ? projectService.value.getById(thread.projectId)
+                        : Effect.succeed(Option.none()),
+                    ),
+                    Effect.flatMap((project) =>
+                      Option.isSome(project)
+                        ? workspaceService.lookup(project.value.workspaceRoot)
+                        : Effect.succeed(null),
+                    ),
+                    Effect.map((target) => target !== null),
+                    Effect.orElseSucceed(() => true),
+                  );
+                  if (remoteBound) capabilities.delete("worktree");
+                }
                 if (browserToolsAvailable) capabilities.add("preview");
                 if (deviceToolsAvailable) capabilities.add("device");
                 const existing = yield* mcpSessions.read(threadId);
@@ -517,7 +566,8 @@ export const layerWithOptions = (
                     // A flipped browser-access setting must not survive through
                     // credential reuse: rotate so the new scope reflects it.
                     resolved.capabilities.has("preview") === browserToolsAvailable &&
-                    resolved.capabilities.has("device") === deviceToolsAvailable
+                    resolved.capabilities.has("device") === deviceToolsAvailable &&
+                    resolved.capabilities.has("worktree") === capabilities.has("worktree")
                   ) {
                     return { mcpCredentialId: existing.providerSessionId, issued: false };
                   }
@@ -1787,46 +1837,98 @@ export const layerWithOptions = (
               ),
             ),
           startTurn: (input) =>
-            observeActivity(
-              providerSessionId,
-              ensureThreadAttached({
-                providerSessionId,
-                threadId: input.threadId,
-                providerInstanceId: runtime.instanceId,
-              }),
-            ).pipe(
-              // A start that fails or is stopped may never emit turn.terminal,
-              // so it clears its own turn or the session never goes idle. If
-              // the adapter emits the terminal anyway, clearing the same turn
-              // again changes nothing, so another thread's turn on a shared
-              // session stays busy either way.
-              Effect.andThen(
-                holdThreadLoaded({
-                  providerSessionId,
-                  threadId: input.threadId,
-                  providerThread: input.providerThread,
-                }),
+            acquireWorkspaceWork(input.threadId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapter.ProviderAdapterTurnStartError({
+                    driver: runtime.driver,
+                    threadId: input.threadId,
+                    providerThreadId: input.providerThread.id,
+                    runId: input.runId,
+                    cause,
+                  }),
               ),
               Effect.andThen(
-                Effect.acquireUseRelease(
-                  observeActivity(
-                    providerSessionId,
-                    markBusy(
-                      providerSessionId,
-                      busyTurnKey(input.providerThread.id, input.runOrdinal),
-                    ),
+                Effect.gen(function* () {
+                  const target = yield* threadWorkspace(input.threadId, input.runtimePolicy.cwd);
+                  if (
+                    target &&
+                    (runtime.driver !== "codex" ||
+                      !target.executor ||
+                      input.runtimePolicy.cwd !== target.localRoot)
+                  )
+                    return yield* new ProviderAdapter.ProviderAdapterTurnStartError({
+                      driver: runtime.driver,
+                      threadId: input.threadId,
+                      providerThreadId: input.providerThread.id,
+                      runId: input.runId,
+                      cause:
+                        "Resume the Codespace and use Codex from the project's main checkout before starting work.",
+                    });
+                }).pipe(
+                  Effect.mapError((cause) =>
+                    Schema.is(ProviderAdapter.ProviderAdapterTurnStartError)(cause)
+                      ? cause
+                      : new ProviderAdapter.ProviderAdapterTurnStartError({
+                          driver: runtime.driver,
+                          threadId: input.threadId,
+                          providerThreadId: input.providerThread.id,
+                          runId: input.runId,
+                          cause,
+                        }),
                   ),
-                  () =>
-                    runtime.startTurn(input).pipe(turnMetrics("send", input.modelSelection.model)),
-                  (_, exit) =>
-                    Exit.isFailure(exit)
-                      ? observeActivity(
-                          providerSessionId,
-                          markIdle(providerSessionId, input.providerThread.id, input.runOrdinal),
-                        )
-                      : Effect.void,
                 ),
               ),
+              Effect.andThen(
+                observeActivity(
+                  providerSessionId,
+                  ensureThreadAttached({
+                    providerSessionId,
+                    threadId: input.threadId,
+                    providerInstanceId: runtime.instanceId,
+                  }),
+                ).pipe(
+                  // A start that fails or is stopped may never emit turn.terminal,
+                  // so it clears its own turn or the session never goes idle. If
+                  // the adapter emits the terminal anyway, clearing the same turn
+                  // again changes nothing, so another thread's turn on a shared
+                  // session stays busy either way.
+                  Effect.andThen(
+                    holdThreadLoaded({
+                      providerSessionId,
+                      threadId: input.threadId,
+                      providerThread: input.providerThread,
+                    }),
+                  ),
+                  Effect.andThen(
+                    Effect.acquireUseRelease(
+                      observeActivity(
+                        providerSessionId,
+                        markBusy(
+                          providerSessionId,
+                          busyTurnKey(input.providerThread.id, input.runOrdinal),
+                        ),
+                      ),
+                      () =>
+                        runtime
+                          .startTurn(input)
+                          .pipe(turnMetrics("send", input.modelSelection.model)),
+                      (_, exit) =>
+                        Exit.isFailure(exit)
+                          ? observeActivity(
+                              providerSessionId,
+                              markIdle(
+                                providerSessionId,
+                                input.providerThread.id,
+                                input.runOrdinal,
+                              ),
+                            )
+                          : Effect.void,
+                    ),
+                  ),
+                ),
+              ),
+              Effect.scoped,
             ),
           steerTurn: (input) =>
             observeActivity(providerSessionId, touchActivity(providerSessionId)).pipe(
@@ -2034,6 +2136,49 @@ export const layerWithOptions = (
                   });
                 }
               }
+              yield* acquireWorkspaceWork(input.threadId).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderSessionOpenError({
+                      instanceId: input.modelSelection.instanceId,
+                      providerSessionId: input.providerSessionId,
+                      reason: cause.message,
+                    }),
+                ),
+              );
+              const target = yield* threadWorkspace(input.threadId, cwd).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderSessionOpenError({
+                      instanceId: input.modelSelection.instanceId,
+                      providerSessionId: input.providerSessionId,
+                      cause,
+                    }),
+                ),
+              );
+              if (target) {
+                const selected = yield* registry.get(input.modelSelection.instanceId).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ProviderSessionOpenError({
+                        instanceId: input.modelSelection.instanceId,
+                        providerSessionId: input.providerSessionId,
+                        cause,
+                      }),
+                  ),
+                );
+                if (selected.driver !== "codex" || !target.executor || cwd !== target.localRoot)
+                  return yield* new ProviderSessionOpenError({
+                    instanceId: input.modelSelection.instanceId,
+                    providerSessionId: input.providerSessionId,
+                    reason:
+                      selected.driver !== "codex"
+                        ? "Codespaces currently require Codex 0.160.1 or later. Provider login stays local."
+                        : !target.executor
+                          ? "Resume the project's Codespace before starting work."
+                          : "Codespaces currently use the project root. Select the main checkout.",
+                  });
+              }
               const key = sessionKey(input.providerSessionId);
               const existing = (yield* Ref.get(sessions)).get(key);
               if (existing !== undefined) {
@@ -2206,7 +2351,7 @@ export const layerWithOptions = (
               yield* startEventPump(entry);
               yield* scheduleIdleRelease(input.providerSessionId);
               return exposedRuntime;
-            }),
+            }).pipe(Effect.scoped),
           ),
         get: (providerSessionId) =>
           Effect.gen(function* () {

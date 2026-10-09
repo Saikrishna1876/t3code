@@ -1,6 +1,7 @@
 "use client";
 
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { useAtomValue } from "@effect/atom-react";
 import { previewStreamDownloadUrl } from "@t3tools/client-runtime/preview/server-browser-stream";
 import {
   isAtomCommandInterrupted,
@@ -17,7 +18,11 @@ import {
   PREVIEW_ZOOM_LEVELS,
   type PreviewAdjustInput,
 } from "@t3tools/contracts";
-import { normalizePreviewUrl, resolveAddressBarInput } from "@t3tools/shared/preview";
+import {
+  isLoopbackHost,
+  normalizePreviewUrl,
+  resolveAddressBarInput,
+} from "@t3tools/shared/preview";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -176,9 +181,17 @@ export function PreviewView({
     : null;
   const open = useAtomCommand(previewEnvironment.open);
   const closePreview = useAtomCommand(previewEnvironment.close, "preview close");
-  const environmentLabel = useEnvironment(threadRef.environmentId)?.label ?? "the environment";
+  const environment = useEnvironment(threadRef.environmentId);
+  const environmentLabel = environment?.label ?? "the environment";
+  const supportsWorkspaceUrlResolution = Boolean(
+    environment?.serverConfig?.environment.capabilities.codespaces,
+  );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const serverBrowser = useEnvironmentSupportsServerBrowser(threadRef.environmentId);
+  const resolveUrl = useAtomCommand(previewEnvironment.resolveUrl, "preview URL resolution");
+  const canResolveUrl = useAtomValue(
+    previewEnvironment.resolveUrl.permissionAtom(threadRef.environmentId),
+  );
   const resize = useAtomCommand(previewEnvironment.resize, "preview viewport resize");
   const adjust = useAtomCommand(previewEnvironment.adjust, "preview appearance or zoom");
 
@@ -265,20 +278,51 @@ export function PreviewView({
   }, [environmentHostname, latestHistoryUrl, navTitle, navUrl, threadKey]);
 
   const navigateToResolvedUrl = useCallback(
-    async (resolvedUrl: string) => {
+    async (requestedUrl: string) => {
+      let resolvedUrl = requestedUrl;
+      if (supportsWorkspaceUrlResolution) {
+        if (!canResolveUrl) return false;
+        const resolution = await resolveUrl({
+          environmentId: threadRef.environmentId,
+          input: { threadId: threadRef.threadId, url: requestedUrl },
+        });
+        if (resolution._tag !== "Success") return false;
+        resolvedUrl = resolution.value;
+      }
       if (isServerTab && serverSurfaceRef.current) {
         if (serverInputDisabled) return false;
         serverSurfaceRef.current.navigate(resolvedUrl);
-        rememberPreviewUrl(threadRef, resolvedUrl);
+        rememberPreviewUrl(threadRef, requestedUrl);
         return true;
       }
-      if (runtimeTabId && previewBridge) {
+      // Codespace forwards listen on the T3 host's loopback, not the desktop client's.
+      let resolvedLoopback = false;
+      try {
+        resolvedLoopback = isLoopbackHost(new URL(resolvedUrl).hostname);
+      } catch {
+        // Older or custom hosts may return a URL the desktop browser must normalize.
+      }
+      const moveToHost =
+        supportsWorkspaceUrlResolution &&
+        resolvedLoopback &&
+        threadRef.environmentId !== primaryEnvironmentId &&
+        !serverOwnsRendering;
+      if (runtimeTabId && previewBridge && !moveToHost) {
         // The bridge mirrors the resolved URL back to the server.
         await previewBridge.navigate(runtimeTabId, resolvedUrl);
-        rememberPreviewUrl(threadRef, resolvedUrl);
+        rememberPreviewUrl(threadRef, requestedUrl);
         return true;
       }
-      const result = await openPreviewSession({ openPreview: open, threadRef, url: resolvedUrl });
+      const result = await openPreviewSession({
+        openPreview: open,
+        threadRef,
+        url: requestedUrl,
+        ...(moveToHost ? { runtime: "server", viewport, profileId: activeProfileId } : {}),
+      });
+      if (result._tag === "Success" && moveToHost) {
+        useRightPanelStore.getState().openBrowser(threadRef, result.value.tabId);
+        if (tabId) await closePreviewSession({ closePreview, snapshot, tabId, threadRef });
+      }
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         if (error instanceof BrowserSettingsReadError) {
@@ -291,7 +335,23 @@ export function PreviewView({
       }
       return result._tag === "Success";
     },
-    [isServerTab, open, runtimeTabId, serverInputDisabled, threadRef],
+    [
+      activeProfileId,
+      canResolveUrl,
+      closePreview,
+      isServerTab,
+      open,
+      primaryEnvironmentId,
+      resolveUrl,
+      runtimeTabId,
+      serverInputDisabled,
+      serverOwnsRendering,
+      snapshot,
+      supportsWorkspaceUrlResolution,
+      tabId,
+      threadRef,
+      viewport,
+    ],
   );
 
   const handleSubmitUrl = useCallback(
@@ -973,7 +1033,7 @@ export function PreviewView({
         canGoBack={canGoBack && !serverInputDisabled}
         canGoForward={canGoForward && !serverInputDisabled}
         refreshDisabled={refreshDisabled || serverInputDisabled}
-        inputDisabled={serverInputDisabled}
+        inputDisabled={serverInputDisabled || (supportsWorkspaceUrlResolution && !canResolveUrl)}
         focusUrlNonce={focusUrlNonce}
         onBack={handleBack}
         onForward={handleForward}

@@ -52,6 +52,39 @@ afterEach(() => {
 });
 
 describe("openPreviewSession", () => {
+  it("reopens a closed forwarded preview with its original application URL", async () => {
+    const first = {
+      ...snapshot,
+      sourceUrl: "http://localhost:3000/app",
+      navStatus: {
+        _tag: "Loading" as const,
+        url: "http://127.0.0.1:60000/app",
+        title: "",
+      },
+    };
+    await openPreviewSession({
+      openPreview: async () => AsyncResult.success(first),
+      threadRef,
+      url: first.sourceUrl,
+    });
+    expect(readThreadPreviewState(threadRef).recentlySeenUrls).toEqual([first.sourceUrl]);
+    resetPreviewStateForTests();
+    const open = vi.fn(async (_input: PreviewOpenInput) =>
+      AsyncResult.success({
+        ...first,
+        navStatus: { ...first.navStatus, url: "http://127.0.0.1:60001/app" },
+      }),
+    );
+    await openPreviewSession({
+      openPreview: ({ input }) => open(input),
+      threadRef,
+      url: first.sourceUrl,
+    });
+    expect(open).toHaveBeenCalledWith(
+      expect.objectContaining({ url: "http://localhost:3000/app" }),
+    );
+    expect(readThreadPreviewState(threadRef).recentlySeenUrls).toEqual([first.sourceUrl]);
+  });
   it("creates an idle tab without recording a recently visited URL", async () => {
     const idleSnapshot: PreviewSessionSnapshot = {
       ...snapshot,
