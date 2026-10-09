@@ -1,3 +1,5 @@
+import { createCodexWorkspaceExecution } from "../../codespaces/CodexWorkspaceExecution.ts";
+import * as CodespacesWorkspace from "../../codespaces/CodespacesWorkspace.ts";
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
@@ -1707,6 +1709,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           settings: resolvedRuntime?.config ?? adapterOptions.settings,
           environment: resolvedRuntime?.environment ?? adapterOptions.environment,
         });
+        const workspaceService = Option.getOrUndefined(
+          yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+        );
+        const executionParams = createCodexWorkspaceExecution(workspaceService, client.raw.request);
         const additionalContextByThread = yield* Ref.make(
           new Map<
             string,
@@ -6195,7 +6201,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               else next.delete(threadId);
               return next;
             });
-            const started = yield* client.request("turn/start", turnStartParams);
+            const execution = yield* executionParams(turnInput.runtimePolicy.cwd, threadId);
+            const started =
+              "environments" in execution
+                ? yield* client.raw
+                    .request("turn/start", { ...turnStartParams, ...execution })
+                    .pipe(
+                      Effect.flatMap(Schema.decodeUnknownEffect(CodexSchema.V2TurnStartResponse)),
+                    )
+                : yield* client.request("turn/start", turnStartParams);
             yield* registerRootTurn({
               turnInput,
               nativeTurnId: started.turn.id,
@@ -6452,14 +6466,31 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             ensureInitialized.pipe(
               Effect.andThen(mcpSessions.read(threadInput.threadId)),
               Effect.flatMap((mcpSession) =>
-                client.request(
-                  "thread/start",
-                  codexThreadRuntimeParams({
+                Effect.gen(function* () {
+                  const params = codexThreadRuntimeParams({
                     mcpSession,
                     modelSelection: threadInput.modelSelection,
                     runtimePolicy: threadInput.runtimePolicy,
-                  }),
-                ),
+                  });
+                  const execution = yield* executionParams(threadInput.runtimePolicy.cwd);
+                  if (!("environments" in execution))
+                    return yield* client.request("thread/start", params);
+                  const response = yield* client.raw
+                    .request("thread/start", {
+                      ...params,
+                      ...execution,
+                      config: {
+                        ...params.config,
+                        "features.stable_environment_tools": false,
+                        "features.multi_agent": false,
+                        "features.multi_agent_v2": false,
+                      },
+                    })
+                    .pipe(
+                      Effect.flatMap(Schema.decodeUnknownEffect(CodexSchema.V2ThreadStartResponse)),
+                    );
+                  return response;
+                }),
               ),
               Effect.map((response): OrchestrationV2ProviderThread =>
                 providerThreadFromCodexThread({

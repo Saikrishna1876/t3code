@@ -2,6 +2,7 @@ import { useComposerMenuState } from "../chat/useComposerMenuState";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { useEnvironmentsWithScope, readEnvironmentScope } from "../../state/session";
+import { ProjectCodespacesControl } from "../ProjectCodespacesControl";
 import {
   isAtomCommandInterrupted,
   mapAtomCommandResult,
@@ -536,6 +537,15 @@ function ProjectDetail({
             }
           />
         </SettingsSection>
+        {environmentById.get(representative.environmentId)?.serverConfig?.capabilities
+          .codespaces ? (
+          <SettingsSection title="Codespace">
+            <ProjectCodespacesControl
+              environmentId={representative.environmentId}
+              projectId={representative.id}
+            />
+          </SettingsSection>
+        ) : null}
         <ProjectDefaultsSettings category="project" />
         <ProjectActionsSettings />
         {hasMultipleCheckouts ? checkoutChoices : null}

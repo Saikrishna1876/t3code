@@ -179,6 +179,7 @@ export function PreviewView({
   const environmentLabel = useEnvironment(threadRef.environmentId)?.label ?? "the environment";
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const serverBrowser = useEnvironmentSupportsServerBrowser(threadRef.environmentId);
+  const resolveUrl = useAtomCommand(previewEnvironment.resolveUrl, "preview URL resolution");
   const resize = useAtomCommand(previewEnvironment.resize, "preview viewport resize");
   const adjust = useAtomCommand(previewEnvironment.adjust, "preview appearance or zoom");
 
@@ -265,7 +266,13 @@ export function PreviewView({
   }, [environmentHostname, latestHistoryUrl, navTitle, navUrl, threadKey]);
 
   const navigateToResolvedUrl = useCallback(
-    async (resolvedUrl: string) => {
+    async (requestedUrl: string) => {
+      const resolution = await resolveUrl({
+        environmentId: threadRef.environmentId,
+        input: { threadId: threadRef.threadId, url: requestedUrl },
+      });
+      if (resolution._tag !== "Success") return false;
+      const resolvedUrl = resolution.value;
       if (isServerTab && serverSurfaceRef.current) {
         if (serverInputDisabled) return false;
         serverSurfaceRef.current.navigate(resolvedUrl);
@@ -291,7 +298,7 @@ export function PreviewView({
       }
       return result._tag === "Success";
     },
-    [isServerTab, open, runtimeTabId, serverInputDisabled, threadRef],
+    [isServerTab, open, resolveUrl, runtimeTabId, serverInputDisabled, threadRef],
   );
 
   const handleSubmitUrl = useCallback(

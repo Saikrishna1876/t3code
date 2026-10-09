@@ -1,3 +1,5 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
+import * as Option from "effect/Option";
 // @effect-diagnostics nodeBuiltinImport:off
 /**
  * WorkspaceFileSystem - Effect service contract for workspace file mutations.
@@ -340,7 +342,25 @@ export const make = Effect.gen(function* () {
     return { relativePath: target.relativePath };
   });
 
-  return WorkspaceFileSystem.of({ readFile, writeFile });
+  const remote = Option.getOrUndefined(
+    yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+  );
+  return WorkspaceFileSystem.of(
+    CodespacesWorkspace.routeWorkspaceMethods(
+      { readFile, writeFile },
+      remote,
+      "files",
+      (cause, method, cwd) =>
+        new WorkspaceFileSystemOperationError({
+          workspaceRoot: cwd,
+          relativePath: "",
+          resolvedPath: cwd,
+          operationPath: cwd,
+          operation: method === "readFile" ? "read" : "write-file",
+          cause,
+        }),
+    ),
+  );
 });
 
 export const layer = Layer.effect(WorkspaceFileSystem, make);

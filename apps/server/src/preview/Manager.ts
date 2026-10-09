@@ -17,6 +17,7 @@ import {
   type PreviewListInput,
   type PreviewListResult,
   type PreviewNavigateInput,
+  type PreviewResolveUrlInput,
   type PreviewOpenInput,
   type PreviewRefreshInput,
   type PreviewReportStatusInput,
@@ -31,6 +32,8 @@ import {
   newPreviewTabId,
   normalizePreviewUrl,
 } from "@t3tools/shared/preview";
+import * as CodespacesPreview from "../codespaces/CodespacesPreview.ts";
+import * as Option from "effect/Option";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -52,6 +55,7 @@ export class PreviewManager extends Context.Service<
         readonly beforePublish?: (snapshot: PreviewSessionSnapshot) => void;
       },
     ) => Effect.Effect<PreviewSessionSnapshot, PreviewError>;
+    readonly resolveUrl: (input: PreviewResolveUrlInput) => Effect.Effect<string, PreviewError>;
     readonly navigate: (
       input: PreviewNavigateInput,
     ) => Effect.Effect<PreviewSessionSnapshot, PreviewError>;
@@ -140,6 +144,24 @@ const currentIsoTimestamp = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* PreviewManagerMake() {
   const crypto = yield* Crypto.Crypto;
+  const remotePreview = Option.getOrUndefined(
+    yield* Effect.serviceOption(CodespacesPreview.CodespacesPreview),
+  );
+  const projectUrl = (threadId: PreviewOpenInput["threadId"], url: string) =>
+    remotePreview
+      ? remotePreview.resolve(threadId, url).pipe(
+          Effect.mapError(
+            (cause) =>
+              new PreviewInvalidUrlError({
+                inputLength: url.length,
+                reason: "unexpected",
+                cause,
+              }),
+          ),
+        )
+      : Effect.succeed(url);
+  const resolveUrl: PreviewManager["Service"]["resolveUrl"] = (input) =>
+    normalizeUrl(input.url).pipe(Effect.flatMap((url) => projectUrl(input.threadId, url)));
   const serverEpoch = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
   const stateRef = yield* SynchronizedRef.make<ManagerState>(initialState);
   // Unbounded PubSub is fine here — events are tiny and we don't want to
@@ -214,7 +236,11 @@ export const make = Effect.gen(function* PreviewManagerMake() {
         threadId: input.threadId,
         tabId,
         navStatus: input.url
-          ? { _tag: "Loading", url: yield* normalizeUrl(input.url), title: "" }
+          ? {
+              _tag: "Loading",
+              url: yield* resolveUrl({ threadId: input.threadId, url: input.url }),
+              title: "",
+            }
           : { _tag: "Idle" },
         canGoBack: false,
         canGoForward: false,
@@ -255,7 +281,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
 
   const navigate: PreviewManager["Service"]["navigate"] = Effect.fn("PreviewManager.navigate")(
     function* (input) {
-      const url = yield* normalizeUrl(input.url);
+      const url = yield* resolveUrl(input);
       return yield* mutateExistingSession(
         input.threadId,
         input.tabId,
@@ -503,6 +529,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     open,
     requestReveal,
     navigate,
+    resolveUrl,
     reportStatus,
     resize,
     adjust,

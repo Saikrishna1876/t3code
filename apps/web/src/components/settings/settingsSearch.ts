@@ -815,6 +815,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["commands scripts setup run dev server checkout worktree t3.json import"],
   },
   {
+    id: "project-codespaces",
+    title: "GitHub Codespaces",
+    to: "/settings/projects",
+    searchTerms: [
+      "cloud workspace create connect start stop rebuild delete machine repository github",
+    ],
+  },
+  {
     id: "environment-icon",
     title: "Environment icon",
     to: "/settings/connections",

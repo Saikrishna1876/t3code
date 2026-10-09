@@ -182,6 +182,50 @@ running is left alone.
 For Antigravity's Google callback on a remote host, see
 [remote sign-in](./providers-antigravity.md#sign-in-from-a-remote-device).
 
+## GitHub Codespaces in this fork
+
+Open your project's settings or its composer and choose Codespaces. The
+project must have a GitHub origin and a `.devcontainer/devcontainer.json`
+configuration, or a configuration below `.devcontainer/`. Push the selected
+configuration to the branch before creating a Codespace. Containers need
+Node.js and SSH, usually supplied by the Node and `sshd` devcontainer features.
+
+Your connected T3 host keeps the project, thread history, agent and provider
+login. It must remain online with GitHub CLI signed in:
+
+```sh
+gh auth refresh -h github.com -s repo,read:org,gist,workflow,codespace
+```
+
+Use an existing Codespace for this repository and branch when available.
+Resume a stopped one to avoid creating a fresh container. Creating a new one
+lets you choose its machine and pushed container configuration. T3 shows
+creation and connection progress while you keep browsing your local threads.
+GitHub controls container startup time. Prebuilds and smaller container setup
+commands can reduce it.
+
+Remote execution currently requires local Codex 0.160.1 or later and uses
+the project's main checkout. No provider sign-in is required inside the
+Codespace. Agent commands, file browsing, terminals, Git and checkpoints
+operate on its filesystem. Loopback preview URLs are forwarded privately
+through the T3 host. Other providers and additional worktrees are not yet
+supported for this execution target.
+
+Stop compute when finished. Finish or stop active turns before stopping or
+switching targets. Resume reconnects the same Codespace and files. Work locally
+returns the project to its local checkout; it does not copy remote edits back.
+Commit and push remote changes before switching if you need them locally.
+Checkpoint refs belong to the checkout where they were captured.
+
+GitHub may charge for compute and retained storage. Deleting a Codespace
+permanently removes unpushed remote files. Local thread history remains.
+Creation defaults to a 30-minute idle timeout and one-day retention.
+
+Web, desktop and mobile control the same local T3 environment through its
+normal connection. No extra Codespace environment pairing, public workspace
+proxy or maintainer-owned relay is required. Optional agent management must
+be explicitly enabled and is limited to full-access callers.
+
 ## Browser on a remote environment
 
 Browser tabs belong to the environment, so you and your agents see the same

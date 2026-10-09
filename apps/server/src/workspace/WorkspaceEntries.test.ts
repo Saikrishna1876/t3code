@@ -1,3 +1,5 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
+import { CodespacesError } from "@t3tools/contracts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from "node:fs/promises";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -832,4 +834,42 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceEntries", (it) => {
       }),
     );
   });
+});
+
+it.effect("keeps absolute folder browsing local for a Codespace-bound project", () => {
+  const calls: string[] = [];
+  const remote = Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+    lookup: () =>
+      Effect.succeed({
+        projectId: "project-test",
+        localRoot: "/bound-project",
+        name: "test-space",
+        executor: null,
+        remoteCwd: null,
+      }),
+    call: (_cwd, group, method) =>
+      Effect.sync(() => {
+        calls.push(group + "." + method);
+        return undefined;
+      }).pipe(
+        Effect.andThen(
+          Effect.fail(
+            new CodespacesError({ code: "conflict", message: "Remote workspace offline." }),
+          ),
+        ),
+      ),
+  });
+  return Effect.gen(function* () {
+    const folder = yield* makeTempDir();
+    yield* writeTextFile(folder, "local-file.txt");
+    const entries = yield* WorkspaceEntries.WorkspaceEntries;
+    const local = yield* entries.browse({ cwd: "/bound-project", partialPath: folder + "/" });
+    expect(local.entries.some((entry) => entry.name === "local-file.txt")).toBe(true);
+    expect(calls).toEqual([]);
+    const relative = yield* entries
+      .browse({ cwd: "/bound-project", partialPath: "./" })
+      .pipe(Effect.result);
+    expect(relative._tag).toBe("Failure");
+    expect(calls).toEqual(["entries.browse"]);
+  }).pipe(Effect.provide(layerTest.pipe(Layer.provide(remote))));
 });

@@ -47,6 +47,15 @@ Keep desktop usable on the user's Intel Mac running unsupported macOS 15. User r
 - Verification: focused clipboard tests and desktop typecheck in the Codespace and Mac runner; archive integrity, packaged runtime, and embedded update repository in the workflow. Runtime graphics and clipboard acceptance on the target Mac stay separate.
 - Retirement: the user replaces the cloud release process or no longer needs the Intel compatibility fork.
 
+## P004: Project Codespaces with local agents
+
+- Status: active implementation. Revised disposable Codespace acceptance verified local Codex execution, terminal/file/preview work, stop/resume, preserved local history, and deletion. Native mobile acceptance remains pending.
+- Required behavior: create or reuse Codespaces from existing projects with pushed `.devcontainer` configurations. Project, thread history, provider inference and credentials stay on the local T3 environment. Remote file, terminal, Git, checkpoint and preview work uses GitHub SSH. Never require provider sign-in remotely or upstream `infra/relay`.
+- Preserve durable project bindings and operation idempotency. Disconnected bound targets fail instead of executing locally. Normal lifecycle changes refuse active or waiting turns. Deletion removes bindings and remote compute while keeping local history. Agent management requires explicit opt-in and full-access callers.
+- Implementation boundary: a bundled workspace worker and pinned Codex exec-server run remotely. Local Codex registers the private executor using native environment APIs. Other providers and additional worktrees are explicitly unsupported initially. Credential files are never copied remotely. SSH forwards belong to the controller connection and close with it.
+- Verification: focused Codespaces worker, binding, controller, SSH host, native execution routing and MCP tests; scoped contracts, client-runtime, server, web and mobile checks; isolated client verification followed by a separately authorized disposable cloud test. Record cloud cleanup and native mobile acceptance separately.
+- Retirement: upstream provides equivalent project-scoped execution with existing local credentials and no maintainer-owned infrastructure dependency.
+
 ## Validation policy
 
 Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use requires the authorization described there. Keep runtime state away from the live install. Record manual graphics and clipboard checks as pending when unavailable.

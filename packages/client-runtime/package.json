@@ -390,6 +390,14 @@
     "./state/mcp-apps": {
       "types": "./src/state/mcpApps.ts",
       "default": "./src/state/mcpApps.ts"
+    },
+    "./state/codespaces": {
+      "types": "./src/state/codespaces.ts",
+      "default": "./src/state/codespaces.ts"
+    },
+    "./codespaces-presentation": {
+      "types": "./src/codespacesPresentation.ts",
+      "default": "./src/codespacesPresentation.ts"
     }
   },
   "scripts": {

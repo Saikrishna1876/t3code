@@ -243,6 +243,12 @@ export const PreviewOpenInput = Schema.Struct({
 });
 export type PreviewOpenInput = typeof PreviewOpenInput.Type;
 
+export const PreviewResolveUrlInput = Schema.Struct({
+  threadId: ThreadId,
+  url: Url,
+});
+export type PreviewResolveUrlInput = typeof PreviewResolveUrlInput.Type;
+
 export const PreviewNavigateInput = Schema.Struct({
   threadId: ThreadId,
   tabId: PreviewTabId,

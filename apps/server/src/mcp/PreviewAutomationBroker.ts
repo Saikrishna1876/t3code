@@ -4,6 +4,7 @@ import {
   PreviewAutomationControlInterruptedError,
   PreviewAutomationControlReason,
   PreviewAutomationExecutionError,
+  PreviewAutomationConnectionId,
   SERVER_BROWSER_AUTOMATION_CLIENT_ID,
   PreviewAutomationInvalidSelectorError,
   PreviewAutomationMalformedResponseError,
@@ -27,6 +28,7 @@ import {
   type PreviewAutomationResponse,
   type PreviewAutomationStreamEvent,
 } from "@t3tools/contracts";
+import * as CodespacesPreview from "../codespaces/CodespacesPreview.ts";
 import * as Context from "effect/Context";
 import type * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
@@ -348,6 +350,9 @@ const classifyResponseError = (
 
 export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
   const crypto = yield* Crypto.Crypto;
+  const remotePreview = Option.getOrUndefined(
+    yield* Effect.serviceOption(CodespacesPreview.CodespacesPreview),
+  );
   const state = yield* SynchronizedRef.make<BrokerState>({
     clients: new Map(),
     assignments: new Map(),
@@ -506,6 +511,34 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
   const invoke = Effect.fn("PreviewAutomationBroker.invoke")(function* <A = unknown>(
     input: Parameters<PreviewAutomationBroker["Service"]["invoke"]>[0],
   ): Effect.fn.Return<A, PreviewAutomationError> {
+    if (
+      remotePreview &&
+      ["open", "navigate"].includes(input.operation) &&
+      typeof input.input === "object" &&
+      input.input !== null &&
+      "url" in input.input &&
+      typeof input.input.url === "string"
+    ) {
+      const url = yield* remotePreview.resolve(input.scope.thread.threadId, input.input.url).pipe(
+        Effect.mapError(
+          (cause) =>
+            new PreviewAutomationExecutionError({
+              operation: input.operation,
+              environmentId: input.scope.environmentId,
+              ...input.scope.thread,
+              clientId: SERVER_BROWSER_AUTOMATION_CLIENT_ID,
+              connectionId: PreviewAutomationConnectionId.make("codespaces-preview"),
+              requestId: "codespaces-preview",
+              timeoutMs: input.timeoutMs ?? 60000,
+              cause,
+              remoteTag: cause._tag,
+              remoteMessageLength: cause.message.length,
+              reason: cause.message,
+            }),
+        ),
+      );
+      input = { ...input, input: { ...input.input, url } };
+    }
     const deferred = yield* Deferred.make<unknown, PreviewAutomationError>();
     const route = yield* SynchronizedRef.modify(state, (current) => {
       const assignments = new Map(

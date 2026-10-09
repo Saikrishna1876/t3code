@@ -1,4 +1,9 @@
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
+import * as CodespacesPreview from "./codespaces/CodespacesPreview.ts";
+import * as CodespacesWorkspace from "./codespaces/CodespacesWorkspace.ts";
+import * as Codespaces from "./codespaces/Codespaces.ts";
+import * as CodespacesHost from "./codespaces/CodespacesHost.ts";
+import * as GitHubCredentials from "./sourceControl/GitHubCredentials.ts";
 import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
 import * as Clock from "effect/Clock";
 import * as Random from "effect/Random";
@@ -422,7 +427,16 @@ const layerTerminal = TerminalManager.layer.pipe(
 );
 
 const layerPreview = Layer.empty.pipe(
-  Layer.provideMerge(PreviewManager.layer),
+  Layer.provideMerge(
+    PreviewManager.layer.pipe(
+      Layer.provide(
+        CodespacesPreview.layer.pipe(
+          Layer.provide(ProjectionStoreV2.layer),
+          Layer.provide(ProjectStore.layer),
+        ),
+      ),
+    ),
+  ),
   Layer.provideMerge(layerPortScanner),
 );
 
@@ -675,7 +689,17 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   ),
 );
 
+const layerCodespaces = Codespaces.layer.pipe(
+  Layer.provide(layerTerminal),
+  Layer.provide(ProjectStore.layer),
+  Layer.provide(ProjectionStoreV2.layer),
+  Layer.provide(CodespacesHost.layer),
+  Layer.provideMerge(GitHubApi.layerWithDependencies),
+  Layer.provide(layerServerSettings),
+  Layer.provide(ServerSecretStore.layer),
+);
 const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
+  Layer.provideMerge(layerCodespaces),
   // Misc.
   Layer.provideMerge(layerBackground),
   Layer.provideMerge(layerResourceDiagnostics),
@@ -735,7 +759,16 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(ServerBrowser.layer.pipe(Layer.provide(DesktopBrowserChannel.layer))),
   // Server browser tabs and HTML render previews install and run the same headless browser.
   Layer.provide(PreviewBrowser.layer),
-  Layer.provide(PreviewAutomationBroker.layer),
+  Layer.provide(
+    PreviewAutomationBroker.layer.pipe(
+      Layer.provide(
+        CodespacesPreview.layer.pipe(
+          Layer.provide(ProjectionStoreV2.layer),
+          Layer.provide(ProjectStore.layer),
+        ),
+      ),
+    ),
+  ),
   Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(layerDesktopAppUpdate))),
   Layer.provide(layerCommandReadiness),
   Layer.provide(ServerHttp.layerBrowserApiCors),
@@ -1112,7 +1145,14 @@ const layerMakeServer = Layer.unwrap(
       Layer.provide(layerApplicationObservability),
       Layer.provideMerge(FetchHttpClient.layer),
       // PR reads, Git operations, and WebSocket discovery share one process limiter.
+      Layer.provide(GitHubCredentials.layer.pipe(Layer.provide(layerServerSettings))),
       Layer.provide(VcsProcess.layer),
+      Layer.provide(
+        CodespacesWorkspace.layer.pipe(
+          Layer.provide(ServerSecretStore.layer),
+          Layer.provide(FetchHttpClient.layer),
+        ),
+      ),
       Layer.provideMerge(layerPlatformServices),
     );
   }),

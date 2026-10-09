@@ -1,3 +1,4 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
@@ -79,13 +80,17 @@ export type ProviderSessionReleaseReason = typeof ProviderSessionReleaseReason.T
 export class ProviderSessionOpenError extends Schema.TaggedError<ProviderSessionOpenError>()(
   "ProviderSessionOpenError",
   {
+    reason: Schema.optional(Schema.String),
     instanceId: ProviderInstanceId,
     providerSessionId: ProviderSessionId,
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
-    return `Failed to open provider instance ${this.instanceId} session ${this.providerSessionId}.`;
+    return (
+      this.reason ??
+      `Failed to open provider instance ${this.instanceId} session ${this.providerSessionId}.`
+    );
   }
 }
 
@@ -341,6 +346,9 @@ export const layerWithOptions = (
     ProviderSessionManagerV2,
     Effect.gen(function* () {
       const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
+      const workspaceService = Option.getOrUndefined(
+        yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+      );
       const fileSystem = yield* FileSystem.FileSystem;
       const mcpSessionRegistry = yield* McpSessionRegistry.McpSessionRegistry;
       const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
@@ -491,6 +499,23 @@ export const layerWithOptions = (
                 const capabilities = new Set<
                   import("../mcp/McpInvocationContext.ts").McpCapability
                 >(["orchestration", "worktree", "pull-requests"]);
+                if (workspaceService && Option.isSome(projectService)) {
+                  const remoteBound = yield* projectionStore.getThreadShell(threadId).pipe(
+                    Effect.flatMap((thread) =>
+                      thread
+                        ? projectService.value.getById(thread.projectId)
+                        : Effect.succeed(Option.none()),
+                    ),
+                    Effect.flatMap((project) =>
+                      Option.isSome(project)
+                        ? workspaceService.lookup(project.value.workspaceRoot)
+                        : Effect.succeed(null),
+                    ),
+                    Effect.map((target) => target !== null),
+                    Effect.orElseSucceed(() => true),
+                  );
+                  if (remoteBound) capabilities.delete("worktree");
+                }
                 if (browserToolsAvailable) capabilities.add("preview");
                 if (deviceToolsAvailable) capabilities.add("device");
                 const existing = yield* mcpSessions.read(threadId);
@@ -517,7 +542,8 @@ export const layerWithOptions = (
                     // A flipped browser-access setting must not survive through
                     // credential reuse: rotate so the new scope reflects it.
                     resolved.capabilities.has("preview") === browserToolsAvailable &&
-                    resolved.capabilities.has("device") === deviceToolsAvailable
+                    resolved.capabilities.has("device") === deviceToolsAvailable &&
+                    resolved.capabilities.has("worktree") === capabilities.has("worktree")
                   ) {
                     return { mcpCredentialId: existing.providerSessionId, issued: false };
                   }
@@ -2033,6 +2059,30 @@ export const layerWithOptions = (
                     cwd,
                   });
                 }
+              }
+              const target = cwd && workspaceService ? yield* workspaceService.lookup(cwd) : null;
+              if (target) {
+                const selected = yield* registry.get(input.modelSelection.instanceId).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ProviderSessionOpenError({
+                        instanceId: input.modelSelection.instanceId,
+                        providerSessionId: input.providerSessionId,
+                        cause,
+                      }),
+                  ),
+                );
+                if (selected.driver !== "codex" || !target.executor || cwd !== target.localRoot)
+                  return yield* new ProviderSessionOpenError({
+                    instanceId: input.modelSelection.instanceId,
+                    providerSessionId: input.providerSessionId,
+                    reason:
+                      selected.driver !== "codex"
+                        ? "Codespaces currently require Codex 0.160.1 or later. Provider login stays local."
+                        : !target.executor
+                          ? "Resume the project's Codespace before starting work."
+                          : "Codespaces currently use the project root. Select the main checkout.",
+                  });
               }
               const key = sessionKey(input.providerSessionId);
               const existing = (yield* Ref.get(sessions)).get(key);
