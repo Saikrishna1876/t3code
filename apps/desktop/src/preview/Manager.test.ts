@@ -620,7 +620,8 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         const preview = makeFaviconWebContents();
         const sendInputEvent = vi.fn();
-        const hostWebContents = { sendInputEvent, isDestroyed: () => false };
+        const send = vi.fn();
+        const hostWebContents = { sendInputEvent, send, isDestroyed: () => false };
         Object.assign(preview.webContents, { hostWebContents });
         fromId.mockReturnValue(preview.webContents);
         getFocusedWebContents.mockReturnValue(preview.webContents as never);
@@ -668,7 +669,8 @@ describe("PreviewManager", () => {
         );
         yield* Effect.yieldNow;
         expect(preventDefault).toHaveBeenCalledOnce();
-        expect(preview.reload).toHaveBeenCalledOnce();
+        expect(preview.reload).not.toHaveBeenCalled();
+        expect(send).toHaveBeenCalledWith("desktop:menu-action", "preview.refresh");
         expect(sendInputEvent).not.toHaveBeenCalled();
       }),
     ),

@@ -1561,6 +1561,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       }
       if (isPreviewRefreshShortcut(input)) {
         event.preventDefault();
+        if (host && !host.isDestroyed() && webContents.getFocusedWebContents() === wc) {
+          if (!input.isAutoRepeat) host.send(MENU_ACTION_CHANNEL, "preview.refresh");
+          return;
+        }
         runFork(
           attempt({ operation: "shortcut.refresh", tabId, webContentsId: wc.id }, () =>
             wc.reload(),

@@ -1,4 +1,6 @@
 import {
+  AuthAccessWriteScope,
+  AuthStandardClientScopes,
   AuthEnvironmentMaintainScope,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
@@ -6,6 +8,7 @@ import {
   AuthSettingsWriteScope,
   DEFAULT_SERVER_SETTINGS,
   ProviderInstanceId,
+  ProjectId,
   ThreadId,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
@@ -22,6 +25,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as RpcTest from "effect/rpc/RpcTest";
+import * as Stream from "effect/Stream";
 
 import {
   RPC_REQUIRED_SCOPES,
@@ -31,6 +35,23 @@ import {
 import * as RpcAuthorization from "./RpcAuthorization.ts";
 
 describe("RPC authorization scopes", () => {
+  it("lets standard task clients observe bindings while keeping account management protected", () => {
+    for (const method of [WS_METHODS.codespacesProject, WS_METHODS.codespacesSubscribe]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+      expect(AuthStandardClientScopes).toContain(requiredScopeForRpcMethod(method));
+    }
+    for (const method of [
+      WS_METHODS.codespacesBind,
+      WS_METHODS.codespacesList,
+      WS_METHODS.codespacesOptions,
+      WS_METHODS.codespacesConfigure,
+      WS_METHODS.codespacesRun,
+      WS_METHODS.codespacesPair,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthAccessWriteScope);
+      expect(AuthStandardClientScopes).not.toContain(requiredScopeForRpcMethod(method));
+    }
+  });
   it("declares exactly one scope for every RPC in the server group", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
   });
@@ -194,6 +215,76 @@ describe("RPC authorization scopes", () => {
     }
   });
 });
+
+it.effect("standard paired clients read bound status and changes but cannot change targets", () =>
+  Effect.gen(function* () {
+    const tested = [
+      WS_METHODS.codespacesProject,
+      WS_METHODS.codespacesSubscribe,
+      WS_METHODS.codespacesBind,
+      WS_METHODS.codespacesRun,
+    ] as const;
+    const group = WsRpcGroup.omit(
+      ...[...WsRpcGroup.requests.keys()].filter(
+        (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, (typeof tested)[number]> =>
+          !(tested as ReadonlyArray<string>).includes(tag),
+      ),
+    );
+    const projectId = ProjectId.make("project");
+    const project = {
+      projectId,
+      eligible: true,
+      reason: "",
+      repository: "example/project",
+      ref: "main",
+      devcontainerPaths: [".devcontainer/devcontainer.json"],
+      name: "space",
+      connected: true,
+    };
+    const snapshot = {
+      bindingRevision: 1,
+      configuration: {
+        releaseBaseUrl: "",
+        archiveVersion: "",
+        remoteScriptPath: "",
+        publicUrlTemplate: "",
+        networkAccess: false,
+        agentAccessEnabled: false,
+      },
+      operations: [],
+      environments: [],
+    };
+    let mutations = 0;
+    const mutation = Effect.sync(() => mutations++).pipe(Effect.andThen(Effect.never));
+    const client = yield* RpcTest.makeClient(group).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          group.toLayerHandler(WS_METHODS.codespacesProject, () => Effect.succeed(project)),
+          group.toLayerHandler(WS_METHODS.codespacesSubscribe, () => Stream.make(snapshot)),
+          group.toLayerHandler(WS_METHODS.codespacesBind, () => mutation),
+          group.toLayerHandler(WS_METHODS.codespacesRun, () => mutation),
+          RpcAuthorization.layer(AuthStandardClientScopes),
+        ),
+      ),
+    );
+    expect(yield* client[WS_METHODS.codespacesProject]({ projectId })).toEqual(project);
+    expect(yield* client[WS_METHODS.codespacesSubscribe]().pipe(Stream.runCollect)).toEqual([
+      snapshot,
+    ]);
+    expect(
+      yield* client[WS_METHODS.codespacesBind]({ projectId, name: null }).pipe(Effect.flip),
+    ).toMatchObject({ requiredPermission: AuthAccessWriteScope });
+    expect(
+      yield* client[WS_METHODS.codespacesRun]({
+        action: "stop",
+        projectId,
+        name: "space",
+        clientRequestId: "stop-test",
+      }).pipe(Effect.flip),
+    ).toMatchObject({ requiredPermission: AuthAccessWriteScope });
+    expect(mutations).toBe(0);
+  }).pipe(Effect.scoped),
+);
 
 it("requires operate permission for host retry while preserving read-only listing", () => {
   expect(requiredScopeForDeviceList({})).toBe(AuthOrchestrationReadScope);

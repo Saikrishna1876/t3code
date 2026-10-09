@@ -136,7 +136,7 @@ const rememberSnapshotUrl = (
 ): string[] =>
   snapshot.navStatus._tag === "Idle"
     ? recentlySeenUrls
-    : dedupeRecentUrls(recentlySeenUrls, snapshot.navStatus.url);
+    : dedupeRecentUrls(recentlySeenUrls, snapshot.sourceUrl ?? snapshot.navStatus.url);
 
 const latestSnapshot = (
   sessions: Record<string, PreviewSessionSnapshot>,
@@ -190,7 +190,10 @@ export function applyPreviewServerEvent(ref: ScopedThreadRef, event: PreviewEven
           const recentlySeenUrls =
             snapshot.navStatus._tag === "Idle"
               ? current.recentlySeenUrls
-              : dedupeRecentUrls(current.recentlySeenUrls, snapshot.navStatus.url);
+              : dedupeRecentUrls(
+                  current.recentlySeenUrls,
+                  snapshot.sourceUrl ?? snapshot.navStatus.url,
+                );
           const sessions = { ...current.sessions, [snapshot.tabId]: snapshot };
           const activeTabId = event.type === "opened" ? snapshot.tabId : current.activeTabId;
           const activeSnapshot = sessions[activeTabId ?? snapshot.tabId] ?? snapshot;
@@ -431,7 +434,7 @@ export function cancelPreviewSessionClose(
     }
     const recentlySeenUrls =
       snapshot.navStatus._tag !== "Idle"
-        ? dedupeRecentUrls(current.recentlySeenUrls, snapshot.navStatus.url)
+        ? dedupeRecentUrls(current.recentlySeenUrls, snapshot.sourceUrl ?? snapshot.navStatus.url)
         : current.recentlySeenUrls;
     return {
       ...current,

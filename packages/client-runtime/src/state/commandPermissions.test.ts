@@ -7,7 +7,9 @@ import type { RpcSession } from "../rpc/session.ts";
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
+  AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
+  AuthPreviewOperateScope,
   AuthSourceControlWriteScope,
   ThreadId,
   EnvironmentId,
@@ -58,6 +60,61 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect("preview URL resolution checks the destination preview grant", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const permissions = createCommandPermissions(runtime, WS_METHODS.previewResolveUrl);
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(permissions.permissionAtom(env))).toBe(false);
+        expect(
+          (yield* permissions.authorize(registry, env).pipe(Effect.flip)).requiredPermission,
+        ).toBe(AuthPreviewOperateScope);
+        registry.set(
+          sessions(other),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthPreviewOperateScope],
+            permissions: [AuthPreviewOperateScope],
+          }),
+        );
+        expect(registry.get(permissions.permissionAtom(other))).toBe(true);
+        yield* permissions.authorize(registry, other);
+        expect(registry.get(permissions.permissionAtom(env))).toBe(false);
+      }),
+    ),
+  );
+  it.effect.each([
+    WS_METHODS.codespacesBind,
+    WS_METHODS.codespacesOptions,
+    WS_METHODS.codespacesConfigure,
+    WS_METHODS.codespacesRun,
+    WS_METHODS.codespacesPair,
+  ])("%s requires access.write on the destination environment", (tag) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const permissions = createCommandPermissions(runtime, tag);
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(permissions.permissionAtom(env))).toBe(false);
+        expect((yield* permissions.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+          "EnvironmentAuthorizationError",
+        );
+        registry.set(
+          sessions(other),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthAccessWriteScope],
+            permissions: [AuthAccessWriteScope],
+          }),
+        );
+        expect(registry.get(permissions.permissionAtom(other))).toBe(true);
+        yield* permissions.authorize(registry, other);
+        expect(registry.get(permissions.permissionAtom(env))).toBe(false);
+      }),
+    ),
+  );
+
   it.effect("uses the target grant for both availability and execution", () =>
     Effect.scoped(
       Effect.gen(function* () {

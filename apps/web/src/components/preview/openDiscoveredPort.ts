@@ -18,7 +18,7 @@ export async function openDiscoveredPort<E>(input: {
 }): Promise<AtomCommandResult<void, E | BrowserSettingsReadError>> {
   // A server tab runs on the environment, where loopback is already right.
   const resolvedUrl =
-    previewRuntimeFor(input.threadRef.environmentId) === "server"
+    previewRuntimeFor(input.threadRef.environmentId, input.port.url) === "server"
       ? input.port.url
       : resolveDiscoveredServerUrl(input.threadRef.environmentId, input.port.url);
   const result = await openPreviewSession({

@@ -1,3 +1,5 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
+import { CodespacesError } from "@t3tools/contracts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from "node:fs/promises";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -693,7 +695,7 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceEntries", (it) => {
     it.effect("preserves invalid regex errors during case-insensitive searches", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTempDir({ prefix: "t3code-workspace-content-invalid-regex-" });
-        yield* writeTextFile(cwd, "src/shapes.ts", "foobar\n");
+        yield* writeTextFile(cwd, "src/shapes.ts", "foobar\nfoo)bar(\n");
 
         const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
         const result = yield* workspaceEntries.searchContents({
@@ -706,7 +708,9 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceEntries", (it) => {
         });
 
         expect(result.regexFallbackError).toBeDefined();
-        expect(result.matches).toEqual([]);
+        expect(result.matches).toMatchObject([
+          { lineNumber: 2, matchRanges: [{ start: 0, end: 8 }] },
+        ]);
       }),
     );
 
@@ -832,4 +836,42 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceEntries", (it) => {
       }),
     );
   });
+});
+
+it.effect("keeps absolute folder browsing local for a Codespace-bound project", () => {
+  const calls: string[] = [];
+  const remote = Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+    lookup: () =>
+      Effect.succeed({
+        projectId: "project-test",
+        localRoot: "/bound-project",
+        name: "test-space",
+        executor: null,
+        remoteCwd: null,
+      }),
+    call: (_cwd, group, method) =>
+      Effect.sync(() => {
+        calls.push(group + "." + method);
+        return undefined;
+      }).pipe(
+        Effect.andThen(
+          Effect.fail(
+            new CodespacesError({ code: "conflict", message: "Remote workspace offline." }),
+          ),
+        ),
+      ),
+  });
+  return Effect.gen(function* () {
+    const folder = yield* makeTempDir();
+    yield* writeTextFile(folder, "local-folder/file.txt");
+    const entries = yield* WorkspaceEntries.WorkspaceEntries;
+    const local = yield* entries.browse({ cwd: "/bound-project", partialPath: folder + "/" });
+    expect(local.entries.some((entry) => entry.name === "local-folder")).toBe(true);
+    expect(calls).toEqual([]);
+    const relative = yield* entries
+      .browse({ cwd: "/bound-project", partialPath: "./" })
+      .pipe(Effect.result);
+    expect(relative._tag).toBe("Failure");
+    expect(calls).toEqual(["entries.browse"]);
+  }).pipe(Effect.provide(layerTest.pipe(Layer.provide(remote))));
 });

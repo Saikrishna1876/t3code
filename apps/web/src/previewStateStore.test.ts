@@ -61,6 +61,42 @@ beforeEach(() => {
 });
 
 describe("previewStateStore (single-tab)", () => {
+  it("retains application URLs through snapshot events, refreshes and tab closure", () => {
+    const snapshot = makeSnapshot({
+      sourceUrl: "http://localhost:3000/app",
+      navStatus: {
+        _tag: "Loading",
+        url: "http://127.0.0.1:60000/app",
+        title: "",
+      },
+    });
+    applyPreviewServerSnapshot(ref, snapshot);
+    applyPreviewServerEvent(ref, {
+      type: "navigated",
+      threadId: snapshot.threadId,
+      tabId: snapshot.tabId,
+      createdAt: snapshot.updatedAt,
+      snapshot: {
+        ...snapshot,
+        sourceUrl: "http://localhost:3000/login",
+        navStatus: {
+          _tag: "Success",
+          url: "http://127.0.0.1:60000/login",
+          title: "Login",
+        },
+      },
+    });
+    applyPreviewServerEvent(ref, {
+      type: "closed",
+      threadId: snapshot.threadId,
+      tabId: snapshot.tabId,
+      createdAt: snapshot.updatedAt,
+    });
+    expect(readThreadPreviewState(ref).recentlySeenUrls).toEqual([
+      "http://localhost:3000/login",
+      "http://localhost:3000/app",
+    ]);
+  });
   it("keeps independent state atoms for each thread", () => {
     expect(previewStateAtom(scopedThreadKey(ref))).toBe(previewStateAtom(scopedThreadKey(ref)));
     expect(previewStateAtom(scopedThreadKey(ref))).not.toBe(

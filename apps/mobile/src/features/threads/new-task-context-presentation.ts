@@ -2,6 +2,27 @@ import { sanitizeNewRefName } from "@t3tools/shared/git";
 
 type WorkspaceMode = "local" | "worktree";
 
+/** Bound Codespaces and projectless tasks always use their main checkout. */
+export function resolveNewTaskWorkspaceSelection(input: {
+  readonly canChooseWorkspace: boolean;
+  readonly defaultMode: WorkspaceMode;
+  readonly selection?: {
+    readonly mode: WorkspaceMode;
+    readonly branch?: string | null;
+    readonly worktreePath?: string | null;
+    readonly startFromOrigin?: boolean;
+  };
+}) {
+  if (!input.canChooseWorkspace)
+    return { mode: "local" as const, branch: null, worktreePath: null, startFromOrigin: false };
+  return {
+    mode: input.selection?.mode ?? input.defaultMode,
+    branch: input.selection?.branch ?? null,
+    worktreePath: input.selection?.worktreePath ?? null,
+    startFromOrigin: input.selection?.startFromOrigin,
+  };
+}
+
 export function resolveNewTaskWorkspaceLabel(input: {
   readonly workspaceMode: WorkspaceMode;
   readonly worktreePath: string | null;

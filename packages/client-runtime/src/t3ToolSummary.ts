@@ -329,6 +329,15 @@ export function summarizeT3ToolCalls(
     case "environment-update":
       label = phrase("Updated", "update", `environment preferences ${times}`);
       break;
+    case "codespaces-list":
+      label = phrase("Listed", "list", `Codespaces ${times}`);
+      break;
+    case "codespaces-status":
+      label = phrase("Checked", "check", `Codespaces operations ${times}`);
+      break;
+    case "codespaces-run":
+      label = phrase("Requested", "request", quantity(selected.length, "Codespace operation"));
+      break;
     case "attachment-prepare":
       label = phrase(
         "Prepared",

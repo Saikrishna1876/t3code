@@ -1,3 +1,5 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
+import * as Option from "effect/Option";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from "node:fs/promises";
 
@@ -355,7 +357,21 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  return WorkspaceEntries.of({ browse, list, refresh, search, searchContents });
+  const remote = Option.getOrUndefined(
+    yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+  );
+  const routed = CodespacesWorkspace.routeWorkspaceMethods(
+    { browse, list, refresh, search, searchContents },
+    remote,
+    "entries",
+    (cause, _method, cwd) =>
+      new WorkspaceEntriesReadDirectoryError({ cwd, partialPath: "", parentPath: cwd, cause }),
+  );
+  return WorkspaceEntries.of({
+    ...routed,
+    browse: (input) =>
+      isExplicitRelativePath(input.partialPath) ? routed.browse(input) : browse(input),
+  });
 });
 
 export const layer = Layer.effect(WorkspaceEntries, make).pipe(

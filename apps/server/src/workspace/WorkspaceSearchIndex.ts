@@ -507,7 +507,7 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
 
     do {
       const remainingTimeBudgetMs = Math.max(1, Math.ceil(deadline - performance.now()));
-      const result = yield* runSearch(input.query, input.limit, "grep", () =>
+      let result = yield* runSearch(input.query, input.limit, "grep", () =>
         finder.grep(searchQuery, {
           mode: regexMode ? "regex" : "plain",
           smartCase: !input.caseSensitive && !regexMode,
@@ -519,6 +519,20 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
         }),
       );
 
+      regexFallbackError ??= result.regexFallbackError;
+      if (regexMode && !input.caseSensitive && result.regexFallbackError !== undefined) {
+        // The engine's literal fallback includes our inline case flag. Search the user's text instead.
+        result = yield* runSearch(input.query, input.limit, "grep", () =>
+          finder.grep(input.query.toLowerCase(), {
+            mode: "plain",
+            smartCase: true,
+            maxMatchesPerFile: Math.min(CONTENT_SEARCH_MAX_MATCHES_PER_FILE, rawPageSize),
+            pageSize: rawPageSize,
+            cursor: nextCursor,
+            timeBudgetMs: Math.max(1, Math.ceil(deadline - performance.now())),
+          }),
+        );
+      }
       for (const match of result.items) {
         const matchRanges = mapContentMatchRanges(match.lineContent, match.matchRanges).filter(
           (range) => !input.wholeWord || isWholeWordRange(match.lineContent, range),

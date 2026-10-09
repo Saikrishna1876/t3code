@@ -7,6 +7,15 @@ function completed(input: unknown, output?: unknown): T3ToolSummaryCall {
 }
 
 describe("summarizeT3ToolCalls", () => {
+  it("describes accepted Codespace operations as requests and retains failures", () => {
+    expect(
+      summarizeT3ToolCalls("codespaces-run", [
+        completed({ input: { action: "start" } }, { status: "running" }),
+        completed({}, { _tag: "CodespacesError", message: "Permission denied" }),
+      ]),
+    ).toEqual({ label: "Requested 1 Codespace operation", failedCount: 1 });
+  });
+
   it("counts registered projects, repository destinations, and accepted thread launches", () => {
     expect(
       summarizeT3ToolCalls("project-create", [

@@ -1,6 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, PreviewRuntime, PreviewSessionSnapshot } from "@t3tools/contracts";
 
+import { isLoopbackHost, normalizePreviewUrl } from "@t3tools/shared/preview";
+
 import { isElectron } from "~/env";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
@@ -16,9 +18,20 @@ import {
  * environment's tabs would stream, so the desktop opens them in its own
  * browser instead: no latency, and it reaches what this computer reaches. The
  * user can move a tab to the environment when only it can reach the page.
+ * Workspace loopback URLs always run on the environment that owns the port.
  */
-export function previewRuntimeFor(environmentId: EnvironmentId): PreviewRuntime | undefined {
+export function previewRuntimeFor(
+  environmentId: EnvironmentId,
+  url?: string,
+): PreviewRuntime | undefined {
   if (!readEnvironmentSupportsServerBrowser(environmentId)) return undefined;
+  if (url !== undefined) {
+    try {
+      if (isLoopbackHost(new URL(normalizePreviewUrl(url)).hostname)) return "server";
+    } catch {
+      // The preview open command reports invalid URLs through its existing error channel.
+    }
+  }
   if (
     isPreviewSupportedInRuntime() &&
     environmentId !== appAtomRegistry.get(primaryEnvironmentIdAtom)

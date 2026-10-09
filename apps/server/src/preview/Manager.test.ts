@@ -8,6 +8,7 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import { expect } from "vite-plus/test";
 
+import * as CodespacesPreview from "../codespaces/CodespacesPreview.ts";
 import * as ServerConfig from "../config.ts";
 import * as PreviewManager from "./Manager.ts";
 
@@ -534,5 +535,83 @@ it.layer(layer)("PreviewManager", (it) => {
       expect(aEvents.map((e) => e.type)).toEqual(["opened", "opened"]);
       expect(bEvents.map((e) => e.type)).toEqual(["opened", "opened"]);
     }),
+  );
+});
+
+it.effect("resolves a remote workspace URL before a client-owned browser navigates", () =>
+  Effect.gen(function* () {
+    const manager = yield* PreviewManager.PreviewManager;
+    const threadId = freshThreadId();
+    const tab = yield* manager.open({ threadId });
+    expect(yield* manager.resolveUrl({ threadId, url: "localhost:4173/page?x=1" })).toBe(
+      "http://127.0.0.1:60000/page?x=1",
+    );
+    // Resolution does not navigate or claim browser control.
+    expect((yield* manager.list({ threadId })).sessions[0]?.navStatus._tag).toBe("Idle");
+    expect(tab.tabId).toBeTruthy();
+    const opened = yield* manager.open({ threadId, url: "localhost:4173/page?x=1" });
+    expect(opened.navStatus).toMatchObject({ url: "http://127.0.0.1:60000/page?x=1" });
+    expect(opened.sourceUrl).toBe("http://localhost:4173/page?x=1");
+    const navigated = yield* manager.navigate({
+      threadId,
+      tabId: tab.tabId,
+      url: "localhost:4173/next",
+    });
+    expect(navigated.navStatus).toMatchObject({ url: "http://127.0.0.1:60000/next" });
+    yield* manager.reportStatus({
+      threadId,
+      tabId: tab.tabId,
+      navStatus: { _tag: "Success", url: "http://127.0.0.1:60000/login", title: "Login" },
+      canGoBack: true,
+      canGoForward: false,
+    });
+    expect(
+      (yield* manager.list({ threadId })).sessions.find((item) => item.tabId === tab.tabId)
+        ?.sourceUrl,
+    ).toBe("http://localhost:4173/login");
+  }).pipe(
+    Effect.provide(
+      layer.pipe(
+        Layer.provide(
+          Layer.mock(CodespacesPreview.CodespacesPreview)({
+            workspaceUrl: (_threadId, url) =>
+              Effect.succeed(url.replace("127.0.0.1:60000", "localhost:4173")),
+            resolve: (_threadId, url) =>
+              Effect.succeed(url.replace("localhost:4173", "127.0.0.1:60000")),
+          }),
+        ),
+      ),
+    ),
+  ),
+);
+
+it.effect("refresh resolves the application URL again after a Codespace reconnect", () => {
+  let port = 60000;
+  return Effect.gen(function* () {
+    const manager = yield* PreviewManager.PreviewManager;
+    const threadId = freshThreadId();
+    const opened = yield* manager.open({ threadId, url: "http://localhost:4173/page?x=1" });
+    const events = yield* manager.subscribeEvents;
+    port = 61000;
+    yield* manager.refresh({ threadId, tabId: opened.tabId });
+    const updated = (yield* manager.list({ threadId })).sessions[0]!;
+    expect(updated.navStatus).toMatchObject({ url: "http://127.0.0.1:61000/page?x=1" });
+    expect(updated.sourceUrl).toBe("http://localhost:4173/page?x=1");
+    expect((yield* PubSub.takeUpTo(events, DRAIN_LIMIT)).map((event) => event.type)).toEqual([
+      "navigated",
+    ]);
+  }).pipe(
+    Effect.provide(
+      layer.pipe(
+        Layer.provide(
+          Layer.mock(CodespacesPreview.CodespacesPreview)({
+            workspaceUrl: (_threadId, url) =>
+              Effect.succeed(url.replace(/127\.0\.0\.1:6\d{4}/, "localhost:4173")),
+            resolve: (_threadId, url) =>
+              Effect.succeed(url.replace("localhost:4173", `127.0.0.1:${port}`)),
+          }),
+        ),
+      ),
+    ),
   );
 });

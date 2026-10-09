@@ -12,6 +12,18 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const mocks = vi.hoisted(() => ({
+  supportsCodespaces: false,
+  sourceUrl: undefined as string | undefined,
+  refreshAction: null as (() => void) | null,
+  hardReloadAction: null as (() => void) | null,
+  hardReload: vi.fn(async () => undefined),
+  refresh: vi.fn(async () => undefined),
+  canResolveUrl: true,
+  primaryEnvironmentId: "environment-1",
+  openPreviewSession: vi.fn(),
+  closePreviewSession: vi.fn(),
+  openBrowser: vi.fn(),
+  resolveUrl: vi.fn(async () => ({ _tag: "Success", value: "http://localhost:14528/app" })),
   navigate: vi.fn(async (_tabId: string, _url: string): Promise<void> => undefined),
   rememberPreviewUrl: vi.fn(),
   readPreparedConnection: vi.fn(() => ({ httpBaseUrl: "http://172.25.85.75:3773" })),
@@ -133,6 +145,7 @@ vi.mock("~/previewStateStore", () => ({
       ? {}
       : {
           "tab-1": {
+            sourceUrl: mocks.sourceUrl,
             threadId: "thread-1",
             tabId: "tab-1",
             navStatus: {
@@ -149,17 +162,34 @@ vi.mock("~/previewStateStore", () => ({
 }));
 
 vi.mock("~/state/environments", () => ({
-  useEnvironment: () => ({ label: "WSL" }),
+  useEnvironment: () => ({
+    label: "WSL",
+    serverConfig: { environment: { capabilities: { codespaces: mocks.supportsCodespaces } } },
+  }),
   useEnvironmentHttpBaseUrl: () => "http://172.25.85.75:3773",
-  usePrimaryEnvironmentId: () => null,
+  usePrimaryEnvironmentId: () => mocks.primaryEnvironmentId,
 }));
 
-vi.mock("~/state/preview", () => ({
-  previewEnvironment: { open: {}, close: {}, resize: {} },
-}));
+vi.mock("~/state/preview", async () => {
+  const { Atom } = await import("effect/reactivity");
+  const allowed = Atom.make(true);
+  const denied = Atom.make(false);
+  return {
+    previewEnvironment: {
+      open: {},
+      close: {},
+      resize: {},
+      resolveUrl: {
+        id: "resolveUrl",
+        permissionAtom: () => (mocks.canResolveUrl ? allowed : denied),
+      },
+    },
+  };
+});
 
 vi.mock("~/state/use-atom-command", () => ({
-  useAtomCommand: () => vi.fn(),
+  useAtomCommand: (command: { id?: string } | undefined) =>
+    command?.id === "resolveUrl" ? mocks.resolveUrl : vi.fn(),
 }));
 
 vi.mock("~/browser/browserRecording", () => ({
@@ -207,7 +237,7 @@ vi.mock("~/previewMiniPlayerStore", () => {
 
 vi.mock("~/rightPanelStore", () => ({
   useRightPanelStore: {
-    getState: () => ({ close: mocks.closeRightPanel }),
+    getState: () => ({ close: mocks.closeRightPanel, openBrowser: mocks.openBrowser }),
   },
 }));
 
@@ -218,6 +248,8 @@ vi.mock("~/components/ui/toast", () => ({
 
 vi.mock("./previewBridge", () => ({
   previewBridge: {
+    refresh: mocks.refresh,
+    hardReload: mocks.hardReload,
     navigate: mocks.navigate,
     pickElement: mocks.pickElement,
     setAnnotationSendEnabled: mocks.setAnnotationSendEnabled,
@@ -232,14 +264,17 @@ vi.mock("./previewBridge", () => ({
 vi.mock("./PreviewChromeRow", () => ({
   PreviewChromeRow: (props: {
     onSubmit: (url: string) => void;
+    onRefresh: () => void;
     onPickElement?: () => void;
     onPictureInPicture?: () => void;
     pictureInPicture?: boolean;
     trailingActions?: {
-      props: { actions?: { toggleNativePictureInPicture?: () => void } };
+      props: { actions?: { toggleNativePictureInPicture?: () => void; hardReload?: () => void } };
     };
   }) => {
     mocks.submittedUrl = props.onSubmit;
+    mocks.refreshAction = props.onRefresh;
+    mocks.hardReloadAction = props.trailingActions?.props.actions?.hardReload ?? null;
     mocks.toggleAnnotation = props.onPickElement ?? null;
     mocks.togglePictureInPicture = props.onPictureInPicture ?? null;
     mocks.toggleNativePictureInPicture =
@@ -267,6 +302,8 @@ vi.mock("./AgentBrowserCursor", () => ({
   AgentBrowserCursor: () => createElement("agent-cursor"),
 }));
 vi.mock("~/browser/BrowserSurfaceSlot", () => ({ BrowserSurfaceSlot: () => null }));
+vi.mock("./openPreviewSession", () => ({ openPreviewSession: mocks.openPreviewSession }));
+vi.mock("./closePreviewSession", () => ({ closePreviewSession: mocks.closePreviewSession }));
 vi.mock("./usePreviewSession", () => ({ usePreviewSession: vi.fn() }));
 
 import { PreviewView } from "./PreviewView";
@@ -342,7 +379,40 @@ function installTestDom() {
 }
 
 describe("PreviewView navigation", () => {
+  it("does not resolve or navigate when the destination preview grant is missing", async () => {
+    mocks.supportsCodespaces = true;
+    mocks.canResolveUrl = false;
+    const document = installTestDom();
+    const { createRoot } = await import("react-dom/client");
+    const root = createRoot(document.createElement("div") as unknown as Element);
+    try {
+      await act(() =>
+        root.render(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />),
+      );
+      await act(async () => {
+        mocks.submittedUrl?.("localhost:3000/app");
+      });
+      expect(mocks.resolveUrl).not.toHaveBeenCalled();
+      expect(mocks.navigate).not.toHaveBeenCalled();
+      expect(mocks.openPreviewSession).not.toHaveBeenCalled();
+    } finally {
+      await act(() => root.unmount());
+      vi.unstubAllGlobals();
+    }
+  });
   beforeEach(() => {
+    mocks.supportsCodespaces = false;
+    mocks.sourceUrl = undefined;
+    mocks.refreshAction = null;
+    mocks.hardReloadAction = null;
+    mocks.hardReload.mockClear();
+    mocks.refresh.mockClear();
+    mocks.canResolveUrl = true;
+    mocks.primaryEnvironmentId = "environment-1";
+    mocks.openPreviewSession.mockReset();
+    mocks.closePreviewSession.mockReset();
+    mocks.openBrowser.mockClear();
+    mocks.resolveUrl.mockClear();
     mocks.navigate.mockClear();
     mocks.rememberPreviewUrl.mockClear();
     mocks.readPreparedConnection.mockClear();
@@ -374,6 +444,161 @@ describe("PreviewView navigation", () => {
     mocks.recordVisitForThread.mockClear();
   });
 
+  it("resolves workspace URLs only when the host advertises Codespaces", async () => {
+    mocks.supportsCodespaces = true;
+    const document = installTestDom();
+    const { createRoot } = await import("react-dom/client");
+    const container = document.createElement("div");
+    const root = createRoot(container as unknown as Element);
+    try {
+      await act(() =>
+        root.render(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />),
+      );
+      await act(async () => {
+        mocks.submittedUrl?.("localhost:3000/app");
+      });
+      expect(mocks.navigate).toHaveBeenCalledWith(
+        TEST_RUNTIME_TAB_ID,
+        "http://localhost:14528/app",
+      );
+      expect(mocks.resolveUrl).toHaveBeenCalledWith({
+        environmentId: TEST_THREAD_REF.environmentId,
+        input: { threadId: TEST_THREAD_REF.threadId, url: "http://localhost:3000/app" },
+      });
+      expect(mocks.rememberPreviewUrl).toHaveBeenCalledWith(
+        TEST_THREAD_REF,
+        "http://localhost:3000/app",
+      );
+    } finally {
+      await act(() => root.unmount());
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(["button", "desktop shortcut", "hard reload"])(
+    "%s refresh uses the application address after a forwarded URL expires",
+    async (trigger) => {
+      mocks.supportsCodespaces = true;
+      mocks.sourceUrl = "http://localhost:4173/page";
+      mocks.resolveUrl.mockResolvedValueOnce({
+        _tag: "Success",
+        value: "http://127.0.0.1:61000/page",
+      });
+      const document = installTestDom();
+      let menuAction: ((action: string) => void) | undefined;
+      Object.assign(window, {
+        desktopBridge: {
+          onMenuAction: (listener: (action: string) => void) => {
+            menuAction = listener;
+            return () => {
+              menuAction = undefined;
+            };
+          },
+        },
+      });
+      const { createRoot } = await import("react-dom/client");
+      const root = createRoot(document.createElement("div") as unknown as Element);
+      try {
+        await act(() =>
+          root.render(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />),
+        );
+        await act(async () => {
+          if (trigger === "button") mocks.refreshAction?.();
+          else if (trigger === "desktop shortcut") menuAction?.("preview.refresh");
+          else mocks.hardReloadAction?.();
+        });
+        expect(mocks.resolveUrl).toHaveBeenCalledWith({
+          environmentId: TEST_THREAD_REF.environmentId,
+          input: { threadId: TEST_THREAD_REF.threadId, url: mocks.sourceUrl },
+        });
+        expect(mocks.navigate).toHaveBeenCalledWith(
+          TEST_RUNTIME_TAB_ID,
+          "http://127.0.0.1:61000/page",
+        );
+        expect(mocks.refresh).not.toHaveBeenCalled();
+      } finally {
+        await act(() => root.unmount());
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it.each(["localhost:3000/app", "http://localhost:14528/app"])(
+    "opens %s in the remote host browser, then replaces the desktop tab",
+    async (requestedUrl) => {
+      mocks.supportsCodespaces = true;
+      mocks.primaryEnvironmentId = "local-host";
+      mocks.openPreviewSession.mockResolvedValue({ _tag: "Success", value: { tabId: "host-tab" } });
+      const document = installTestDom();
+      const { createRoot } = await import("react-dom/client");
+      const root = createRoot(document.createElement("div") as unknown as Element);
+      try {
+        await act(() =>
+          root.render(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />),
+        );
+        await act(async () => {
+          mocks.submittedUrl?.(requestedUrl);
+        });
+        expect(mocks.navigate).not.toHaveBeenCalled();
+        expect(mocks.openPreviewSession).toHaveBeenCalledWith(
+          expect.objectContaining({
+            threadRef: TEST_THREAD_REF,
+            url: requestedUrl.startsWith("http") ? requestedUrl : "http://" + requestedUrl,
+            runtime: "server",
+          }),
+        );
+        expect(mocks.openBrowser).toHaveBeenCalledWith(TEST_THREAD_REF, "host-tab");
+        expect(mocks.closePreviewSession).toHaveBeenCalledWith(
+          expect.objectContaining({ tabId: "tab-1" }),
+        );
+      } finally {
+        await act(() => root.unmount());
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+  it("keeps an unchanged external URL in the desktop browser of a remote host", async () => {
+    mocks.supportsCodespaces = true;
+    mocks.primaryEnvironmentId = "local-host";
+    mocks.resolveUrl.mockResolvedValueOnce({ _tag: "Success", value: "https://example.com/" });
+    const document = installTestDom();
+    const { createRoot } = await import("react-dom/client");
+    const root = createRoot(document.createElement("div") as unknown as Element);
+    try {
+      await act(() =>
+        root.render(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />),
+      );
+      await act(async () => {
+        mocks.submittedUrl?.("https://example.com/");
+      });
+      expect(mocks.navigate).toHaveBeenCalledWith(TEST_RUNTIME_TAB_ID, "https://example.com/");
+      expect(mocks.openPreviewSession).not.toHaveBeenCalled();
+    } finally {
+      await act(() => root.unmount());
+      vi.unstubAllGlobals();
+    }
+  });
+  it("keeps bridge navigation when a custom host returns a non-absolute URL", async () => {
+    mocks.supportsCodespaces = true;
+    mocks.primaryEnvironmentId = "local-host";
+    mocks.resolveUrl.mockResolvedValueOnce({ _tag: "Success", value: "/app" });
+    const document = installTestDom();
+    const { createRoot } = await import("react-dom/client");
+    const root = createRoot(document.createElement("div") as unknown as Element);
+    try {
+      await act(() =>
+        root.render(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />),
+      );
+      await act(async () => {
+        mocks.submittedUrl?.("localhost:3000/app");
+      });
+      expect(mocks.navigate).toHaveBeenCalledWith(TEST_RUNTIME_TAB_ID, "/app");
+      expect(mocks.openPreviewSession).not.toHaveBeenCalled();
+    } finally {
+      await act(() => root.unmount());
+      vi.unstubAllGlobals();
+    }
+  });
   it("shows the cursor in a replacement browser while the old instance still records", async () => {
     const document = installTestDom();
     const { createRoot } = await import("react-dom/client");
@@ -452,6 +677,7 @@ describe("PreviewView navigation", () => {
     await vi.waitFor(() =>
       expect(mocks.navigate).toHaveBeenCalledWith(TEST_RUNTIME_TAB_ID, expected),
     );
+    expect(mocks.resolveUrl).not.toHaveBeenCalled();
     expect(mocks.rememberPreviewUrl).toHaveBeenCalledWith(
       {
         environmentId: "environment-1",

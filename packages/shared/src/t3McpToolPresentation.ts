@@ -50,6 +50,9 @@ export type T3McpToolSummaryAction =
   | "project-clone"
   | "environment-read"
   | "environment-update"
+  | "codespaces-list"
+  | "codespaces-status"
+  | "codespaces-run"
   | "attachment-prepare"
   | "attachment-discard"
   | "attachment-send"
@@ -296,6 +299,15 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   t3_environment_preferences_update: tool(
     ["Update", "Updating", "Updated", "environment preferences"],
     "environment-update",
+  ),
+  codespaces_list: tool(["List", "Listing", "Listed", "Codespaces"], "codespaces-list"),
+  codespaces_status: tool(
+    ["Check", "Checking", "Checked", "Codespaces operations"],
+    "codespaces-status",
+  ),
+  codespaces_run: tool(
+    ["Request", "Requesting", "Requested", "a Codespace operation"],
+    "codespaces-run",
   ),
   t3_thread_launch: tool(["Launch", "Launching", "Launched", "a project thread"], "thread-create"),
   t3_project_list: tool(["List", "Listing", "Listed", "projects"], "project-list"),
