@@ -1,0 +1,9 @@
+{
+  "name": "T3 Code workspace",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:24-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/sshd:1": {}
+  },
+  "hostRequirements": { "cpus": 2, "memory": "8gb" },
+  "remoteUser": "node"
+}

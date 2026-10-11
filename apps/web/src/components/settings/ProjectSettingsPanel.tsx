@@ -2,6 +2,7 @@ import { useComposerMenuState } from "../chat/useComposerMenuState";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { useEnvironmentsWithScope, readEnvironmentScope } from "../../state/session";
+import { ProjectCodespacesControl } from "../ProjectCodespacesControl";
 import {
   isAtomCommandInterrupted,
   mapAtomCommandResult,
@@ -182,6 +183,10 @@ function ProjectDetail({
     group.memberProjects.find(
       (member) => environmentById.get(member.environmentId)?.serverConfig != null,
     ) ?? group.memberProjects[0]!;
+  const codespacesProject = group.memberProjects.find(
+    (member) =>
+      environmentById.get(member.environmentId)?.serverConfig?.environment.capabilities.codespaces,
+  );
   const threads = useThreadShells();
   const updateProject = useOrchestrationCommand(projectEnvironment.update, {
     reportFailure: false,
@@ -536,6 +541,16 @@ function ProjectDetail({
             }
           />
         </SettingsSection>
+        {codespacesProject ? (
+          <SettingsSection title="Codespace">
+            <div className="px-3 py-4 sm:px-4">
+              <ProjectCodespacesControl
+                environmentId={codespacesProject.environmentId}
+                projectId={codespacesProject.id}
+              />
+            </div>
+          </SettingsSection>
+        ) : null}
         <ProjectDefaultsSettings category="project" />
         <ProjectActionsSettings />
         {hasMultipleCheckouts ? checkoutChoices : null}

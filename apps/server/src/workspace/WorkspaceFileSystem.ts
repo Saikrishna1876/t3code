@@ -1,3 +1,5 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
+import * as Option from "effect/Option";
 // @effect-diagnostics nodeBuiltinImport:off
 /**
  * WorkspaceFileSystem - Effect service contract for workspace file mutations.
@@ -340,7 +342,44 @@ export const make = Effect.gen(function* () {
     return { relativePath: target.relativePath };
   });
 
-  return WorkspaceFileSystem.of({ readFile, writeFile });
+  const remote = Option.getOrUndefined(
+    yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+  );
+  const routed = CodespacesWorkspace.routeWorkspaceMethods(
+    { readFile, writeFile },
+    remote,
+    "files",
+    (cause, method, cwd) =>
+      new WorkspaceFileSystemOperationError({
+        workspaceRoot: cwd,
+        relativePath: "",
+        resolvedPath: cwd,
+        operationPath: cwd,
+        operation: method === "readFile" ? "read" : "write-file",
+        cause,
+      }),
+  );
+  return WorkspaceFileSystem.of({
+    writeFile: routed.writeFile,
+    readFile: (input) =>
+      Effect.gen(function* () {
+        const requestedPath = input.relativePath.trim();
+        if (!remote || !path.isAbsolute(requestedPath)) return yield* routed.readFile(input);
+        const target = yield* remote.lookup(input.cwd);
+        if (!target) return yield* readFile(input);
+        const fileTarget = yield* remote.lookup(requestedPath);
+        if (fileTarget?.projectId === target.projectId)
+          // The absolute link may use Git's canonical root rather than the project's alias.
+          return yield* routed.readFile({ ...input, cwd: fileTarget.localRoot });
+        if (
+          target.executor &&
+          CodespacesWorkspace.isWorkspacePath(requestedPath, target.executor.remoteRoot)
+        )
+          return yield* routed.readFile(input);
+        // Host reports in earlier history keep their explicit location after binding a project.
+        return yield* readFile(input);
+      }),
+  });
 });
 
 export const layer = Layer.effect(WorkspaceFileSystem, make);

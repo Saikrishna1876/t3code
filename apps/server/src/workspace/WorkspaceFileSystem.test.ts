@@ -7,6 +7,9 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import { HttpClient, HttpClientResponse } from "effect/http";
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 
 import * as ServerConfig from "../config.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
@@ -58,6 +61,103 @@ const writeTextFile = Effect.fn("writeTextFile")(function* (
 
 it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (it) => {
   describe("readFile", () => {
+    it.effect(
+      "keeps outside host reports local while bound workspace reads use the executor",
+      () => {
+        const requests: unknown[] = [];
+        const remoteLayer = CodespacesWorkspace.layer.pipe(
+          Layer.provide(
+            Layer.mock(ServerSecretStore.ServerSecretStore)({
+              get: () => Effect.succeedNone,
+              set: () => Effect.void,
+            }),
+          ),
+          Layer.provide(
+            Layer.succeed(
+              HttpClient.HttpClient,
+              HttpClient.make((request) => {
+                if (request.body._tag === "Uint8Array")
+                  requests.push(JSON.parse(new TextDecoder().decode(request.body.body)));
+                return Effect.succeed(
+                  HttpClientResponse.fromWeb(
+                    request,
+                    new Response(
+                      JSON.stringify({
+                        value: {
+                          relativePath: "proof.txt",
+                          contents: "remote",
+                          byteLength: 6,
+                          truncated: false,
+                        },
+                      }),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+        );
+        return Effect.gen(function* () {
+          const remote = yield* CodespacesWorkspace.CodespacesWorkspace;
+          const service = yield* WorkspaceFileSystem.make;
+          const path = yield* Path.Path;
+          const fs = yield* FileSystem.FileSystem;
+          const cwd = yield* makeTempDir;
+          const outside = yield* makeTempDir;
+          const report = path.join(outside, "report.md");
+          yield* writeTextFile(outside, "report.md", "host report");
+          yield* writeTextFile(cwd, "proof.txt", "stale local copy");
+          yield* remote.bind({ projectId: "files", localRoot: cwd, name: "space" });
+          yield* remote.register({
+            name: "space",
+            remoteRoot: "/workspaces/project",
+            workerUrl: "http://localhost:1",
+            execServerUrl: "ws://localhost:2",
+            token: "private",
+          });
+          expect((yield* service.readFile({ cwd, relativePath: report })).contents).toBe(
+            "host report",
+          );
+          expect(requests).toHaveLength(0);
+          for (const relativePath of [
+            "proof.txt",
+            path.join(cwd, "proof.txt"),
+            "/workspaces/project/proof.txt",
+          ])
+            expect((yield* service.readFile({ cwd, relativePath })).contents).toBe("remote");
+          const canonical = yield* fs.realPath(path.join(cwd, "proof.txt"));
+          expect((yield* service.readFile({ cwd, relativePath: canonical })).contents).toBe(
+            "remote",
+          );
+          expect(requests).toHaveLength(4);
+          expect(requests).toContainEqual({
+            group: "files",
+            method: "readFile",
+            args: [{ cwd: "/workspaces/project", relativePath: "/workspaces/project/proof.txt" }],
+          });
+          yield* remote.disconnect("space");
+          expect((yield* service.readFile({ cwd, relativePath: report })).contents).toBe(
+            "host report",
+          );
+          for (const relativePath of ["proof.txt", path.join(cwd, "proof.txt"), canonical]) {
+            const failed = yield* service.readFile({ cwd, relativePath }).pipe(Effect.flip);
+            expect(failed._tag).toBe("WorkspaceFileSystemOperationError");
+          }
+          // Outside writes and relative traversal still take the remote path, never the host escape hatch.
+          expect(
+            yield* service
+              .writeFile({ cwd, relativePath: report, contents: "overwrite" })
+              .pipe(Effect.result),
+          ).toMatchObject({ _tag: "Failure" });
+          expect(
+            yield* service.readFile({ cwd, relativePath: "../report.md" }).pipe(Effect.result),
+          ).toMatchObject({ _tag: "Failure" });
+          expect(requests).toHaveLength(4);
+          expect(yield* fs.readFileString(report)).toBe("host report");
+        }).pipe(Effect.provide(remoteLayer));
+      },
+    );
+
     it.effect("reads UTF-8 files relative to the workspace root", () =>
       Effect.gen(function* () {
         const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;

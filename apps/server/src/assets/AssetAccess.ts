@@ -1,3 +1,6 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
+import * as Stream from "effect/Stream";
+import { CodespacesError } from "@t3tools/contracts";
 import type { AssetResource } from "@t3tools/contracts";
 import {
   AssetAttachmentNotFoundError,
@@ -33,6 +36,7 @@ import {
 import { githubMediaFetchUrl, githubMediaFileName } from "@t3tools/shared/githubMedia";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@t3tools/shared/projectFavicon";
 import { MAX_TOOL_OUTPUT_IMAGE_BASE64_LENGTH, toolOutputImages } from "@t3tools/shared/toolOutput";
+import * as DateTime from "effect/DateTime";
 import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -91,6 +95,7 @@ const AssetClaimsSchema = Schema.Union([
   Schema.Struct({
     version: Schema.Literal(1),
     kind: Schema.Literal("workspace-file"),
+    codespaceName: Schema.optionalKey(Schema.String),
     workspaceRoot: Schema.String,
     baseRelativePath: Schema.String,
     expiresAt: Schema.Number,
@@ -98,6 +103,7 @@ const AssetClaimsSchema = Schema.Union([
   Schema.Struct({
     version: Schema.Literal(1),
     kind: Schema.Literal("workspace-file-exact"),
+    codespaceName: Schema.optionalKey(Schema.String),
     workspaceRoot: Schema.String,
     relativePath: Schema.String,
     expiresAt: Schema.Number,
@@ -173,6 +179,13 @@ export type ResolvedAsset =
       readonly fileName?: string;
       readonly mimeType?: string;
       readonly file?: OpenMediaFile;
+      readonly remoteFile?: {
+        readonly info: { readonly size: bigint; readonly mtime: Date; readonly mtimeMs: number };
+        readonly stream: (
+          offset: bigint,
+          size: bigint,
+        ) => Stream.Stream<Uint8Array, CodespacesError>;
+      };
     }
   | {
       readonly kind: "bytes";
@@ -369,6 +382,95 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
   },
 );
 
+// Issuance discovers the current location; resolution passes null to pin an existing local URL.
+const remoteWorkspaceAsset = (
+  workspaceRoot: string,
+  relativePath: string,
+  expectedName?: string | null,
+) =>
+  Effect.gen(function* () {
+    const remote = Option.getOrUndefined(
+      yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+    );
+    const target = remote ? yield* remote.lookup(workspaceRoot) : null;
+    if (expectedName !== undefined && (target?.name ?? null) !== expectedName)
+      return yield* new CodespacesError({ code: "conflict", message: "Asset binding changed." });
+    if (!target || !remote) return null;
+    const info = yield* remote
+      .call(workspaceRoot, "files", "inspectAsset", [{ cwd: workspaceRoot, relativePath }])
+      .pipe(
+        Effect.flatMap(
+          Schema.decodeUnknownEffect(
+            Schema.Struct({
+              size: Schema.Number,
+              mtimeMs: Schema.Number,
+              headerBase64: Schema.String,
+            }),
+          ),
+        ),
+      );
+    return { name: target.name, info, remote };
+  });
+const resolveWorkspaceAsset = (
+  workspaceRoot: string,
+  relativePath: string,
+  expectedName?: string,
+) =>
+  Effect.gen(function* () {
+    const remote = yield* remoteWorkspaceAsset(workspaceRoot, relativePath, expectedName ?? null);
+    if (remote) {
+      return {
+        kind: "file" as const,
+        path: relativePath,
+        remoteFile: {
+          info: {
+            size: BigInt(remote.info.size),
+            mtimeMs: remote.info.mtimeMs,
+            mtime: DateTime.toDateUtc(DateTime.makeUnsafe(remote.info.mtimeMs)),
+          },
+          stream: (offset: bigint, size: bigint) =>
+            Stream.unwrap(
+              remote.remote.openAsset({
+                cwd: workspaceRoot,
+                relativePath,
+                name: remote.name,
+                offset: Number(offset),
+                size: Number(size),
+              }),
+            ),
+        },
+      };
+    }
+    const file = yield* resolveCanonicalWorkspaceFileForRequest({ workspaceRoot, relativePath });
+    return file ? { kind: "file" as const, path: file } : null;
+  }).pipe(Effect.orElseSucceed(() => null));
+
+const remoteWorkspaceResource = (workspaceRoot: string | undefined, requestedPath: string) =>
+  Effect.gen(function* () {
+    if (!workspaceRoot) return null;
+    const remote = Option.getOrUndefined(
+      yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+    );
+    const target = remote ? yield* remote.lookup(workspaceRoot) : null;
+    if (!target) return null;
+    const path = yield* Path.Path;
+    if (!path.isAbsolute(requestedPath)) {
+      const relative = path.relative(workspaceRoot, path.resolve(workspaceRoot, requestedPath));
+      return relative === ".." || relative.startsWith("../")
+        ? null
+        : { workspaceRoot, requestedPath };
+    }
+    if (
+      target.remoteCwd &&
+      (requestedPath === target.remoteCwd || requestedPath.startsWith(target.remoteCwd + "/"))
+    )
+      return { workspaceRoot, requestedPath: path.relative(target.remoteCwd, requestedPath) };
+    const relative = path.relative(workspaceRoot, requestedPath);
+    return relative === ".." || relative.startsWith("../") || path.isAbsolute(relative)
+      ? null
+      : { workspaceRoot, requestedPath };
+  });
+
 const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileAsset")(
   function* (input: {
     readonly workspaceRoot: string;
@@ -379,9 +481,11 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
     const path = yield* Path.Path;
     const fileSystem = yield* FileSystem.FileSystem;
     const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
-    const relativePath = path.isAbsolute(input.requestedPath)
-      ? path.relative(input.workspaceRoot, input.requestedPath)
-      : input.requestedPath;
+    const remoteResource = yield* remoteWorkspaceResource(input.workspaceRoot, input.requestedPath);
+    const requestedPath = remoteResource?.requestedPath ?? input.requestedPath;
+    const relativePath = path.isAbsolute(requestedPath)
+      ? path.relative(input.workspaceRoot, requestedPath)
+      : requestedPath;
     const resolved = yield* workspacePaths
       .resolveRelativePathWithinRoot({ workspaceRoot: input.workspaceRoot, relativePath })
       .pipe(
@@ -393,10 +497,47 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
             }),
         ),
       );
-    if (!isWorkspacePreviewEntryPath(resolved.relativePath)) {
+    const allowsHostMedia =
+      input.resource._tag === "media-file" ||
+      (input.resource._tag === "draft-workspace-file" && path.isAbsolute(input.requestedPath));
+    if (
+      !(allowsHostMedia
+        ? hostPreviewMimeTypeFromExtension(path.extname(resolved.relativePath))
+        : isWorkspacePreviewEntryPath(resolved.relativePath))
+    ) {
       return yield* new AssetPreviewTypeValidationError({
         resource: input.resource,
       });
+    }
+    const remote = yield* remoteWorkspaceAsset(input.workspaceRoot, resolved.relativePath).pipe(
+      Effect.mapError(
+        (cause) => new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
+      ),
+    );
+    if (remote) {
+      return {
+        claims:
+          isWorkspaceImagePreviewPath(resolved.relativePath) ||
+          !isWorkspacePreviewEntryPath(resolved.relativePath)
+            ? {
+                version: 1 as const,
+                kind: "workspace-file-exact" as const,
+                workspaceRoot: input.workspaceRoot,
+                relativePath: resolved.relativePath,
+                codespaceName: remote.name,
+                expiresAt: input.expiresAt,
+              }
+            : {
+                version: 1 as const,
+                kind: "workspace-file" as const,
+                workspaceRoot: input.workspaceRoot,
+                baseRelativePath: path.dirname(resolved.relativePath),
+                codespaceName: remote.name,
+                expiresAt: input.expiresAt,
+              },
+        fileName: path.basename(resolved.relativePath),
+        imageDimensions: readImageDimensions(Buffer.from(remote.info.headerBase64, "base64")),
+      };
     }
     const canonicalFile = yield* resolveCanonicalWorkspaceFile({
       workspaceRoot: input.workspaceRoot,
@@ -484,11 +625,18 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
           );
         requestedPath = path.resolve(workspaceRoot, requestedPath);
       }
-      const finalized = yield* finalizeAbsoluteMediaFileAsset({
-        requestedPath,
-        resource: input.resource,
-        expiresAt,
-      });
+      const remoteResource = yield* remoteWorkspaceResource(input.workspaceRoot, requestedPath);
+      const finalized = remoteResource
+        ? yield* finalizeWorkspaceFileAsset({
+            ...remoteResource,
+            resource: input.resource,
+            expiresAt,
+          })
+        : yield* finalizeAbsoluteMediaFileAsset({
+            requestedPath,
+            resource: input.resource,
+            expiresAt,
+          });
       claims = finalized.claims;
       fileName = finalized.fileName;
       imageDimensions = finalized.imageDimensions;
@@ -526,11 +674,21 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       const draftWorkspaceRoot = input.workspaceRoot ?? input.resource.cwd;
       if (path.isAbsolute(input.resource.path)) {
         // An absolute draft path serves exactly like an absolute media path.
-        const finalized = yield* finalizeAbsoluteMediaFileAsset({
-          requestedPath: input.resource.path,
-          resource: input.resource,
-          expiresAt,
-        });
+        const remoteResource = yield* remoteWorkspaceResource(
+          draftWorkspaceRoot,
+          input.resource.path,
+        );
+        const finalized = remoteResource
+          ? yield* finalizeWorkspaceFileAsset({
+              ...remoteResource,
+              resource: input.resource,
+              expiresAt,
+            })
+          : yield* finalizeAbsoluteMediaFileAsset({
+              requestedPath: input.resource.path,
+              resource: input.resource,
+              expiresAt,
+            });
         claims = finalized.claims;
         fileName = finalized.fileName;
         imageDimensions = finalized.imageDimensions;
@@ -912,13 +1070,11 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
   }
   if (claims.kind === "workspace-file-exact") {
     if (decodedPath !== path.basename(claims.relativePath)) return null;
-    const exactWorkspaceFile = yield* resolveCanonicalWorkspaceFileForRequest({
-      workspaceRoot: claims.workspaceRoot,
-      relativePath: claims.relativePath,
-    });
-    return exactWorkspaceFile
-      ? ({ kind: "file", path: exactWorkspaceFile } satisfies ResolvedAsset)
-      : null;
+    return yield* resolveWorkspaceAsset(
+      claims.workspaceRoot,
+      claims.relativePath,
+      claims.codespaceName,
+    );
   }
   const segments = decodedPath.split(/[\\/]/);
   if (
@@ -929,11 +1085,18 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
   ) {
     return null;
   }
+  // Signed Codespace assets are Linux paths even when the T3 host runs Windows.
+  const isRemote = claims.codespaceName !== undefined;
+  const assetPath = isRemote ? yield* Path.Path.pipe(Effect.provide(Path.layer)) : path;
+  const baseRelativePath = isRemote
+    ? claims.baseRelativePath.replaceAll("\\", "/")
+    : claims.baseRelativePath;
+  const requestedPath = isRemote ? decodedPath.replaceAll("\\", "/") : decodedPath;
   const joinedRelativePath =
-    claims.baseRelativePath === "." ? decodedPath : path.join(claims.baseRelativePath, decodedPath);
-  const workspaceFile = yield* resolveCanonicalWorkspaceFileForRequest({
-    workspaceRoot: claims.workspaceRoot,
-    relativePath: joinedRelativePath,
-  });
-  return workspaceFile ? ({ kind: "file", path: workspaceFile } satisfies ResolvedAsset) : null;
+    baseRelativePath === "." ? requestedPath : assetPath.join(baseRelativePath, requestedPath);
+  return yield* resolveWorkspaceAsset(
+    claims.workspaceRoot,
+    joinedRelativePath,
+    claims.codespaceName,
+  );
 });

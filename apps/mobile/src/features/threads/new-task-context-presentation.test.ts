@@ -5,7 +5,50 @@ import {
   resolveNewTaskBranchWorktreePath,
   resolveNewTaskBranchLabel,
   resolveNewTaskLocalWorkspaceSelection,
+  resolveNewTaskWorkspaceSelection,
 } from "./new-task-context-presentation";
+
+describe("Codespace task workspace selection", () => {
+  it("uses the main checkout despite a worktree default", () => {
+    expect(
+      resolveNewTaskWorkspaceSelection({ canChooseWorkspace: false, defaultMode: "worktree" }),
+    ).toEqual({ mode: "local", branch: null, worktreePath: null, startFromOrigin: false });
+  });
+
+  it.each(["local", "worktree"] as const)(
+    "ignores saved %s worktree selections while bound",
+    (mode) => {
+      expect(
+        resolveNewTaskWorkspaceSelection({
+          canChooseWorkspace: false,
+          defaultMode: "worktree",
+          selection: {
+            mode,
+            branch: "feature",
+            worktreePath: "/repo/worktrees/feature",
+            startFromOrigin: true,
+          },
+        }),
+      ).toEqual({ mode: "local", branch: null, worktreePath: null, startFromOrigin: false });
+    },
+  );
+
+  it("restores the saved selection after returning to local work", () => {
+    const selection = {
+      mode: "worktree" as const,
+      branch: "feature",
+      worktreePath: "/repo/worktrees/feature",
+      startFromOrigin: true,
+    };
+    expect(
+      resolveNewTaskWorkspaceSelection({
+        canChooseWorkspace: true,
+        defaultMode: "local",
+        selection,
+      }),
+    ).toEqual(selection);
+  });
+});
 
 describe("resolveNewTaskLocalWorkspaceSelection", () => {
   it("waits for refs instead of carrying a worktree base into Current checkout", () => {

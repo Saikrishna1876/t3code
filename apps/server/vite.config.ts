@@ -1,3 +1,7 @@
+// @effect-diagnostics nodeBuiltinImport:off -- build configuration embeds the standalone workspace bundle.
+import * as NodeFS from "node:fs";
+import * as NodeURL from "node:url";
+import { build as buildWorkspaceWorker } from "vite-plus/pack";
 import "vite-plus/test/config";
 import { defineConfig, mergeConfig } from "vite-plus";
 
@@ -21,6 +25,20 @@ import {
 
 export { shouldBundleCliDependency };
 
+await buildWorkspaceWorker({
+  entry: [NodeURL.fileURLToPath(new URL("src/codespaces/worker.ts", import.meta.url))],
+  outDir: NodeURL.fileURLToPath(new URL("dist-workspace", import.meta.url)),
+  config: false,
+  platform: "node",
+  target: "node22",
+  minify: true,
+  deps: { alwaysBundle: () => true, onlyBundle: false },
+  define: { __T3CODE_BUILD_RELAY_URL__: '""', __T3CODE_BUILD_CHANNEL__: '"latest"' },
+});
+const workspaceWorker = NodeFS.readFileSync(
+  new URL("dist-workspace/worker.mjs", import.meta.url),
+  "utf8",
+);
 const repoEnv = loadRepoEnv();
 const cliBuildChannel = /^[^-+]+-(?:nightly|preview)\./.test(packageJson.version)
   ? "nightly"
@@ -111,6 +129,7 @@ export default mergeConfig(
         js: "#!/usr/bin/env node\n",
       },
       define: {
+        __T3CODE_WORKSPACE_WORKER__: JSON.stringify(workspaceWorker),
         __T3CODE_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),
         __T3CODE_BUILD_RELAY_URL__: JSON.stringify(repoEnv.T3CODE_RELAY_URL?.trim() ?? ""),
         __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(

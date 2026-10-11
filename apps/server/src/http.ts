@@ -6,6 +6,8 @@ import {
 } from "@t3tools/contracts";
 import { isDevProxiedPath } from "@t3tools/shared/devProxy";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
+import type * as Cause from "effect/Cause";
+import type { CodespacesError } from "@t3tools/contracts";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -28,7 +30,7 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { OtlpTracer, OtlpSerialization } from "effect/observability";
 
 import * as ServerConfig from "./config.ts";
-import { ASSET_ROUTE_PREFIX, resolveAsset } from "./assets/AssetAccess.ts";
+import { ASSET_ROUTE_PREFIX, resolveAsset, type ResolvedAsset } from "./assets/AssetAccess.ts";
 import { githubMediaResponse } from "./assets/GitHubMediaFetch.ts";
 import { statMediaFile, streamMediaFile, type OpenMediaFile } from "./assets/MediaFile.ts";
 import {
@@ -167,15 +169,23 @@ export const assetFileResponse = Effect.fn("assetFileResponse")(function* (
     readonly fileName?: string;
     readonly mimeType?: string;
     readonly file?: OpenMediaFile;
+    readonly remoteFile?: Extract<ResolvedAsset, { kind: "file" }>["remoteFile"];
   },
   rangeHeader?: string,
   ifRangeHeader?: string,
   method: "GET" | "HEAD" = "GET",
 ) {
   const headers = assetResponseHeaders(asset.path, asset);
+  if (asset.remoteFile)
+    headers["Content-Type"] ??= Option.getOrElse(
+      Mime.getType(asset.path),
+      () => "application/octet-stream",
+    );
   const mediaFile = asset.file;
-  const mediaInfo = mediaFile ? yield* statMediaFile(asset.path, mediaFile) : undefined;
+  const mediaInfo =
+    asset.remoteFile?.info ?? (mediaFile ? yield* statMediaFile(asset.path, mediaFile) : undefined);
   const isMedia = /^(?:audio|video)\//i.test(headers["Content-Type"] ?? "");
+  if (asset.remoteFile) headers["Cache-Control"] = "private, no-store";
   if (isMedia) {
     // Host media can change in place. Do not invite conditional range requests
     // with validators that cannot establish byte-for-byte identity. Attachment media
@@ -185,7 +195,7 @@ export const assetFileResponse = Effect.fn("assetFileResponse")(function* (
   let status = 200;
   let offset = 0n;
   let bytesToRead: bigint | undefined;
-  if (isMedia) {
+  if (isMedia || (asset.remoteFile && headers["Content-Type"] === "application/pdf")) {
     headers["Accept-Ranges"] = "bytes";
     // If-Range requires a matching validator. A full response is safe when we cannot validate it.
     if (method === "GET" && rangeHeader && ifRangeHeader === undefined) {
@@ -206,7 +216,7 @@ export const assetFileResponse = Effect.fn("assetFileResponse")(function* (
       }
     }
   }
-  if (mediaFile && mediaInfo) {
+  if ((mediaFile || asset.remoteFile) && mediaInfo) {
     const size = bytesToRead ?? mediaInfo.size;
     headers["Content-Type"] ??= Option.getOrElse(
       Mime.getType(asset.path),
@@ -220,11 +230,13 @@ export const assetFileResponse = Effect.fn("assetFileResponse")(function* (
     if (method === "HEAD" || size === 0n) {
       return HttpServerResponse.empty({ status, headers });
     }
-    const body = streamMediaFile(mediaFile, offset, size);
+    const body = asset.remoteFile
+      ? asset.remoteFile.stream(offset, size)
+      : streamMediaFile(mediaFile!, offset, size);
     if (!body) {
       return HttpServerResponse.text("File is too large to preview.", { status: 413 });
     }
-    return HttpServerResponse.stream(body, {
+    return HttpServerResponse.stream<CodespacesError | Cause.UnknownError>(body, {
       status,
       headers,
     });

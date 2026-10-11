@@ -1,3 +1,8 @@
+import { useAtomValue } from "@effect/atom-react";
+import { codespacesSetupPrompt } from "@t3tools/client-runtime/codespaces-presentation";
+import { ProjectCodespacesControl } from "../connection/CodespacesSettings";
+import { codespacesEnvironment } from "../../state/codespaces";
+import { useEnvironmentQuery } from "../../state/query";
 import { MaterialListRow } from "../../components/MaterialListRow";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { shouldCheckoutNewTaskBranch } from "./new-task-context-presentation";
@@ -47,6 +52,7 @@ function SelectionRow(props: {
   readonly onPress: () => void;
   readonly disabled?: boolean;
   readonly selected: boolean;
+  readonly expanded?: boolean;
   readonly isLast?: boolean;
   readonly subtitle?: string;
   readonly title: string;
@@ -73,8 +79,10 @@ function SelectionRow(props: {
             <SymbolView name="checkmark" size={20} tintColorClassName="accent-focus" />
           ) : null
         }
-        accessibilityRole="radio"
-        accessibilityState={{ checked: props.selected }}
+        accessibilityRole={props.expanded === undefined ? "radio" : "button"}
+        accessibilityState={
+          props.expanded === undefined ? { checked: props.selected } : { expanded: props.expanded }
+        }
         disabled={props.disabled}
         onPress={props.onPress}
       />
@@ -83,8 +91,10 @@ function SelectionRow(props: {
   return (
     <Pressable
       accessibilityLabel={[props.title, props.subtitle].filter(Boolean).join(", ")}
-      accessibilityRole="radio"
-      accessibilityState={{ checked: props.selected }}
+      accessibilityRole={props.expanded === undefined ? "radio" : "button"}
+      accessibilityState={
+        props.expanded === undefined ? { checked: props.selected } : { expanded: props.expanded }
+      }
       className={cn(
         "min-h-14 flex-row items-center gap-3 bg-grouped-card px-4 py-3 active:bg-subtle",
         !props.isLast && "border-b border-border-subtle",
@@ -207,6 +217,31 @@ export function NewTaskEnvironmentPickerRouteScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const serverConfigs = useServerConfigs();
+  const [showCodespaces, setShowCodespaces] = useState(false);
+  const project = flow.selectedProject;
+  const canRunCodespaces = useAtomValue(
+    codespacesEnvironment.run.permissionAtom(project?.environmentId ?? flow.selectedEnvironmentId),
+  );
+  const codespace = useEnvironmentQuery(
+    project && serverConfigs.get(project.environmentId)?.environment.capabilities.codespaces
+      ? codespacesEnvironment.project({
+          environmentId: project.environmentId,
+          input: { projectId: project.id },
+        })
+      : null,
+  );
+  const canManageCodespaces = Boolean(
+    canRunCodespaces &&
+    project &&
+    serverConfigs.get(project.environmentId)?.environment.capabilities.codespaces,
+  );
+  useEffect(() => {
+    if (!showCodespaces || !codespace.data || codespace.data.eligible || codespace.data.name)
+      return;
+    flow.setPrompt(codespacesSetupPrompt(flow.prompt));
+    setShowCodespaces(false);
+    navigation.goBack();
+  }, [showCodespaces, codespace.data, flow, navigation]);
   return (
     <View className="flex-1 bg-sheet" collapsable={false}>
       <NativeStackScreenOptions
@@ -245,7 +280,7 @@ export function NewTaskEnvironmentPickerRouteScreen() {
                     tintColorClassName="accent-icon-muted"
                   />
                 }
-                isLast={index === flow.environments.length - 1}
+                isLast={index === flow.environments.length - 1 && !canManageCodespaces}
                 disabled={flow.switchingToEnvironmentId !== null}
                 onPress={() => {
                   void Haptics.selectionAsync();
@@ -257,7 +292,33 @@ export function NewTaskEnvironmentPickerRouteScreen() {
                 title={environment.environmentLabel}
               />
             ))}
+            {canManageCodespaces ? (
+              <SelectionRow
+                icon={<SymbolView name="cloud" size={20} tintColorClassName="accent-icon-muted" />}
+                isLast
+                onPress={() => {
+                  if (codespace.data && !codespace.data.eligible && !codespace.data.name) {
+                    flow.setPrompt(codespacesSetupPrompt(flow.prompt));
+                    navigation.goBack();
+                  } else {
+                    setShowCodespaces((value) => !value);
+                  }
+                }}
+                selected={false}
+                expanded={showCodespaces}
+                title={codespace.data?.name ? "Manage Codespace" : "Codespace…"}
+              />
+            ) : null}
           </PickerSurface>
+          {showCodespaces && project ? (
+            <View className="pt-5">
+              <ProjectCodespacesControl
+                key={`${project.environmentId}:${project.id}`}
+                environmentId={project.environmentId}
+                projectId={project.id}
+              />
+            </View>
+          ) : null}
         </ScrollView>
       </MaterialScreenContent>
     </View>

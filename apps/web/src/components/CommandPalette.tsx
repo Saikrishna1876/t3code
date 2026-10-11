@@ -2076,6 +2076,31 @@ function OpenCommandPaletteDialog(props: {
 
   actionItems.push({
     kind: "action",
+    value: "action:codespaces",
+    title: "Manage Codespaces",
+    searchTerms: [
+      "github",
+      "cloud",
+      "create codespace",
+      "start codespace",
+      "stop codespace",
+      "remote workspace",
+    ],
+    icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      void navigate({
+        to: "/settings/projects",
+        search: {
+          project: contextualProjectRef
+            ? `${contextualProjectRef.environmentId}\u0000${contextualProjectRef.projectId}`
+            : undefined,
+          machine: undefined,
+        },
+      });
+    },
+  });
+  actionItems.push({
+    kind: "action",
     value: "action:add-project",
     searchTerms: [
       "add project",

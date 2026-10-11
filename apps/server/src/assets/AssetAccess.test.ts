@@ -1,5 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off - tests inject swaps at the native open boundary.
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
+import { startWorker } from "../codespaces/worker.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodePath from "@effect/platform-node/NodePath";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -21,7 +24,7 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
-import { HttpClient, HttpClientResponse, HttpServerResponse } from "effect/http";
+import { FetchHttpClient, HttpClient, HttpClientResponse, HttpServerResponse } from "effect/http";
 import { vi } from "vite-plus/test";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -126,6 +129,178 @@ const layerTest = Layer.mergeAll(
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
 describe("AssetAccess", () => {
+  it.effect("serves bound HTML, siblings, images and ranged PDFs from the remote workspace", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-remote-assets-" });
+      const local = path.join(root, "local");
+      const remote = path.join(root, "remote");
+      yield* fs.makeDirectory(local);
+      yield* fs.makeDirectory(remote);
+      yield* fs.writeFileString(path.join(local, "index.html"), "local copy");
+      yield* fs.writeFileString(path.join(remote, "index.html"), "remote <img src='shot.png'>");
+      yield* fs.writeFile(path.join(remote, "shot.png"), screenshotPng);
+      const pdf = "%PDF-" + "remote".repeat(400000);
+      yield* fs.writeFileString(path.join(remote, "report.pdf"), pdf);
+      const worker = yield* Effect.acquireRelease(
+        Effect.promise(() => startWorker(remote, "asset-token")),
+        (worker) =>
+          Effect.promise(async () => {
+            await new Promise<void>((resolve) => worker.server.close(() => resolve()));
+            await worker.runtime.dispose();
+          }),
+      );
+      const localPreview = yield* issueAssetUrl({
+        workspaceRoot: local,
+        resource: {
+          _tag: "workspace-file",
+          threadId: ThreadId.make("asset-thread"),
+          path: "index.html",
+        },
+      });
+      const workspace = yield* CodespacesWorkspace.CodespacesWorkspace;
+      yield* workspace.bind({ projectId: "asset-project", localRoot: local, name: "asset-space" });
+      yield* workspace.register({
+        name: "asset-space",
+        remoteRoot: remote,
+        workerUrl: `http://127.0.0.1:${worker.port}`,
+        execServerUrl: "ws://localhost:1",
+        token: "asset-token",
+      });
+      const issue = (name: string) =>
+        issueAssetUrl({
+          workspaceRoot: local,
+          resource: { _tag: "workspace-file", threadId: ThreadId.make("asset-thread"), path: name },
+        });
+      const resolve = (url: string, sibling?: string) => {
+        const suffix = url.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+        const separator = suffix.indexOf("/");
+        return resolveAsset(suffix.slice(0, separator), sibling ?? suffix.slice(separator + 1));
+      };
+      const read = (
+        asset: NonNullable<Effect.Success<ReturnType<typeof resolveAsset>>>,
+        range?: string,
+      ) =>
+        Effect.gen(function* () {
+          if (asset.kind !== "file") throw new Error("Expected a file asset.");
+          const response = HttpServerResponse.toWeb(yield* assetFileResponse(asset, range));
+          return {
+            status: response.status,
+            headers: response.headers,
+            bytes: yield* Effect.promise(async () => Buffer.from(await response.arrayBuffer())),
+          };
+        });
+      expect(yield* resolve(localPreview.relativeUrl)).toBeNull();
+      const index = yield* issue("index.html");
+      const page = yield* resolve(index.relativeUrl);
+      expect(page?.kind).toBe("file");
+      expect((yield* read(page!)).bytes.toString()).toBe("remote <img src='shot.png'>");
+      const sibling = yield* resolve(index.relativeUrl, "shot.png");
+      expect((yield* read(sibling!)).bytes).toEqual(Buffer.from(screenshotPng));
+      yield* fs.symlink(path.join(remote, "shot.png"), path.join(remote, "linked.png"));
+      expect((yield* read((yield* resolve(index.relativeUrl, "linked.png"))!)).bytes).toEqual(
+        Buffer.from(screenshotPng),
+      );
+      expect((yield* issue("linked.png")).imageDimensions).toEqual({ width: 390, height: 844 });
+      yield* fs.writeFileString(path.join(remote, "style.css"), "body { color: red; }");
+      yield* fs.symlink(path.join(remote, "style.css"), path.join(remote, "linked.css"));
+      expect(
+        (yield* read((yield* resolve(index.relativeUrl, "linked.css"))!)).bytes.toString(),
+      ).toBe("body { color: red; }");
+      const nested = path.join(remote, "docs", "nested");
+      yield* fs.makeDirectory(path.join(nested, "assets"), { recursive: true });
+      yield* fs.writeFileString(path.join(nested, "index.html"), "nested remote page");
+      yield* fs.writeFileString(path.join(nested, "report.pdf"), pdf);
+      yield* fs.writeFileString(path.join(nested, "assets", "style.css"), "body { color: blue; }");
+      yield* fs.writeFile(path.join(nested, "assets", "shot.png"), screenshotPng);
+      const nestedPage = yield* issue("docs/nested/index.html");
+      const windowsResolve = (url: string, sibling?: string) =>
+        resolve(url, sibling).pipe(Effect.provide(NodePath.layerWin32));
+      expect((yield* read((yield* windowsResolve(nestedPage.relativeUrl))!)).bytes.toString()).toBe(
+        "nested remote page",
+      );
+      for (const cssPath of ["assets/style.css", "assets\\style.css"]) {
+        expect(
+          (yield* read((yield* windowsResolve(nestedPage.relativeUrl, cssPath))!)).bytes.toString(),
+        ).toBe("body { color: blue; }");
+      }
+      expect(
+        (yield* read((yield* windowsResolve(nestedPage.relativeUrl, "assets/shot.png"))!)).bytes,
+      ).toEqual(Buffer.from(screenshotPng));
+      const nestedPdf = yield* windowsResolve((yield* issue("docs/nested/report.pdf")).relativeUrl);
+      expect((yield* read(nestedPdf!, "bytes=5-10")).bytes.toString()).toBe("remote");
+      for (const traversal of ["../report.pdf", "..\\report.pdf", "assets/%2e%2e/report.pdf"]) {
+        expect(yield* windowsResolve(nestedPage.relativeUrl, traversal)).toBeNull();
+      }
+      const image = yield* issue("shot.png");
+      expect(image.imageDimensions).toEqual({ width: 390, height: 844 });
+      expect(yield* resolve(image.relativeUrl, "index.html")).toBeNull();
+      expect(yield* resolve(index.relativeUrl, "../local/index.html")).toBeNull();
+      yield* fs.symlink(path.join(local, "index.html"), path.join(remote, "escape.html"));
+      expect(yield* resolve(index.relativeUrl, "escape.html")).toBeNull();
+      const directory = path.join(remote, "pages");
+      const saved = path.join(remote, "saved-pages");
+      yield* fs.makeDirectory(directory);
+      yield* fs.writeFileString(path.join(directory, "index.html"), "workspace page");
+      const native = yield* Effect.promise(() =>
+        vi.importActual<typeof NodeFSP>("node:fs/promises"),
+      );
+      const canonicalDirectory = yield* fs.realPath(directory);
+      const canonicalLocal = yield* fs.realPath(local);
+      const swappingOpen = vi.mocked(NodeFSP.open).mockImplementationOnce(async (...args) => {
+        await native.rename(
+          canonicalDirectory,
+          path.join(path.dirname(canonicalDirectory), "saved-pages"),
+        );
+        await native.symlink(canonicalLocal, canonicalDirectory, "junction");
+        return native.open(...args);
+      });
+      try {
+        expect((yield* issue("pages/index.html").pipe(Effect.result))._tag).toBe("Failure");
+      } finally {
+        swappingOpen.mockReset().mockImplementation(native.open);
+        yield* fs.remove(directory);
+        yield* fs.rename(saved, directory);
+      }
+      const report = yield* resolve((yield* issue("report.pdf")).relativeUrl);
+      const partial = yield* read(report!, "bytes=5-10");
+      expect(partial.status).toBe(206);
+      expect(partial.bytes.toString()).toBe("remote");
+      expect((yield* read(report!)).bytes.toString()).toBe(pdf);
+      const head =
+        report?.kind === "file"
+          ? yield* assetFileResponse(report, undefined, undefined, "HEAD")
+          : null;
+      expect(head?.headers["content-length"]).toBe(String(pdf.length));
+      const absolute = yield* issueAssetUrl({
+        workspaceRoot: local,
+        resource: {
+          _tag: "media-file",
+          threadId: ThreadId.make("asset-thread"),
+          path: path.join(remote, "index.html"),
+        },
+      });
+      expect((yield* read((yield* resolve(absolute.relativeUrl))!)).bytes.toString()).toContain(
+        "remote",
+      );
+      yield* workspace.bind({ projectId: "asset-project", localRoot: local, name: "other-space" });
+      expect(yield* resolve(index.relativeUrl)).toBeNull();
+      yield* workspace.bind({ projectId: "asset-project", localRoot: local, name: "asset-space" });
+      yield* workspace.disconnect("asset-space");
+      expect(yield* resolve(index.relativeUrl)).toBeNull();
+      yield* workspace.bind({ projectId: "asset-project", name: null });
+      expect(yield* resolve(index.relativeUrl)).toBeNull();
+      expect(yield* resolve(localPreview.relativeUrl)).toMatchObject({ kind: "file" });
+    }).pipe(
+      Effect.provide(
+        CodespacesWorkspace.layer.pipe(
+          Layer.provideMerge(layerTest),
+          Layer.provide(FetchHttpClient.layer),
+        ),
+      ),
+    ),
+  );
   it.effect("loads private media immediately after login with the GitHub credential", () => {
     let lookups = 0;
     const authorizations: Array<string | undefined> = [];

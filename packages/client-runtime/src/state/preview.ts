@@ -42,6 +42,10 @@ export function createPreviewEnvironmentAtoms<R, E>(
       scheduler: lifecycleScheduler,
       concurrency: lifecycleConcurrency,
     }),
+    resolveUrl: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:preview:resolve-url",
+      tag: WS_METHODS.previewResolveUrl,
+    }),
     navigate: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:preview:navigate",
       tag: WS_METHODS.previewNavigate,

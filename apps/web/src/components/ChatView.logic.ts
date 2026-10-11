@@ -822,6 +822,31 @@ export function resolveSendEnvMode(input: {
   return input.isGitRepo ? input.requestedEnvMode : "local";
 }
 
+/** Unstarted Codespace drafts use the project's main checkout, regardless of saved worktree choices. */
+export function resolveCodespaceDraftWorkspace(input: {
+  codespaceBound: boolean;
+  isUnstarted: boolean;
+  envMode: DraftThreadEnvMode;
+  branch: string | null;
+  worktreePath: string | null;
+  startFromOrigin: boolean;
+  currentCheckoutBranch: string | null;
+}) {
+  if (input.codespaceBound && input.isUnstarted)
+    return {
+      envMode: "local" as const,
+      branch: input.currentCheckoutBranch,
+      worktreePath: null,
+      startFromOrigin: false,
+    };
+  return {
+    envMode: input.envMode,
+    branch: input.branch,
+    worktreePath: input.worktreePath,
+    startFromOrigin: input.startFromOrigin,
+  };
+}
+
 export function resolveBackgroundDraftWorkspaceOptions(input: {
   envMode: DraftThreadEnvMode;
   branch: string | null;
