@@ -12,13 +12,14 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
-import { Tool } from "effect/ai";
+import { Tool, McpSchema, McpServer } from "effect/ai";
 
 import * as Codespaces from "../../../codespaces/Codespaces.ts";
 import * as Environment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Settings from "../../../serverSettings.ts";
+import * as McpHttpServer from "../../McpHttpServer.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { liveThreadShell } from "../../McpToolAccess.testkit.ts";
@@ -27,6 +28,72 @@ import { EnvironmentToolkit } from "./tools.ts";
 
 const environmentId = EnvironmentId.make("environment:preferences");
 const threadId = ThreadId.make("thread:preferences");
+const caller: McpInvocationContext.McpInvocationScope = {
+  environmentId,
+  requestNamespace: "provider:preferences",
+  thread: {
+    threadId,
+    providerSessionId: "provider:preferences",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+  },
+  client: undefined,
+  capabilities: new Set(["orchestration" as const]),
+  issuedAt: 0,
+};
+const layerEnvironment = Layer.mock(Environment.ServerEnvironment)({
+  getDescriptor: Effect.succeed({
+    environmentId,
+    label: "Test",
+    platform: { os: "linux", arch: "x64" },
+    serverVersion: "0.0.0",
+    capabilities: { repositoryIdentity: false },
+  }),
+});
+
+it.effect("updates preferences for a thread caller through the /mcp registration", () =>
+  Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
+    const result = yield* server
+      .callTool({
+        name: "t3_environment_preferences_update",
+        arguments: { newWorktreesStartFromOrigin: true },
+      })
+      .pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, caller),
+        Effect.provideService(
+          McpSchema.McpServerClient,
+          McpSchema.McpServerClient.of({
+            clientId: 1,
+            protocolVersion: "2025-06-18",
+            clientCapabilities: {},
+            clientInfo: { name: "preferences", version: "1" },
+            initializePayload: {
+              protocolVersion: "2025-06-18",
+              capabilities: {},
+              clientInfo: { name: "preferences", version: "1" },
+            },
+            getClient: Effect.die("unused"),
+          }),
+        ),
+      );
+    expect(result.isError).toBe(false);
+    expect(result.structuredContent).toMatchObject({ newWorktreesStartFromOrigin: true });
+  }).pipe(
+    Effect.provide(
+      McpHttpServer.layerEnvironmentToolkit.pipe(
+        Layer.provideMerge(McpServer.McpServer.layer),
+        Layer.provide(
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            getThreadShell: (id) => Effect.succeed(liveThreadShell(id)),
+          }),
+        ),
+        Layer.provide(layerEnvironment),
+        Layer.provide(Layer.mock(Codespaces.Codespaces)({})),
+        Layer.provide(Settings.layerTest()),
+      ),
+    ),
+  ),
+);
 
 it.effect(
   "exposes object parameters and requires explicit agent opt-in for Codespaces writes",

@@ -130,6 +130,16 @@ describe("resolveNewTaskBranchWorktreePath", () => {
 });
 
 describe("resolveNewTaskBranchLabel", () => {
+  it("identifies a deferred PR checkout independently of the origin default", () => {
+    expect(
+      resolveNewTaskBranchLabel({
+        branchName: "fork/feature",
+        startFromOrigin: true,
+        workspaceMode: "worktree",
+        pullRequestReference: "https://github.com/acme/repo/pull/123",
+      }),
+    ).toBe("From PR #123");
+  });
   it("shows the checked-out branch without a base-ref prefix", () => {
     expect(
       resolveNewTaskBranchLabel({
@@ -193,3 +203,17 @@ describe("filterNewTaskBranches", () => {
     expect(search("  login page ")).toEqual(["Feature/Login-Page"]);
   });
 });
+
+it.each([true, false])(
+  "keeps PR worktree references only when workspace selection is allowed: %s",
+  (canChooseWorkspace) => {
+    const reference = "https://github.com/acme/repo/pull/123";
+    const workspace = resolveNewTaskWorkspaceSelection({
+      canChooseWorkspace,
+      defaultMode: "worktree",
+      selection: { mode: "worktree", pullRequestReference: reference },
+    });
+    expect(workspace.mode).toBe(canChooseWorkspace ? "worktree" : "local");
+    expect(workspace.pullRequestReference).toBe(canChooseWorkspace ? reference : undefined);
+  },
+);

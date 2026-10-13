@@ -1,4 +1,5 @@
 import { sanitizeNewRefName } from "@t3tools/shared/git";
+import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
 
 type WorkspaceMode = "local" | "worktree";
 
@@ -11,6 +12,7 @@ export function resolveNewTaskWorkspaceSelection(input: {
     readonly branch?: string | null;
     readonly worktreePath?: string | null;
     readonly startFromOrigin?: boolean;
+    readonly pullRequestReference?: string;
   };
 }) {
   if (!input.canChooseWorkspace)
@@ -20,6 +22,9 @@ export function resolveNewTaskWorkspaceSelection(input: {
     branch: input.selection?.branch ?? null,
     worktreePath: input.selection?.worktreePath ?? null,
     startFromOrigin: input.selection?.startFromOrigin,
+    ...(input.selection?.pullRequestReference
+      ? { pullRequestReference: input.selection.pullRequestReference }
+      : {}),
   };
 }
 
@@ -84,7 +89,12 @@ export function resolveNewTaskBranchLabel(input: {
   readonly branchName: string | null;
   readonly startFromOrigin: boolean;
   readonly workspaceMode: WorkspaceMode;
+  readonly pullRequestReference?: string;
 }): string {
+  if (input.workspaceMode === "worktree" && input.pullRequestReference) {
+    const pr = parseChangeRequestUrl(input.pullRequestReference);
+    if (pr) return `From PR #${pr.number}`;
+  }
   if (!input.branchName) {
     return "Choose branch";
   }

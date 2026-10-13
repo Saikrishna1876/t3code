@@ -20,6 +20,7 @@ import {
   type ProjectSearchEntriesInput,
   type ProjectSearchContentsInput,
   type FilesystemBrowseInput,
+  type FilesystemEntryMetadata,
 } from "@t3tools/contracts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as WorkspaceSearchIndex from "../workspace/WorkspaceSearchIndex.ts";
@@ -31,6 +32,7 @@ import {
   insertRankedSearchResult,
   type RankedSearchResult,
 } from "@t3tools/shared/searchRanking";
+import { fileHeaderMimeType } from "../workspace/fileHeaderMimeType.ts";
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
@@ -186,6 +188,37 @@ export async function startWorker(root: string, token: string, port = 0) {
     }
   };
   const filesystem = {
+    getMetadata: async (input: { cwd: string; relativePath: string }) => {
+      try {
+        const target = await validPath(NodePath.resolve(input.cwd, input.relativePath));
+        const stat = await NodeFSP.stat(target);
+        if (stat.isDirectory()) return { kind: "directory" } as const;
+        if (!stat.isFile()) return { kind: "other" } as const;
+        let mimeType: string | undefined;
+        if (NodePath.extname(target) === "" && stat.size > 0) {
+          const handle = await NodeFSP.open(
+            target,
+            NodeFS.constants.O_RDONLY | NodeFS.constants.O_NONBLOCK,
+          );
+          try {
+            if ((await handle.stat()).isFile()) {
+              const buffer = Buffer.alloc(512);
+              const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+              mimeType = fileHeaderMimeType(buffer.subarray(0, bytesRead));
+            }
+          } finally {
+            await handle.close();
+          }
+        }
+        return {
+          kind: "file",
+          byteLength: stat.size,
+          ...(mimeType === undefined ? {} : { mimeType }),
+        } satisfies FilesystemEntryMetadata;
+      } catch {
+        return null;
+      }
+    },
     inspectAsset: async (input: { cwd: string; relativePath: string }) => {
       const handle = await openAsset(input.cwd, input.relativePath);
       try {

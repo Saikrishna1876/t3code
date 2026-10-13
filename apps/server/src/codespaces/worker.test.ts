@@ -72,6 +72,23 @@ async function fixture() {
   return { local, remote, call, worker };
 }
 describe("Codespace workspace worker", () => {
+  it("reads remote metadata, detects extensionless images and refuses outside paths", async () => {
+    const test = await fixture();
+    const image = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+    await NodeFSP.writeFile(NodePath.join(test.remote, "image"), image);
+    const metadata = (relativePath: string) =>
+      test.call("files", "getMetadata", [{ cwd: test.remote, relativePath }]);
+    expect((await metadata("proof.txt")).body?.value).toMatchObject({ kind: "file" });
+    expect((await metadata("image")).body?.value).toEqual({
+      kind: "file",
+      byteLength: image.length,
+      mimeType: "image/png",
+    });
+    expect((await metadata(".")).body?.value).toEqual({ kind: "directory" });
+    expect((await metadata("missing")).body?.value).toBeNull();
+    expect((await metadata(NodePath.join(test.local, "proof.txt"))).body?.value).toBeNull();
+  });
+
   it.effect("browses relative Windows folder queries in the actual remote worker", () =>
     Effect.gen(function* () {
       const test = yield* Effect.promise(fixture);

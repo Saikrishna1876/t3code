@@ -21,8 +21,8 @@ import { HttpClient, HttpClientResponse } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 import * as Net from "@t3tools/shared/Net";
 import * as ServerConfig from "../config.ts";
-import * as GitHubCredentials from "../sourceControl/GitHubCredentials.ts";
-import * as GitHubApi from "../sourceControl/GitHubApi.ts";
+import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
+import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as CodespacesHost from "./CodespacesHost.ts";
 

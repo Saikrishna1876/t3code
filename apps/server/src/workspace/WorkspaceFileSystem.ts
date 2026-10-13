@@ -15,11 +15,16 @@ import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 
 import type {
+  FilesystemEntryMetadata,
+  FilesystemGetMetadataInput,
+  FilesystemGetMetadataResult,
   ProjectReadFileInput,
   ProjectReadFileResult,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "@t3tools/contracts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -29,6 +34,7 @@ import * as Schema from "effect/Schema";
 
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
+import { fileHeaderMimeType } from "./fileHeaderMimeType.ts";
 
 const PROJECT_READ_FILE_MAX_BYTES = 1024 * 1024;
 
@@ -109,6 +115,10 @@ export type WorkspaceFileSystemError = typeof WorkspaceFileSystemError.Type;
 export class WorkspaceFileSystem extends Context.Service<
   WorkspaceFileSystem,
   {
+    readonly getMetadata: (
+      input: FilesystemGetMetadataInput,
+    ) => Effect.Effect<FilesystemGetMetadataResult>;
+
     /**
      * Read a UTF-8 text file relative to the workspace root, or any host file by
      * absolute path.
@@ -140,6 +150,70 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+
+  const remote = Option.getOrUndefined(
+    yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+  );
+
+  const metadataForPath = Effect.fnUntraced(function* (requestedPath: string) {
+    const expandedPath = expandHomePath(requestedPath, yield* HostProcess.HomeDirectory);
+    if (!path.isAbsolute(expandedPath)) return null;
+    if (remote) {
+      const target =
+        (yield* remote.lookup(expandedPath)) ??
+        (yield* remote.bindings).find(
+          (binding) =>
+            binding.remoteRoot &&
+            CodespacesWorkspace.isWorkspacePath(expandedPath, binding.remoteRoot),
+        );
+      if (target)
+        return yield* remote
+          .call<FilesystemEntryMetadata | null>(target.localRoot, "files", "getMetadata", [
+            { cwd: expandedPath, relativePath: "." },
+          ])
+          .pipe(Effect.catch(() => Effect.succeed(null)));
+    }
+    const stat = yield* fileSystem.stat(expandedPath).pipe(Effect.option);
+    if (stat._tag === "None") return null;
+    if (stat.value.type === "Directory") return { kind: "directory" } as const;
+    if (stat.value.type !== "File") return { kind: "other" } as const;
+    let mimeType: string | undefined;
+    // Named extensions already choose the icon without a content read. For an
+    // extensionless regular file, read at most 512 bytes, never the whole file.
+    if (path.extname(expandedPath) === "" && stat.value.size > 0) {
+      mimeType = yield* Effect.tryPromise({
+        try: async () => {
+          const handle = await NodeFSP.open(
+            expandedPath,
+            NodeFS.constants.O_RDONLY | NodeFS.constants.O_NONBLOCK,
+          );
+          try {
+            if (!(await handle.stat()).isFile()) return undefined;
+            const buffer = Buffer.alloc(512);
+            const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+            return fileHeaderMimeType(buffer.subarray(0, bytesRead));
+          } finally {
+            await handle.close();
+          }
+        },
+        catch: () => undefined,
+      }).pipe(Effect.catch(() => Effect.succeed(undefined)));
+    }
+    return {
+      kind: "file",
+      byteLength: Number(stat.value.size),
+      ...(mimeType === undefined ? {} : { mimeType }),
+    } satisfies FilesystemEntryMetadata;
+  });
+
+  const getMetadata: WorkspaceFileSystem["Service"]["getMetadata"] = Effect.fn(
+    "WorkspaceFileSystem.getMetadata",
+  )(function* (input) {
+    const paths = [...new Set(input.paths)];
+    const entries = yield* Effect.forEach(paths, metadataForPath, { concurrency: 8 });
+    const byPath = new Map(paths.map((value, index) => [value, entries[index] ?? null]));
+    return { entries: input.paths.map((value) => byPath.get(value) ?? null) };
+  });
 
   /**
    * Resolves the file a read targets. Workspace-relative paths must stay inside the
@@ -342,9 +416,6 @@ export const make = Effect.gen(function* () {
     return { relativePath: target.relativePath };
   });
 
-  const remote = Option.getOrUndefined(
-    yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
-  );
   const routed = CodespacesWorkspace.routeWorkspaceMethods(
     { readFile, writeFile },
     remote,
@@ -355,11 +426,12 @@ export const make = Effect.gen(function* () {
         relativePath: "",
         resolvedPath: cwd,
         operationPath: cwd,
-        operation: method === "readFile" ? "read" : "write-file",
+        operation: method === "writeFile" ? "write-file" : "read",
         cause,
       }),
   );
   return WorkspaceFileSystem.of({
+    getMetadata,
     writeFile: routed.writeFile,
     readFile: (input) =>
       Effect.gen(function* () {

@@ -1,5 +1,5 @@
 import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
-import * as GitHubCredentials from "../sourceControl/GitHubCredentials.ts";
+import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as NodeModule from "node:module";
@@ -11,7 +11,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
 
@@ -50,8 +50,8 @@ let didEnsureSpawnHelperExecutable = false;
 const resolveNodePtySpawnHelperPath = Effect.gen(function* () {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
-  const platform = yield* HostProcessPlatform;
-  const architecture = yield* HostProcessArchitecture;
+  const platform = yield* HostProcess.Platform;
+  const architecture = yield* HostProcess.Architecture;
 
   const packageJsonPath = requireForNodePty.resolve("node-pty/package.json");
   const packageDir = path.dirname(packageJsonPath);
@@ -71,7 +71,7 @@ const resolveNodePtySpawnHelperPath = Effect.gen(function* () {
 
 const ensureNodePtySpawnHelperExecutable = Effect.fn(function* () {
   const fs = yield* FileSystem.FileSystem;
-  const platform = yield* HostProcessPlatform;
+  const platform = yield* HostProcess.Platform;
   if (platform === "win32") return;
   if (didEnsureSpawnHelperExecutable) return;
 
@@ -240,8 +240,8 @@ export const make = Effect.fn("NodePtyAdapter.make")(function* () {
   const loadNodePtyModule = yield* NodePtyModuleLoaderRef;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const platform = yield* HostProcessPlatform;
-  const architecture = yield* HostProcessArchitecture;
+  const platform = yield* HostProcess.Platform;
+  const architecture = yield* HostProcess.Architecture;
 
   const nodePty = yield* Effect.tryPromise({
     try: loadNodePtyModule,
@@ -257,8 +257,8 @@ export const make = Effect.fn("NodePtyAdapter.make")(function* () {
     ensureNodePtySpawnHelperExecutable().pipe(
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(Path.Path, path),
-      Effect.provideService(HostProcessPlatform, platform),
-      Effect.provideService(HostProcessArchitecture, architecture),
+      Effect.provideService(HostProcess.Platform, platform),
+      Effect.provideService(HostProcess.Architecture, architecture),
       Effect.orElseSucceed(() => undefined),
     ),
   );
