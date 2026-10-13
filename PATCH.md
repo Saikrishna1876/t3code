@@ -17,7 +17,7 @@ Keep project Codespaces work available with the user's existing local provider l
 
 ## Baseline
 
-- Observed integrated upstream baseline: `42160f2925daa3c0d4ef2b95f68a87858972e6a3`, committed through merge `ca3e61cd48f7ac176634cf06efbab631f4bdba93` on 2026-10-13. Git ancestry confirms local integration; fork/main push is pending.
+- Observed integrated upstream baseline: `42160f2925daa3c0d4ef2b95f68a87858972e6a3`, committed through merge `ca3e61cd48f7ac176634cf06efbab631f4bdba93` on 2026-10-13. The merge and review fixes were pushed to fork/main without force at `8fc3e9b1bc34d8d716aea32d7e03937265d4eea1` and verified live. Git ancestry confirms integration.
 - Previous integrated upstream baseline: `33806e73555107b8ac8fb18fd15b9dfb87ec6557`, landed through merge `becb9df9f34c64976b939e9eb9ca756d1f53e562`.
 - Compatibility patches, including PR #2, are committed. Superseded local Codespaces drafts were stashed before the 2026-10-13 integration; see Latest attempt.
 - Last behaviorally verified baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda` (release `0.0.42` built locally on 2026-09-18 with Electron `43.6.0` was extracted and interactively confirmed working by the user on the target Intel Mac macOS 15 system).
@@ -92,7 +92,7 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 ## Latest attempt
 
 - Date: 2026-10-13.
-- Status: committed locally as integration merge `ca3e61cd48f7ac176634cf06efbab631f4bdba93`; focused checks passed. CodeRabbit completed; its four findings are addressed. Follow-up CodeRabbit review is rate-limited, and Greptile CLI review is unavailable on the personal free plan. Push remains pending. The user authorizes stashing superseded drafts, updating this specification, committing the integration, and updating fork/main without force.
+- Status: landed. Integration merge `ca3e61cd48f7ac176634cf06efbab631f4bdba93` and review-fix commit `8fc3e9b1bc34d8d716aea32d7e03937265d4eea1` were pushed to fork/main without force and verified live; focused checks passed. CodeRabbit completed; its four findings are addressed. Follow-up CodeRabbit review is rate-limited, and Greptile CLI review is unavailable on the personal free plan. Fork CI results are not yet verified. The user authorizes stashing superseded drafts, updating this specification, committing the integration, and updating fork/main without force.
 - Starting fork HEAD and rollback reference: `1e778979abf3fb64d9511fee147c16b710c4de98`, the landed PR #2 merge. Original local main remains `9b53b9fc028b8eee682a4000b2ee6eb91e2a5b57`.
 - Previous integrated upstream baseline: `33806e73555107b8ac8fb18fd15b9dfb87ec6557`. Exact target: `42160f2925daa3c0d4ef2b95f68a87858972e6a3`, resolved live from origin/main and fetched on 2026-10-13. Baseline ancestry verified; 357 upstream commits included.
 - Review branch: `patch/upstream-20261013`. Worktree: `/Users/saikrishnaambeti/Documents/opensource/t3code-upstream-review-20261013`.
