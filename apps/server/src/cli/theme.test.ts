@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as TestConsole from "effect/testing/TestConsole";
 import { Command } from "effect/cli";
+import type * as CliError from "effect/cli/CliError";
 
 import { cli } from "../binCli.ts";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
@@ -21,8 +22,10 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 const windowsHost = HostProcess.Platform.defaultValue() === "win32";
 const layerCliRuntime = Layer.mergeAll(NodeServices.layer, NetService.layer, TestConsole.layer);
 
-const runCli = (args: ReadonlyArray<string>) =>
-  Command.runWith(cli, { version: "0.0.0" })(args).pipe(Effect.provide(layerCliRuntime));
+const runCli = (
+  args: ReadonlyArray<string>,
+): Effect.Effect<void, Command.Error<typeof cli> | CliError.CliError> =>
+  Effect.provide(Command.runWith(cli, { version: "0.0.0" })(args), layerCliRuntime);
 
 const makeBaseDir = () => NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-theme-cli-"));
 
