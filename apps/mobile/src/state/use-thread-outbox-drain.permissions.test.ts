@@ -21,6 +21,7 @@ const state = vi.hoisted(() => ({
   runtime: vi.fn(),
   interaction: vi.fn(),
   prepare: vi.fn(),
+  binding: vi.fn(),
   manager: null as unknown as ReturnType<
     typeof import("./thread-outbox-manager").createThreadOutboxManager
   >,
@@ -34,7 +35,7 @@ const state = vi.hoisted(() => ({
   },
   config: {
     providers: [{ instanceId: "codex", driver: "codex" }],
-    environment: { capabilities: {} },
+    environment: { capabilities: {} as { codespaces?: boolean } },
   },
 }));
 vi.mock("react", () => ({
@@ -65,6 +66,21 @@ vi.mock("./server", async () => {
   const { Atom } = await import("effect/reactivity");
   return {
     serverEnvironment: { configValueAtom: Atom.family((_id: string) => Atom.make(state.config)) },
+  };
+});
+vi.mock("./codespaces", async () => {
+  const { Atom } = await import("effect/reactivity");
+  const Effect = await import("effect/Effect");
+  const project = Atom.family((key: string) =>
+    Atom.make(
+      Effect.tryPromise({ try: () => state.binding(JSON.parse(key)), catch: (error) => error }),
+    ).pipe(Atom.keepAlive),
+  );
+  return {
+    codespacesEnvironment: {
+      project: (target: { environmentId: string; input: { projectId: string } }) =>
+        project(JSON.stringify(target)),
+    },
   };
 });
 vi.mock("./threads", async () => {
@@ -171,6 +187,8 @@ function runDrain() {
 beforeEach(() => {
   state.grantedEnvironments = new Set(["primary"]);
   state.draftText = "Keep this draft separate";
+  state.config.environment.capabilities = {};
+  state.binding.mockReset().mockResolvedValue({ name: null });
   appAtomRegistry.set(state.manager.queuedMessagesByThreadKeyAtom, {});
   appAtomRegistry.set(dispatchingQueuedMessageIdAtom, null);
   for (const command of [state.start, state.metadata, state.runtime, state.interaction]) {
@@ -185,6 +203,80 @@ beforeEach(() => {
 });
 afterEach(() => {
   state.cleanups.splice(0).forEach((cleanup) => cleanup());
+});
+
+describe("queued creation workspace delivery", () => {
+  it.each([false, true])(
+    "refreshes a queued worktree selection against current binding, bound: %s",
+    async (bound) => {
+      state.grantedEnvironments.add("secondary");
+      state.config.environment.capabilities = { codespaces: true };
+      const queued = message({
+        threadId: ThreadId.make("new-thread"),
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        creation: {
+          projectId: ProjectId.make("project"),
+          projectCwd: "/repo",
+          workspaceMode: "worktree",
+          branch: "feature/saved",
+          worktreePath: "/old/worktree",
+          startFromOrigin: true,
+        },
+      });
+      await state.manager.enqueue(queued);
+      const { executeAtomQuery } = await import("@t3tools/client-runtime/state/runtime");
+      const { codespacesEnvironment } = await import("./codespaces");
+      await executeAtomQuery(
+        appAtomRegistry,
+        codespacesEnvironment.project({
+          environmentId: queued.environmentId,
+          input: { projectId: queued.creation!.projectId },
+        }),
+        { refresh: true },
+      );
+      state.binding.mockResolvedValue({ name: bound ? "new-binding" : null });
+      await runDrain();
+      expect(state.binding).toHaveBeenCalledTimes(2);
+      const input = state.start.mock.calls[0]![0].input;
+      expect(input.bootstrap.createThread.worktreePath).toBeNull();
+      expect(input.bootstrap.createThread.branch).toBe(bound ? null : "feature/saved");
+      if (bound) {
+        expect(input.bootstrap.prepareWorktree).toBeUndefined();
+        expect(input.bootstrap.runSetupScript).toBeUndefined();
+      } else {
+        expect(input.bootstrap.prepareWorktree).toMatchObject({
+          baseBranch: "feature/saved",
+          startFromOrigin: true,
+        });
+      }
+      expect(remaining()).toEqual([]);
+    },
+  );
+  it("keeps creation queued after failed binding reads and retries with current status", async () => {
+    state.grantedEnvironments.add("secondary");
+    state.config.environment.capabilities = { codespaces: true };
+    const queued = message({
+      threadId: ThreadId.make("new-thread"),
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      creation: {
+        projectId: ProjectId.make("project"),
+        projectCwd: "/repo",
+        workspaceMode: "local",
+        branch: null,
+        worktreePath: null,
+      },
+    });
+    await state.manager.enqueue(queued);
+    state.binding.mockRejectedValueOnce(new Error("Binding read failed"));
+    await runDrain();
+    expect(state.start).not.toHaveBeenCalled();
+    expect(remaining()).toEqual([queued]);
+    state.binding.mockResolvedValue({ name: "now-bound" });
+    state.cleanups.splice(0).forEach((cleanup) => cleanup());
+    await runDrain();
+    expect(state.start).toHaveBeenCalledOnce();
+    expect(remaining()).toEqual([]);
+  });
 });
 
 describe("queued task operation access", () => {

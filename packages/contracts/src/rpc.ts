@@ -3,6 +3,21 @@ import {
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
 } from "./orchestrationV2.ts";
+import {
+  CodespacesProjectInput,
+  CodespacesBindInput,
+  CodespacesProject,
+  CodespacesError,
+  CodespacesConfiguration,
+  CodespacesRunInput,
+  CodespacesOperation,
+  CodespacesSnapshot,
+  CodespacesListResult,
+  CodespacesOptionsInput,
+  CodespacesOptions,
+  CodespacesPairInput,
+  CodespacesPairResult,
+} from "./codespaces.ts";
 import { OrchestrationDispatchCommandError } from "./orchestrationDispatch.ts";
 import {
   McpAppCallToolInput,
@@ -258,6 +273,7 @@ import {
   PreviewClearProfileInput,
   PreviewReportProfilesInput,
   PreviewNavigateInput,
+  PreviewResolveUrlInput,
   PreviewOpenInput,
   PreviewRefreshInput,
   PreviewReportStatusInput,
@@ -358,6 +374,14 @@ import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 
 export const WS_METHODS = {
+  codespacesProject: "codespaces.project",
+  codespacesBind: "codespaces.bind",
+  codespacesList: "codespaces.list",
+  codespacesOptions: "codespaces.options",
+  codespacesConfigure: "codespaces.configure",
+  codespacesRun: "codespaces.run",
+  codespacesPair: "codespaces.pair",
+  codespacesSubscribe: "codespaces.subscribe",
   // Project registry methods
   projectsList: "projects.list",
   projectsAdd: "projects.add",
@@ -439,6 +463,7 @@ export const WS_METHODS = {
   // Preview methods
   previewOpen: "preview.open",
   previewNavigate: "preview.navigate",
+  previewResolveUrl: "preview.resolveUrl",
   previewResize: "preview.resize",
   previewAdjust: "preview.adjust",
   previewRefresh: "preview.refresh",
@@ -1438,6 +1463,12 @@ const WsPreviewOpenRpc = Rpc.make(WS_METHODS.previewOpen, {
   error: Schema.Union([PreviewError, EnvironmentAuthorizationError]),
 });
 
+const WsPreviewResolveUrlRpc = Rpc.make(WS_METHODS.previewResolveUrl, {
+  payload: PreviewResolveUrlInput,
+  success: Schema.String,
+  error: Schema.Union([PreviewError, EnvironmentAuthorizationError]),
+});
+
 const WsPreviewNavigateRpc = Rpc.make(WS_METHODS.previewNavigate, {
   payload: PreviewNavigateInput,
   success: PreviewSessionSnapshot,
@@ -1808,7 +1839,54 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
   { error: EnvironmentAuthorizationError },
 ) {}
 
+const WsCodespacesProjectRpc = Rpc.make(WS_METHODS.codespacesProject, {
+  payload: CodespacesProjectInput,
+  success: CodespacesProject,
+  error: CodespacesError,
+});
+const WsCodespacesBindRpc = Rpc.make(WS_METHODS.codespacesBind, {
+  payload: CodespacesBindInput,
+  success: CodespacesProject,
+  error: CodespacesError,
+});
+const WsCodespacesListRpc = Rpc.make(WS_METHODS.codespacesList, {
+  success: CodespacesListResult,
+  error: CodespacesError,
+});
+const WsCodespacesOptionsRpc = Rpc.make(WS_METHODS.codespacesOptions, {
+  payload: CodespacesOptionsInput,
+  success: CodespacesOptions,
+  error: CodespacesError,
+});
+const WsCodespacesConfigureRpc = Rpc.make(WS_METHODS.codespacesConfigure, {
+  payload: CodespacesConfiguration,
+  success: CodespacesSnapshot,
+  error: CodespacesError,
+});
+const WsCodespacesRunRpc = Rpc.make(WS_METHODS.codespacesRun, {
+  payload: CodespacesRunInput,
+  success: CodespacesOperation,
+  error: CodespacesError,
+});
+const WsCodespacesPairRpc = Rpc.make(WS_METHODS.codespacesPair, {
+  payload: CodespacesPairInput,
+  success: CodespacesPairResult,
+  error: CodespacesError,
+});
+const WsCodespacesSubscribeRpc = Rpc.make(WS_METHODS.codespacesSubscribe, {
+  success: CodespacesSnapshot,
+  error: CodespacesError,
+  stream: true,
+});
 export const WsRpcGroup = RpcGroup.make(
+  WsCodespacesProjectRpc,
+  WsCodespacesBindRpc,
+  WsCodespacesListRpc,
+  WsCodespacesOptionsRpc,
+  WsCodespacesConfigureRpc,
+  WsCodespacesRunRpc,
+  WsCodespacesPairRpc,
+  WsCodespacesSubscribeRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -1956,6 +2034,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeTerminalMetadataRpc,
   WsPreviewOpenRpc,
   WsPreviewNavigateRpc,
+  WsPreviewResolveUrlRpc,
   WsPreviewResizeRpc,
   WsPreviewAdjustRpc,
   WsPreviewRefreshRpc,

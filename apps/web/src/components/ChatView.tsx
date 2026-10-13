@@ -147,6 +147,8 @@ import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReferenc
 import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
 import { Debouncer } from "@tanstack/react-pacer";
 import { useAtomValue } from "@effect/atom-react";
+import { codespacesEnvironment } from "~/state/codespaces";
+import { codespacesProjectSendBlockReason } from "@t3tools/client-runtime/codespaces-presentation";
 import { Atom } from "effect/reactivity";
 import {
   Fragment,
@@ -546,6 +548,7 @@ import {
   resolveProactiveTurnDiffAction,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
+  resolveCodespaceDraftWorkspace,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   startNewThreadForProject,
@@ -3004,6 +3007,16 @@ export default function ChatView(props: ChatViewProps) {
   const serverConfig = activeThread
     ? (activeEnvironment?.serverConfig ?? null)
     : (primaryEnvironment?.serverConfig ?? null);
+  const codespace = useEnvironmentQuery(
+    activeProject && serverConfig?.environment.capabilities.codespaces
+      ? codespacesEnvironment.project({ environmentId, input: { projectId: activeProject.id } })
+      : null,
+  );
+  const codespaceBound = Boolean(codespace.data?.name);
+  const workspaceLocationBlockReason = codespacesProjectSendBlockReason(
+    activeProject ? serverConfig?.environment.capabilities : { codespaces: false },
+    codespace,
+  );
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
   const selectedProviderByThreadId = composerActiveProvider ?? null;
   const threadProvider =
@@ -3032,6 +3045,22 @@ export default function ChatView(props: ChatViewProps) {
       ? null
       : clampFileAttachmentUploadBytes(advertisedFileAttachmentBytes);
   const envLocked = Boolean(activeThread && (activeMessageCount > 0 || activeRuntime !== null));
+  const canOverrideServerThreadEnvMode = Boolean(
+    isServerThread &&
+    activeThread &&
+    activeMessageCount === 0 &&
+    activeThread.worktreePath === null &&
+    !envLocked,
+  );
+  const activeWorktreePath = resolveCodespaceDraftWorkspace({
+    codespaceBound,
+    isUnstarted: isLocalDraftThread || canOverrideServerThreadEnvMode,
+    envMode: draftThread?.envMode ?? "local",
+    branch: activeThread?.branch ?? null,
+    worktreePath: activeThread?.worktreePath ?? null,
+    startFromOrigin: false,
+    currentCheckoutBranch: null,
+  }).worktreePath;
 
   const loadBalancingSettings = useClientSettings();
   const automaticEnvironment = Boolean(
@@ -3090,6 +3119,21 @@ export default function ChatView(props: ChatViewProps) {
     isServerUpdateFailureDismissed(serverUpdateState);
   const systemComposerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
     const items: ComposerBannerStackItem[] = [];
+    if (workspaceLocationBlockReason) {
+      items.push({
+        id: `workspace-location:${activeProject?.id}`,
+        variant: codespace.error && !codespace.isPending ? "error" : "info",
+        compact: true,
+        title: workspaceLocationBlockReason,
+        icon: null,
+        actions:
+          codespace.error && !codespace.isPending ? (
+            <Button size="xs" variant="ghost" onClick={codespace.refresh}>
+              Retry execution location
+            </Button>
+          ) : undefined,
+      });
+    }
     const updateRunning = serverUpdateState.status === "running";
     const unavailableConnection = activeEnvironmentUnavailableState?.connection ?? null;
     const disconnectAction =
@@ -3224,6 +3268,11 @@ export default function ChatView(props: ChatViewProps) {
     if (autoBalanceUpdateBanner) items.push(autoBalanceUpdateBanner);
     return items;
   }, [
+    workspaceLocationBlockReason,
+    activeProject?.id,
+    codespace.error,
+    codespace.isPending,
+    codespace.refresh,
     automaticEnvironment,
     autoBalanceUpdateBanner,
     activeEnvironmentUnavailableState,
@@ -4120,10 +4169,10 @@ export default function ChatView(props: ChatViewProps) {
   const gitCwd = activeProject
     ? projectScriptCwd({
         project: { cwd: activeProject.workspaceRoot },
-        worktreePath: activeThread?.worktreePath ?? null,
+        worktreePath: activeWorktreePath,
       })
     : null;
-  const gitStatusCwd = activeThread?.worktreePath ?? gitCwd;
+  const gitStatusCwd = activeWorktreePath ?? gitCwd;
   const gitStatusQuery = useEnvironmentQuery(
     gitStatusCwd === null
       ? null
@@ -4220,7 +4269,7 @@ export default function ChatView(props: ChatViewProps) {
     : null;
   const hasTimelineTopBanner = Boolean(timelineThreadError) || visibleProviderStatus !== null;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
-  const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
+  const activeThreadWorktreePath = activeWorktreePath;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
   useLayoutEffect(() => {
     if (
@@ -4626,6 +4675,9 @@ export default function ChatView(props: ChatViewProps) {
       if (!isServerThread || activeThreadId === null) {
         throw new Error("Messages from apps need a started thread.");
       }
+      if (workspaceLocationBlockReason !== null) {
+        throw new Error(workspaceLocationBlockReason);
+      }
       const result = await startThreadTurn({
         environmentId,
         input: {
@@ -4641,7 +4693,15 @@ export default function ChatView(props: ChatViewProps) {
         throw error instanceof Error ? error : new Error("Could not send the app's message.");
       }
     },
-    [activeThreadId, environmentId, interactionMode, isServerThread, runtimeMode, startThreadTurn],
+    [
+      activeThreadId,
+      environmentId,
+      interactionMode,
+      isServerThread,
+      runtimeMode,
+      startThreadTurn,
+      workspaceLocationBlockReason,
+    ],
   );
   const editQueuedRunCommand = useAtomCommand(threadEnvironment.editQueuedRun, {
     reportFailure: false,
@@ -4980,7 +5040,7 @@ export default function ChatView(props: ChatViewProps) {
         wantsNewTerminal ||
         !canReuseTerminal ||
         !readEnvironmentScope(environmentId, AuthTerminalReadScope);
-      const targetWorktreePath = options?.worktreePath ?? activeThread.worktreePath ?? null;
+      const targetWorktreePath = options?.worktreePath ?? activeWorktreePath;
 
       setTerminalUiLaunchContext({
         threadId: activeThreadId,
@@ -5079,6 +5139,7 @@ export default function ChatView(props: ChatViewProps) {
       activeThread,
       activeThreadId,
       activeThreadRef,
+      activeWorktreePath,
       gitCwd,
       setTerminalOpen,
       setThreadError,
@@ -6926,20 +6987,12 @@ export default function ChatView(props: ChatViewProps) {
     setExpandedImage(null);
   }, []);
 
-  const activeWorktreePath = activeThread?.worktreePath ?? null;
   const derivedEnvMode: DraftThreadEnvMode = resolveEffectiveEnvMode({
     activeWorktreePath,
     hasServerThread: isServerThread,
     draftThreadEnvMode: isLocalDraftThread ? draftThread?.envMode : undefined,
     preparingWorktree: isPreparingWorktree,
   });
-  const canOverrideServerThreadEnvMode = Boolean(
-    isServerThread &&
-    activeThread &&
-    activeMessageCount === 0 &&
-    activeThread.worktreePath === null &&
-    !envLocked,
-  );
   const envMode: DraftThreadEnvMode = canOverrideServerThreadEnvMode
     ? (pendingServerThreadEnvMode ?? draftThread?.envMode ?? derivedEnvMode)
     : derivedEnvMode;
@@ -6953,8 +7006,17 @@ export default function ChatView(props: ChatViewProps) {
       ? (pendingServerThreadStartFromOriginByThreadId[activeThread?.id ?? ""] ??
         activeProjectSettings.settings.newWorktreesStartFromOrigin)
       : false;
+  const sendWorkspace = resolveCodespaceDraftWorkspace({
+    codespaceBound,
+    isUnstarted: isLocalDraftThread || canOverrideServerThreadEnvMode,
+    envMode,
+    branch: activeThreadBranch,
+    worktreePath: activeWorktreePath,
+    startFromOrigin,
+    currentCheckoutBranch: gitStatusQuery.data?.refName ?? null,
+  });
   const sendEnvMode = resolveSendEnvMode({
-    requestedEnvMode: envMode,
+    requestedEnvMode: sendWorkspace.envMode,
     isGitRepo,
   });
   const localCheckoutBranchMismatch = useMemo(
@@ -7420,7 +7482,13 @@ export default function ChatView(props: ChatViewProps) {
   // and its attachments stay local.
   const sendStandaloneCommand = useCallback(
     async (text: string, failureMessage: string) => {
-      if (!activeThread || !clientSettingsHydrated || sendInFlightRef.current) return;
+      if (
+        !activeThread ||
+        !clientSettingsHydrated ||
+        workspaceLocationBlockReason !== null ||
+        sendInFlightRef.current
+      )
+        return;
       const context = composerRef.current?.getSendContext();
       if (!context?.providerAvailable) return;
 
@@ -7498,6 +7566,7 @@ export default function ChatView(props: ChatViewProps) {
       sendInFlightRef,
       setThreadError,
       startThreadTurn,
+      workspaceLocationBlockReason,
     ],
   );
   // A native /goal keeps the agent working across turns. Stop pauses a Codex
@@ -7679,16 +7748,18 @@ export default function ChatView(props: ChatViewProps) {
     pendingApprovals.length > 0 ||
     pendingUserInputs.length > 0 ||
     showPlanFollowUpPrompt;
-  const compactDisabled = compactThreadUnavailable;
-  const compactDisabledReason = compactDisabled
-    ? !canOperateThread
-      ? "This connection cannot change threads."
-      : !activeProject
-        ? "Choose a project before compacting"
-        : !manualCompactionProviderAvailable
-          ? "Compaction is unavailable for this provider"
-          : "Compacting is unavailable right now"
-    : null;
+  const compactDisabled = compactThreadUnavailable || workspaceLocationBlockReason !== null;
+  const compactDisabledReason =
+    workspaceLocationBlockReason ??
+    (compactDisabled
+      ? !canOperateThread
+        ? "This connection cannot change threads."
+        : !activeProject
+          ? "Choose a project before compacting"
+          : !manualCompactionProviderAvailable
+            ? "Compaction is unavailable for this provider"
+            : "Compacting is unavailable right now"
+      : null);
   // Tokens a stale Claude session would re-read on its next turn. While set,
   // the composer shows a Compact chip and Enter compacts first; turning the
   // chip off sends the next message with full history. Held queues and
@@ -8663,6 +8734,7 @@ export default function ChatView(props: ChatViewProps) {
       isRevertingCheckpoint ||
       threadDetailLoading ||
       activeEnvironmentUnavailable ||
+      workspaceLocationBlockReason !== null ||
       sendInFlightRef.current
     ) {
       return;
@@ -8816,12 +8888,23 @@ export default function ChatView(props: ChatViewProps) {
       onAdvanceActivePendingUserInput();
       return;
     }
+    if (workspaceLocationBlockReason !== null) {
+      notifyDirectAnnotationAttached();
+      return;
+    }
     const sendCtx = composerRef.current?.getSendContext();
     if (!sendCtx?.providerAvailable) {
       notifyDirectAnnotationAttached();
       return;
     }
     const multipleModelSelections = sendCtx.multipleModelSelections;
+    if (codespaceBound && multipleModelSelections !== null) {
+      setThreadError(
+        activeThread.id,
+        "Codespaces support one model in the main checkout. Choose one model before sending.",
+      );
+      return;
+    }
     if (
       multipleModelSelections !== null &&
       serverConfig?.environment.capabilities.requiredWorktreeBootstrap !== true
@@ -9216,15 +9299,15 @@ export default function ChatView(props: ChatViewProps) {
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeMessageCount === 0;
     const baseBranchForWorktree =
-      isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
-        ? activeThreadBranch
+      isFirstMessage && sendEnvMode === "worktree" && !sendWorkspace.worktreePath
+        ? sendWorkspace.branch
         : null;
 
     // In worktree mode, require an explicit base branch so we don't silently
     // fall back to local execution when branch selection is missing.
     const shouldCreateWorktree =
-      isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath;
-    if (shouldCreateWorktree && !activeThreadBranch) {
+      isFirstMessage && sendEnvMode === "worktree" && !sendWorkspace.worktreePath;
+    if (shouldCreateWorktree && !sendWorkspace.branch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return;
     }
@@ -9886,8 +9969,8 @@ export default function ChatView(props: ChatViewProps) {
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
                       interactionMode: sendInteractionMode,
-                      branch: activeThreadBranch,
-                      worktreePath: activeThread.worktreePath,
+                      branch: sendWorkspace.branch,
+                      worktreePath: sendWorkspace.worktreePath,
                       createdAt: activeThread.createdAt,
                     },
                   }
@@ -9962,8 +10045,8 @@ export default function ChatView(props: ChatViewProps) {
               scopeProjectRef(activeProject.environmentId, activeProject.id),
               resolveBackgroundDraftWorkspaceOptions({
                 envMode: sendEnvMode,
-                branch: activeThreadBranch,
-                startFromOrigin,
+                branch: sendWorkspace.branch,
+                startFromOrigin: sendWorkspace.startFromOrigin,
               }),
             ),
           );
@@ -10386,6 +10469,7 @@ export default function ChatView(props: ChatViewProps) {
       !isServerThread ||
       isSendBusy ||
       isConnecting ||
+      workspaceLocationBlockReason !== null ||
       sendInFlightRef.current
     ) {
       return false;
@@ -10529,6 +10613,7 @@ export default function ChatView(props: ChatViewProps) {
       isSendBusy ||
       isConnecting ||
       activeEnvironmentUnavailable ||
+      workspaceLocationBlockReason !== null ||
       sendInFlightRef.current
     ) {
       return;
@@ -10673,6 +10758,7 @@ export default function ChatView(props: ChatViewProps) {
     resetLocalDispatch,
     defaultRuntimeMode,
     startThreadTurn,
+    workspaceLocationBlockReason,
     environmentId,
     composerRef,
   ]);
@@ -10860,6 +10946,7 @@ export default function ChatView(props: ChatViewProps) {
     !needsLoadBalancing &&
     !activeEnvironmentUnavailable &&
     !activePendingProgress &&
+    workspaceLocationBlockReason === null &&
     !feedbackUploading;
   useEffect(() => {
     if (
@@ -11628,7 +11715,10 @@ export default function ChatView(props: ChatViewProps) {
                                           ? "Messages loading"
                                           : worktreeSetupBlocksSend
                                             ? "Preparing worktree"
-                                            : projectCloneSendBlockReason
+                                            : (projectCloneSendBlockReason ??
+                                              (activePendingProgress
+                                                ? null
+                                                : workspaceLocationBlockReason))
                               }
                               isPreparingWorktree={isPreparingWorktree}
                               queuedRunsControl={

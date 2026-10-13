@@ -1,6 +1,8 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
+import { makeWorkspaceReservations } from "../codespaces/WorkspaceReservations.ts";
 import * as NetAddress from "effect/net/NetAddress";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, it } from "@effect/vitest";
+import { assert, expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
   type ModelSelection,
@@ -471,6 +473,7 @@ function layerTest(input: {
   readonly scopeCloseReached?: Deferred.Deferred<void>;
   readonly serverSettingsLayer?: ReturnType<typeof ServerSettings.layerTest>;
   readonly projectServiceLayer?: Layer.Layer<ProjectService.ProjectService>;
+  readonly workspaceLayer?: Layer.Layer<CodespacesWorkspace.CodespacesWorkspace>;
 }) {
   const layerConfiguredEventSink =
     input.flakyReleaseWrites !== undefined
@@ -537,6 +540,7 @@ function layerTest(input: {
           layerTestStores,
           ...(input.serverSettingsLayer === undefined ? [] : [input.serverSettingsLayer]),
           ...(input.projectServiceLayer === undefined ? [] : [input.projectServiceLayer]),
+          ...(input.workspaceLayer === undefined ? [] : [input.workspaceLayer]),
         ),
       ),
     ),
@@ -794,6 +798,149 @@ function makePendingRuntimeRequestEvents(input: {
     return { events, providerEvents, requestId, nodeId };
   });
 }
+
+it.effect.each([true, false])(
+  "ProviderSessionManagerV2 rejects outside-root worktrees with connected=%s",
+  (connected) =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      const projectId = ProjectId.make("bound-project");
+      const binding = { projectId, localRoot: "/other/project", name: "space" };
+      const workspaceLayer = Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+        bindings: Effect.succeed([binding]),
+        acquireWork: () => Effect.void,
+        lookup: (cwd) =>
+          Effect.succeed(
+            cwd === binding.localRoot
+              ? {
+                  ...binding,
+                  executor: connected
+                    ? {
+                        name: "space",
+                        remoteRoot: "/workspaces/project",
+                        workerUrl: "http://localhost:1",
+                        execServerUrl: "ws://localhost:2",
+                        token: "fixture",
+                      }
+                    : null,
+                  remoteCwd: connected ? "/workspaces/project" : null,
+                }
+              : null,
+          ),
+      });
+      yield* Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const threadId = ThreadId.make("outside-bound-root");
+        const now = yield* DateTime.now;
+        yield* eventSink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, projectId, now })],
+        });
+        const providerSessionId = yield* idAllocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        const result = yield* manager
+          .open({ threadId, providerSessionId, modelSelection, runtimePolicy })
+          .pipe(Effect.flip);
+        expect(result._tag).toBe("ProviderSessionOpenError");
+        expect(result.message).toContain(
+          connected ? "Select the main checkout" : "Resume the project's Codespace",
+        );
+        expect((yield* Ref.get(state)).openCount).toBe(0);
+      }).pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1000, workspaceLayer })));
+    }),
+);
+
+it.effect(
+  "ProviderSessionManagerV2 blocks starts on existing sessions during lifecycle reservations",
+  () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      const starts = yield* Ref.make(0);
+      const reservations = makeWorkspaceReservations();
+      const workspaceLayer = Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+        bindings: Effect.succeed([]),
+        lookup: () => Effect.succeed(null),
+        acquireWork: reservations.acquireWork,
+      });
+      yield* Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const threadId = ThreadId.make("reserved-existing-session");
+        const projectId = ProjectId.make("reserved-project");
+        const now = yield* DateTime.now;
+        yield* eventSink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, projectId, now })],
+        });
+        const providerSessionId = yield* idAllocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        const runtime = yield* manager.open({
+          threadId,
+          providerSessionId,
+          modelSelection,
+          runtimePolicy,
+        });
+        const providerThread = makeProviderThread({
+          idAllocator,
+          threadId,
+          providerSessionId,
+          now,
+        });
+        const runId = idAllocator.derive.run({ threadId, ordinal: 1 });
+        const input: ProviderAdapter.ProviderAdapterV2TurnInput = {
+          appThread: (yield* projectionStore.getThreadProjection(threadId)).thread,
+          threadId,
+          runId,
+          runOrdinal: 1,
+          providerTurnOrdinal: 1,
+          attemptId: idAllocator.derive.runAttempt({ runId, attemptOrdinal: 1 }),
+          rootNodeId: idAllocator.derive.rootNode({ runId }),
+          providerThread,
+          message: {
+            createdBy: "user",
+            creationSource: "web",
+            messageId: yield* idAllocator.allocate.message({ threadId, ordinal: 1 }),
+            text: "hello",
+            attachments: [],
+          },
+          modelSelection,
+          runtimePolicy,
+        };
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* reservations.reserve("stop", [projectId], ["space"]);
+            expect((yield* runtime.startTurn(input).pipe(Effect.flip))._tag).toBe(
+              "ProviderAdapterTurnStartError",
+            );
+            expect(
+              (yield* manager
+                .open({ threadId, providerSessionId, modelSelection, runtimePolicy })
+                .pipe(Effect.flip))._tag,
+            ).toBe("ProviderSessionOpenError");
+            expect(yield* Ref.get(starts)).toBe(0);
+          }),
+        );
+        yield* runtime.startTurn(input);
+        expect(yield* Ref.get(starts)).toBe(1);
+        yield* manager.close(providerSessionId);
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            state,
+            idleTimeoutMs: 1000,
+            workspaceLayer,
+            startTurn: Ref.update(starts, (count) => count + 1),
+          }),
+        ),
+      );
+    }),
+);
 
 it.effect("ProviderSessionManagerV2 opens independent sessions concurrently", () =>
   Effect.gen(function* () {

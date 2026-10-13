@@ -198,6 +198,8 @@ export const PreviewSessionSnapshot = Schema.Struct({
   threadId: TrimmedNonEmptyString,
   tabId: PreviewTabId,
   navStatus: PreviewNavStatus,
+  /** Original workspace URL for reopening after temporary SSH ports change. */
+  sourceUrl: Schema.optional(Schema.String),
   canGoBack: Schema.Boolean,
   canGoForward: Schema.Boolean,
   /** Missing snapshots from older servers are treated as fill-panel mode. */
@@ -242,6 +244,12 @@ export const PreviewOpenInput = Schema.Struct({
   reveal: Schema.optional(Schema.Boolean),
 });
 export type PreviewOpenInput = typeof PreviewOpenInput.Type;
+
+export const PreviewResolveUrlInput = Schema.Struct({
+  threadId: ThreadId,
+  url: Url,
+});
+export type PreviewResolveUrlInput = typeof PreviewResolveUrlInput.Type;
 
 export const PreviewNavigateInput = Schema.Struct({
   threadId: ThreadId,

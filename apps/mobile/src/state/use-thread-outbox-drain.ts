@@ -4,7 +4,7 @@ import {
   type EnvironmentProject,
   type EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
-import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+import { executeAtomQuery, type AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
 import {
   AuthOrchestrationOperateScope,
@@ -40,6 +40,7 @@ import {
   recordPendingThreadCreationOutcome,
 } from "./pending-thread-creation";
 import { serverEnvironment } from "./server";
+import { codespacesEnvironment } from "./codespaces";
 import { readEnvironmentScope, useEnvironmentsWithScope } from "./session";
 import {
   confirmThreadOutboxMessageQueued,
@@ -1046,7 +1047,21 @@ export function useThreadOutboxDrain(): void {
         settings,
         currentConfig.providers,
       );
+      let codespaceBound = false;
+      if (currentConfig.environment.capabilities.codespaces === true) {
+        const binding = await executeAtomQuery(
+          appAtomRegistry,
+          codespacesEnvironment.project({
+            environmentId: queuedMessage.environmentId,
+            input: { projectId: creation.projectId },
+          }),
+          { refresh: true, reportFailure: false },
+        );
+        if (binding._tag === "Failure") return false;
+        codespaceBound = Boolean(binding.value.name);
+      }
       if (!hasAccess()) return true;
+      if (!isQueuedMessagePayloadCurrent(persistedMessage, deliveryRevision)) return true;
       const deliveryResult = await startTurn({
         environmentId: queuedMessage.environmentId,
         input: buildProjectThreadStartTurnInput({
@@ -1069,10 +1084,10 @@ export function useThreadOutboxDrain(): void {
           modelSelection: sendSettings.modelSelection,
           runtimeMode: sendSettings.runtimeMode,
           interactionMode: sendSettings.interactionMode,
-          workspaceMode: creation.workspaceMode,
-          branch: creation.branch,
-          worktreePath: creation.worktreePath,
-          startFromOrigin: creation.startFromOrigin ?? false,
+          workspaceMode: codespaceBound ? "local" : creation.workspaceMode,
+          branch: codespaceBound ? null : creation.branch,
+          worktreePath: codespaceBound ? null : creation.worktreePath,
+          startFromOrigin: !codespaceBound && (creation.startFromOrigin ?? false),
           worktreeBranchName: buildTemporaryWorktreeBranchName(randomHex),
         }),
       });

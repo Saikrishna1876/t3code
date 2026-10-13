@@ -1,3 +1,4 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import * as NodeBuffer from "node:buffer";
 
 import * as Context from "effect/Context";
@@ -1253,12 +1254,56 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
 
 export const makeVcsDriver = Effect.gen(function* () {
   const driver = yield* makeVcsDriverShape();
-  return VcsDriver.VcsDriver.of(driver);
+  const remote = Option.getOrUndefined(
+    yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+  );
+  const failure = (
+    cause: import("@t3tools/contracts").CodespacesError | import("@t3tools/contracts").VcsError,
+    operation: string,
+    cwd: string,
+  ) =>
+    new VcsProcessExitError({
+      operation,
+      command: "remote workspace",
+      cwd,
+      exitCode: 1,
+      detail: cause.message,
+    });
+  return VcsDriver.VcsDriver.of({
+    ...CodespacesWorkspace.routeWorkspaceMethods(driver, remote, "vcs", failure),
+    ...(driver.checkpoints
+      ? {
+          checkpoints: CodespacesWorkspace.routeWorkspaceMethods(
+            driver.checkpoints,
+            remote,
+            "checkpoints",
+            failure,
+          ),
+        }
+      : {}),
+  });
 });
 
 export const make = Effect.gen(function* () {
   const git = yield* makeGitVcsDriverCore();
-  return GitVcsDriver.of(git);
+  const remote = Option.getOrUndefined(
+    yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+  );
+  return GitVcsDriver.of(
+    CodespacesWorkspace.routeWorkspaceMethods(
+      git,
+      remote,
+      "git",
+      (cause, operation, cwd) =>
+        new GitCommandError({
+          operation,
+          command: "remote workspace",
+          cwd,
+          detail: cause.message,
+          cause,
+        }),
+    ),
+  );
 });
 
 export const layerVcs = Layer.effect(VcsDriver.VcsDriver, makeVcsDriver);

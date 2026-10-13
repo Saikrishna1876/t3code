@@ -37,6 +37,18 @@ describe("previewRuntimeFor", () => {
     expect(previewRuntimeFor(local)).toBe("server");
   });
 
+  it.each(["http://localhost:3000/app", "http://127.0.0.1:14528/", "http://[::1]:3000/"])(
+    "keeps %s on the host that owns its port",
+    (url) => {
+      state.desktop = true;
+      state.primary = local;
+      state.serverBrowser = new Set([local, remote]);
+      expect(previewRuntimeFor(remote, url)).toBe("server");
+      expect(previewRuntimeFor(remote, "https://example.com/")).toBeUndefined();
+      state.serverBrowser.clear();
+      expect(previewRuntimeFor(remote, url)).toBeUndefined();
+    },
+  );
   it("uses the environment's browser where the client has none of its own", () => {
     state.serverBrowser = new Set([remote]);
 

@@ -1,4 +1,5 @@
 import * as NodeOS from "node:os";
+import * as CodespacesWorkspace from "../../codespaces/CodespacesWorkspace.ts";
 
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import {
@@ -13,6 +14,7 @@ import {
   EnvironmentId,
   MessageId,
   type ModelSelection,
+  type ChatAttachment,
   NodeId,
   type OrchestrationV2AppThread,
   type OrchestrationV2ProviderThread,
@@ -2514,6 +2516,164 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
       ),
     ),
+  );
+
+  it.effect(
+    "stages steering attachments in the active project when the session opened locally",
+    () =>
+      Effect.gen(function* () {
+        const nativeThreadId = "steering-workspace-thread";
+        const nativeTurnId = "steering-workspace-turn";
+        const cwd = "/project/codespace";
+        const remoteRoot = "/workspaces/project";
+        const remotePath = "/tmp/staged-report.pdf";
+        const attachment: ChatAttachment = {
+          type: "file",
+          id: "thread-11111111-1111-4111-8111-111111111111-pdf",
+          name: "report.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 100,
+        };
+        const preamble = codexReplayPreamble({
+          nativeThreadId,
+          nativeTurnId,
+          prompt: "Start work",
+        });
+        const transcript = makeCodexReplayTranscript({
+          scenario: "steering-active-workspace",
+          entries: [
+            ...preamble.slice(0, 5),
+            {
+              type: "expect_outbound",
+              label: "environment/add",
+              frame: {
+                id: 3,
+                method: "environment/add",
+                params: {
+                  environmentId: "codespace-space",
+                  execServerUrl: "ws://localhost:2",
+                  authBearerToken: "private",
+                  connectTimeoutMs: 20000,
+                },
+              },
+            },
+            { type: "emit_inbound", label: "environment/add", frame: { id: 3, result: {} } },
+            ...preamble.slice(5).map((entry) =>
+              entry.type === "expect_outbound" && entry.label === "turn/start"
+                ? {
+                    ...entry,
+                    frame: {
+                      id: 4,
+                      method: "turn/start",
+                      params: {
+                        threadId: nativeThreadId,
+                        input: [{ type: "text", text: "Start work" }],
+                        cwd,
+                        model: "gpt-5.4",
+                        approvalPolicy: "never",
+                        approvalsReviewer: "user",
+                        sandboxPolicy: { type: "dangerFullAccess" },
+                        summary: "detailed",
+                        environments: [
+                          {
+                            environmentId: "codespace-space",
+                            cwd: remoteRoot,
+                            runtimeWorkspaceRoots: [remoteRoot],
+                          },
+                        ],
+                      },
+                    },
+                  }
+                : entry.type === "emit_inbound" && entry.label === "turn/start"
+                  ? withReplayRequestId(entry, 4)
+                  : entry,
+            ),
+            {
+              type: "expect_outbound",
+              label: "turn/steer",
+              frame: {
+                id: 5,
+                method: "turn/steer",
+                params: {
+                  expectedTurnId: nativeTurnId,
+                  input: [
+                    {
+                      type: "text",
+                      text: `Read report\n\n[Attached file "report.pdf" is saved at: ${remotePath}]`,
+                    },
+                  ],
+                  threadId: nativeThreadId,
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              label: "turn/steer",
+              frame: { id: 5, result: { turnId: nativeTurnId } },
+            },
+          ],
+        });
+        const staged: string[] = [];
+        const workspace = Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+          lookup: (location) =>
+            Effect.succeed(
+              location === cwd
+                ? {
+                    projectId: "project",
+                    localRoot: cwd,
+                    name: "space",
+                    remoteCwd: remoteRoot,
+                    executor: {
+                      name: "space",
+                      remoteRoot,
+                      workerUrl: "http://localhost:1",
+                      execServerUrl: "ws://localhost:2",
+                      token: "private",
+                    },
+                  }
+                : null,
+            ),
+          wasRemote: () => Effect.succeed(false),
+          stageAttachment: (input) =>
+            Effect.sync(() => {
+              staged.push(input.cwd);
+              return remotePath;
+            }),
+        });
+        yield* Effect.gen(function* () {
+          const harness = yield* makeCodexReplayHarness(transcript);
+          const base = makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("steering-workspace-attempt"),
+            text: "Start work",
+          });
+          const turnInput = { ...base, runtimePolicy: { ...base.runtimePolicy, cwd } };
+          yield* harness.runtime.startTurn(turnInput);
+          yield* harness.runtime.steerTurn({
+            threadId: harness.threadId,
+            runId: turnInput.runId,
+            providerThread: harness.providerThread,
+            providerTurnId: (yield* IdAllocator.IdAllocatorV2).derive.providerTurn({
+              driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+              nativeTurnId,
+            }),
+            message: {
+              ...turnInput.message,
+              messageId: MessageId.make("steering-workspace-message"),
+              text: "Read report",
+              attachments: [attachment],
+            },
+          });
+          assert.deepEqual(staged, [cwd]);
+        }).pipe(Effect.provide(workspace));
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
   );
 
   it.effect("sends currency-sigil skill mentions to Codex as $ mentions", () =>

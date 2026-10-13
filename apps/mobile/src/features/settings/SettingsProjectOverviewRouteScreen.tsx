@@ -1,3 +1,4 @@
+import { ProjectCodespacesControl } from "../connection/CodespacesSettings";
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
 import { AppText as Text, AppTextInput } from "../../components/AppText";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
@@ -139,6 +140,13 @@ function ProjectOverviewContent(props: {
         </View>
       </SettingsSection>
 
+      {props.members.map((member) => (
+        <ProjectCodespacesControl
+          key={`${member.environmentId}:${member.id}`}
+          environmentId={member.environmentId}
+          projectId={member.id}
+        />
+      ))}
       <SettingsSection title="Checkouts">
         {props.members.map((member, index) => {
           const environment = props.environments.find(

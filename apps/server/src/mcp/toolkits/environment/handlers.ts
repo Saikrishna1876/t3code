@@ -1,5 +1,6 @@
 import { OrchestratorMcpFailure, type ServerSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Codespaces from "../../../codespaces/Codespaces.ts";
 import * as Environment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as Settings from "../../../serverSettings.ts";
@@ -41,6 +42,44 @@ const access = Effect.gen(function* () {
   return { ...context, descriptor, settings: yield* Settings.ServerSettingsService };
 });
 export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
+  codespaces_list: McpToolAccess.reads(() =>
+    Effect.gen(function* () {
+      yield* access;
+      const service = yield* Codespaces.Codespaces;
+      return yield* service.list.pipe(Effect.mapError(unavailable));
+    }),
+  ),
+  codespaces_status: McpToolAccess.reads(() =>
+    Effect.gen(function* () {
+      yield* access;
+      const service = yield* Codespaces.Codespaces;
+      return { operations: (yield* service.snapshot).operations };
+    }),
+  ),
+  codespaces_run: McpToolAccess.writesEnvironment(({ input }, check) =>
+    Effect.gen(function* () {
+      yield* check;
+      const context = yield* access;
+      const service = yield* Codespaces.Codespaces;
+      if (!(yield* service.snapshot).configuration.agentAccessEnabled)
+        return yield* new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message:
+            "Enable Codespaces agent management in project settings before agents can manage billable workspaces.",
+        });
+      if (context.caller && input.projectId && input.projectId !== context.caller.projectId)
+        return yield* new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message: "Manage Codespaces from their own project thread.",
+        });
+      const scopedInput = context.caller
+        ? { ...input, projectId: context.caller.projectId }
+        : input;
+      return yield* service
+        .run(scopedInput, context.caller?.projectId)
+        .pipe(Effect.mapError(unavailable));
+    }),
+  ),
   t3_environment_read: McpToolAccess.reads(() =>
     Effect.gen(function* () {
       const { descriptor, settings } = yield* access;

@@ -1,6 +1,7 @@
 "use client";
 
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { useAtomValue } from "@effect/atom-react";
 import { previewStreamDownloadUrl } from "@t3tools/client-runtime/preview/server-browser-stream";
 import {
   isAtomCommandInterrupted,
@@ -17,7 +18,11 @@ import {
   PREVIEW_ZOOM_LEVELS,
   type PreviewAdjustInput,
 } from "@t3tools/contracts";
-import { normalizePreviewUrl, resolveAddressBarInput } from "@t3tools/shared/preview";
+import {
+  isLoopbackHost,
+  normalizePreviewUrl,
+  resolveAddressBarInput,
+} from "@t3tools/shared/preview";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -176,9 +181,17 @@ export function PreviewView({
     : null;
   const open = useAtomCommand(previewEnvironment.open);
   const closePreview = useAtomCommand(previewEnvironment.close, "preview close");
-  const environmentLabel = useEnvironment(threadRef.environmentId)?.label ?? "the environment";
+  const environment = useEnvironment(threadRef.environmentId);
+  const environmentLabel = environment?.label ?? "the environment";
+  const supportsWorkspaceUrlResolution = Boolean(
+    environment?.serverConfig?.environment.capabilities.codespaces,
+  );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const serverBrowser = useEnvironmentSupportsServerBrowser(threadRef.environmentId);
+  const resolveUrl = useAtomCommand(previewEnvironment.resolveUrl, "preview URL resolution");
+  const canResolveUrl = useAtomValue(
+    previewEnvironment.resolveUrl.permissionAtom(threadRef.environmentId),
+  );
   const resize = useAtomCommand(previewEnvironment.resize, "preview viewport resize");
   const adjust = useAtomCommand(previewEnvironment.adjust, "preview appearance or zoom");
 
@@ -230,6 +243,7 @@ export function PreviewView({
   const desktopOverlay = tabId ? (previewState.desktopByTabId[tabId] ?? null) : null;
   const navStatus = snapshot?.navStatus ?? { _tag: "Idle" as const };
   const url = navStatus._tag === "Idle" ? "" : navStatus.url;
+  const sourceUrl = snapshot?.sourceUrl;
   const loading = desktopOverlay?.loading ?? navStatus._tag === "Loading";
   const canGoBack = desktopOverlay?.canGoBack ?? snapshot?.canGoBack ?? false;
   const canGoForward = desktopOverlay?.canGoForward ?? snapshot?.canGoForward ?? false;
@@ -265,20 +279,51 @@ export function PreviewView({
   }, [environmentHostname, latestHistoryUrl, navTitle, navUrl, threadKey]);
 
   const navigateToResolvedUrl = useCallback(
-    async (resolvedUrl: string) => {
+    async (requestedUrl: string) => {
+      let resolvedUrl = requestedUrl;
+      if (supportsWorkspaceUrlResolution) {
+        if (!canResolveUrl) return false;
+        const resolution = await resolveUrl({
+          environmentId: threadRef.environmentId,
+          input: { threadId: threadRef.threadId, url: requestedUrl },
+        });
+        if (resolution._tag !== "Success") return false;
+        resolvedUrl = resolution.value;
+      }
       if (isServerTab && serverSurfaceRef.current) {
         if (serverInputDisabled) return false;
         serverSurfaceRef.current.navigate(resolvedUrl);
-        rememberPreviewUrl(threadRef, resolvedUrl);
+        rememberPreviewUrl(threadRef, requestedUrl);
         return true;
       }
-      if (runtimeTabId && previewBridge) {
+      // Codespace forwards listen on the T3 host's loopback, not the desktop client's.
+      let resolvedLoopback = false;
+      try {
+        resolvedLoopback = isLoopbackHost(new URL(resolvedUrl).hostname);
+      } catch {
+        // Older or custom hosts may return a URL the desktop browser must normalize.
+      }
+      const moveToHost =
+        supportsWorkspaceUrlResolution &&
+        resolvedLoopback &&
+        threadRef.environmentId !== primaryEnvironmentId &&
+        !serverOwnsRendering;
+      if (runtimeTabId && previewBridge && !moveToHost) {
         // The bridge mirrors the resolved URL back to the server.
         await previewBridge.navigate(runtimeTabId, resolvedUrl);
-        rememberPreviewUrl(threadRef, resolvedUrl);
+        rememberPreviewUrl(threadRef, requestedUrl);
         return true;
       }
-      const result = await openPreviewSession({ openPreview: open, threadRef, url: resolvedUrl });
+      const result = await openPreviewSession({
+        openPreview: open,
+        threadRef,
+        url: requestedUrl,
+        ...(moveToHost ? { runtime: "server", viewport, profileId: activeProfileId } : {}),
+      });
+      if (result._tag === "Success" && moveToHost) {
+        useRightPanelStore.getState().openBrowser(threadRef, result.value.tabId);
+        if (tabId) await closePreviewSession({ closePreview, snapshot, tabId, threadRef });
+      }
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         if (error instanceof BrowserSettingsReadError) {
@@ -291,7 +336,23 @@ export function PreviewView({
       }
       return result._tag === "Success";
     },
-    [isServerTab, open, runtimeTabId, serverInputDisabled, threadRef],
+    [
+      activeProfileId,
+      canResolveUrl,
+      closePreview,
+      isServerTab,
+      open,
+      primaryEnvironmentId,
+      resolveUrl,
+      runtimeTabId,
+      serverInputDisabled,
+      serverOwnsRendering,
+      snapshot,
+      supportsWorkspaceUrlResolution,
+      tabId,
+      threadRef,
+      viewport,
+    ],
   );
 
   const handleSubmitUrl = useCallback(
@@ -327,9 +388,20 @@ export function PreviewView({
   );
 
   const handleRefresh = useCallback(() => {
+    if (supportsWorkspaceUrlResolution && sourceUrl && sourceUrl !== url) {
+      void navigateToResolvedUrl(sourceUrl);
+      return;
+    }
     if (isServerTab) serverSurfaceRef.current?.reload();
     else if (previewBridge && runtimeTabId) void previewBridge.refresh(runtimeTabId);
-  }, [isServerTab, runtimeTabId]);
+  }, [
+    isServerTab,
+    navigateToResolvedUrl,
+    runtimeTabId,
+    sourceUrl,
+    supportsWorkspaceUrlResolution,
+    url,
+  ]);
 
   /** Appearance and zoom of a server tab, through the server for every client. */
   const adjustServerTab = useCallback(
@@ -508,9 +580,24 @@ export function PreviewView({
   const desktopCall = (op: ((tabId: string) => Promise<void>) | undefined) => () => {
     if (op && runtimeTabId) void op(runtimeTabId).catch(() => undefined);
   };
+  const handleHardReload = () => {
+    const reload = () =>
+      serverOwnsRendering
+        ? adjustServerTab({ hardReload: true })
+        : previewBridge && runtimeTabId
+          ? previewBridge.hardReload(runtimeTabId)
+          : Promise.resolve();
+    if (supportsWorkspaceUrlResolution && sourceUrl && sourceUrl !== url) {
+      void navigateToResolvedUrl(sourceUrl)
+        .then((navigated) => (navigated ? reload() : undefined))
+        .catch(() => undefined);
+    } else {
+      void reload().catch(() => undefined);
+    }
+  };
   const moreMenuActions: PreviewMoreMenuActions | null = serverOwnsRendering
     ? {
-        hardReload: () => void adjustServerTab({ hardReload: true }),
+        hardReload: handleHardReload,
         setColorScheme: (colorScheme) => void adjustServerTab({ colorScheme }),
         zoomIn: handleZoomIn,
         zoomOut: handleZoomOut,
@@ -526,7 +613,7 @@ export function PreviewView({
       }
     : previewBridge
       ? {
-          hardReload: desktopCall(previewBridge.hardReload),
+          hardReload: handleHardReload,
           setColorScheme: (colorScheme) => {
             if (runtimeTabId)
               void previewBridge?.setColorScheme(runtimeTabId, colorScheme).catch(() => undefined);
@@ -939,7 +1026,7 @@ export function PreviewView({
   // URL-aware handler regardless of whether the panel is currently mounted.
   useEffect(() => {
     if (!visible) return;
-    return subscribePreviewAction((action) => {
+    const unsubscribe = subscribePreviewAction((action) => {
       switch (action) {
         case "refresh":
           handleRefresh();
@@ -960,6 +1047,13 @@ export function PreviewView({
           return;
       }
     });
+    const unsubscribeDesktop = window.desktopBridge?.onMenuAction((action) => {
+      if (action === "preview.refresh") handleRefresh();
+    });
+    return () => {
+      unsubscribe();
+      unsubscribeDesktop?.();
+    };
   }, [handleRefresh, handleResetZoom, handleZoomIn, handleZoomOut, visible]);
 
   return (
@@ -973,7 +1067,7 @@ export function PreviewView({
         canGoBack={canGoBack && !serverInputDisabled}
         canGoForward={canGoForward && !serverInputDisabled}
         refreshDisabled={refreshDisabled || serverInputDisabled}
-        inputDisabled={serverInputDisabled}
+        inputDisabled={serverInputDisabled || (supportsWorkspaceUrlResolution && !canResolveUrl)}
         focusUrlNonce={focusUrlNonce}
         onBack={handleBack}
         onForward={handleForward}

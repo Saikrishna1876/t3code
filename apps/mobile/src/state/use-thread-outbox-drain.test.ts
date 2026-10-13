@@ -92,6 +92,10 @@ vi.mock("./threads", () => ({
   threadEnvironment: {},
 }));
 
+vi.mock("./codespaces", () => ({
+  codespacesEnvironment: {},
+}));
+
 vi.mock("./use-atom-command", () => ({
   useAtomCommand: () => async () => undefined,
 }));

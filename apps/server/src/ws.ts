@@ -1,3 +1,4 @@
+import * as Codespaces from "./codespaces/Codespaces.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
@@ -1260,6 +1261,7 @@ const layerWsRpc = (
       const keybindings = yield* Keybindings.Keybindings;
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
+      const codespaces = yield* Codespaces.Codespaces;
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const directEndpoints = yield* DirectEndpoints.DirectEndpoints;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
@@ -2073,6 +2075,14 @@ const layerWsRpc = (
           Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
             Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
           ),
+        [WS_METHODS.codespacesProject]: (input) => codespaces.project(input),
+        [WS_METHODS.codespacesBind]: (input) => codespaces.bind(input),
+        [WS_METHODS.codespacesList]: () => codespaces.list,
+        [WS_METHODS.codespacesOptions]: (input) => codespaces.options(input),
+        [WS_METHODS.codespacesConfigure]: (input) => codespaces.configure(input),
+        [WS_METHODS.codespacesRun]: (input) => codespaces.run(input),
+        [WS_METHODS.codespacesPair]: (input) => codespaces.pair(input),
+        [WS_METHODS.codespacesSubscribe]: () => codespaces.changes,
         [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),
         [WS_METHODS.serverGetConfig]: (_input) => loadServerConfig({ usageLimitsCommand: false }),
         [WS_METHODS.serverSearchAcpRegistry]: (input) =>
@@ -2893,6 +2903,7 @@ const layerWsRpc = (
           ),
         [WS_METHODS.previewOpen]: (input) => previewManager.open(input),
         [WS_METHODS.previewNavigate]: (input) => previewManager.navigate(input),
+        [WS_METHODS.previewResolveUrl]: (input) => previewManager.resolveUrl(input),
         [WS_METHODS.previewResize]: (input) => previewManager.resize(input),
         [WS_METHODS.previewAdjust]: (input) => previewManager.adjust(input),
         [WS_METHODS.previewRefresh]: (input) => previewManager.refresh(input),

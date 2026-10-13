@@ -2,7 +2,7 @@ import { ComposerSelectControl } from "./chat/ComposerControl";
 import { ComposerContextLabel } from "./ComposerContextLabel";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { ScaleIcon } from "lucide-react";
+import { CloudIcon, ScaleIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
 import type { EnvironmentOption } from "./BranchToolbar.logic";
@@ -21,6 +21,8 @@ interface BranchToolbarEnvironmentSelectorProps {
   autoEnvironmentLabel?: string | undefined;
   onAutoEnvironment?: (() => void) | undefined;
   envLocked: boolean;
+  onCodespaces?: (() => void) | undefined;
+  codespaceLabel?: string | undefined;
   environmentId: EnvironmentId;
   availableEnvironments: readonly EnvironmentOption[];
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
@@ -30,6 +32,8 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   autoEnvironmentLabel,
   onAutoEnvironment,
   envLocked,
+  onCodespaces,
+  codespaceLabel,
   environmentId,
   availableEnvironments,
   onEnvironmentChange,
@@ -44,12 +48,13 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
       ...(onAutoEnvironment
         ? [{ value: "auto", label: autoEnvironmentLabel ?? "Auto balance" }]
         : []),
+      ...(onCodespaces ? [{ value: "codespace", label: codespaceLabel ?? "Codespace…" }] : []),
       ...availableEnvironments.map((env) => ({
         value: env.environmentId,
         label: env.label,
       })),
     ],
-    [availableEnvironments, autoEnvironmentLabel, onAutoEnvironment],
+    [availableEnvironments, autoEnvironmentLabel, onAutoEnvironment, onCodespaces, codespaceLabel],
   );
 
   // The static label carries the xs control's height (h-7 sm:h-6) as well as
@@ -57,7 +62,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   // the glass seam joining it to the composer assumes a fixed strip height, so
   // a shorter label would drag the seam out of line whenever this label is the
   // only thing in the strip.
-  if (envLocked || onEnvironmentChange === undefined) {
+  if (!onCodespaces && (envLocked || onEnvironmentChange === undefined)) {
     const lockedRow = (
       <span
         className="inline-flex h-7 min-w-0 max-w-full items-center gap-1 border border-transparent px-1.75 font-normal text-muted-foreground/70 text-xs sm:h-6"
@@ -81,9 +86,13 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   return (
     <Select
       modal={false}
-      value={autoEnvironmentLabel ? "auto" : environmentId}
+      value={codespaceLabel ? "codespace" : autoEnvironmentLabel ? "auto" : environmentId}
       onValueChange={(value) =>
-        value === "auto" ? onAutoEnvironment?.() : onEnvironmentChange(value as EnvironmentId)
+        value === "codespace"
+          ? onCodespaces?.()
+          : value === "auto"
+            ? onAutoEnvironment?.()
+            : onEnvironmentChange?.(value as EnvironmentId)
       }
       items={environmentItems}
     >
@@ -99,7 +108,9 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
             />
           }
         >
-          {autoEnvironmentLabel ? (
+          {codespaceLabel ? (
+            <CloudIcon className="size-3 shrink-0" aria-hidden="true" />
+          ) : autoEnvironmentLabel ? (
             <ScaleIcon className="size-3 shrink-0" aria-hidden="true" />
           ) : (
             <EnvironmentMachineIcon
@@ -111,7 +122,9 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
             <SelectValue />
           </ComposerContextLabel>
         </TooltipTrigger>
-        <TooltipPopup>{autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}</TooltipPopup>
+        <TooltipPopup>
+          {codespaceLabel ?? autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}
+        </TooltipPopup>
       </Tooltip>
       <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
         <SelectGroup>
@@ -119,6 +132,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           {onAutoEnvironment && (
             <SelectItem
               value="auto"
+              disabled={envLocked}
               onClick={() => {
                 if (autoEnvironmentLabel) onAutoEnvironment?.();
               }}
@@ -130,13 +144,30 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
             </SelectItem>
           )}
           {availableEnvironments.map((env) => (
-            <SelectItem key={env.environmentId} value={env.environmentId}>
+            <SelectItem
+              key={env.environmentId}
+              value={env.environmentId}
+              disabled={envLocked || !onEnvironmentChange}
+            >
               <span className="inline-flex items-center gap-1.5">
                 <EnvironmentMachineIcon kind={env.machine} className="size-3" />
                 {env.label}
               </span>
             </SelectItem>
           ))}
+          {onCodespaces ? (
+            <SelectItem
+              value="codespace"
+              onClick={() => {
+                if (codespaceLabel) onCodespaces();
+              }}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <CloudIcon className="size-3" aria-hidden="true" />
+                {codespaceLabel ?? "Codespace…"}
+              </span>
+            </SelectItem>
+          ) : null}
         </SelectGroup>
       </SelectPopup>
     </Select>

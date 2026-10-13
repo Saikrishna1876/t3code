@@ -1,3 +1,6 @@
+import { resolveCodexWorkspaceAttachments } from "../../codespaces/CodexWorkspaceAttachments.ts";
+import { createCodexWorkspaceExecution } from "../../codespaces/CodexWorkspaceExecution.ts";
+import * as CodespacesWorkspace from "../../codespaces/CodespacesWorkspace.ts";
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
@@ -1707,6 +1710,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           settings: resolvedRuntime?.config ?? adapterOptions.settings,
           environment: resolvedRuntime?.environment ?? adapterOptions.environment,
         });
+        const workspaceService = Option.getOrUndefined(
+          yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+        );
+        const executionParams = createCodexWorkspaceExecution(workspaceService, client.raw.request);
         const additionalContextByThread = yield* Ref.make(
           new Map<
             string,
@@ -3141,14 +3148,19 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             | ProviderAdapter.ProviderAdapterV2SteerInput,
             "message"
           >,
+          cwd: string | null,
         ) =>
           Effect.gen(function* () {
             const inputItems: Array<CodexSchema.V2TurnStartParams__UserInput> = [];
+            const attachmentPaths = yield* resolveCodexWorkspaceAttachments(workspaceService, {
+              cwd,
+              attachmentsDir: serverConfig.attachmentsDir,
+              attachments: turnInput.message.attachments,
+            });
             const text = providerMessageTextWithAttachmentPaths({
               text: codexSkillMentionText(turnInput.message.text),
               attachments: turnInput.message.attachments,
-              resolveAttachmentPath: (attachment) =>
-                resolveAttachmentPath({ attachmentsDir: serverConfig.attachmentsDir, attachment }),
+              resolveAttachmentPath: (attachment) => attachmentPaths.get(attachment.id) ?? null,
             });
             if (text.length > 0) {
               inputItems.push({
@@ -6195,7 +6207,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               else next.delete(threadId);
               return next;
             });
-            const started = yield* client.request("turn/start", turnStartParams);
+            const execution = yield* executionParams(turnInput.runtimePolicy.cwd, threadId);
+            const started =
+              "environments" in execution
+                ? yield* client.raw
+                    .request("turn/start", { ...turnStartParams, ...execution })
+                    .pipe(
+                      Effect.flatMap(Schema.decodeUnknownEffect(CodexSchema.V2TurnStartResponse)),
+                    )
+                : yield* client.request("turn/start", turnStartParams);
             yield* registerRootTurn({
               turnInput,
               nativeTurnId: started.turn.id,
@@ -6286,10 +6306,13 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               yield* startNativeTurn(
                 turnInput,
                 command.type === "set"
-                  ? yield* toCodexInput({
-                      ...turnInput,
-                      message: { ...turnInput.message, text: command.objective },
-                    })
+                  ? yield* toCodexInput(
+                      {
+                        ...turnInput,
+                        message: { ...turnInput.message, text: command.objective },
+                      },
+                      turnInput.runtimePolicy.cwd,
+                    )
                   : [],
               );
               if (activation.stopped) return;
@@ -6452,14 +6475,31 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             ensureInitialized.pipe(
               Effect.andThen(mcpSessions.read(threadInput.threadId)),
               Effect.flatMap((mcpSession) =>
-                client.request(
-                  "thread/start",
-                  codexThreadRuntimeParams({
+                Effect.gen(function* () {
+                  const params = codexThreadRuntimeParams({
                     mcpSession,
                     modelSelection: threadInput.modelSelection,
                     runtimePolicy: threadInput.runtimePolicy,
-                  }),
-                ),
+                  });
+                  const execution = yield* executionParams(threadInput.runtimePolicy.cwd);
+                  if (!("environments" in execution))
+                    return yield* client.request("thread/start", params);
+                  const response = yield* client.raw
+                    .request("thread/start", {
+                      ...params,
+                      ...execution,
+                      config: {
+                        ...params.config,
+                        "features.stable_environment_tools": false,
+                        "features.multi_agent": false,
+                        "features.multi_agent_v2": false,
+                      },
+                    })
+                    .pipe(
+                      Effect.flatMap(Schema.decodeUnknownEffect(CodexSchema.V2ThreadStartResponse)),
+                    );
+                  return response;
+                }),
               ),
               Effect.map((response): OrchestrationV2ProviderThread =>
                 providerThreadFromCodexThread({
@@ -6615,7 +6655,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               yield* startNativeTurn(
                 turnInput,
                 turnInput.restartContinuationOfRunId === undefined
-                  ? yield* toCodexInput(turnInput)
+                  ? yield* toCodexInput(turnInput, turnInput.runtimePolicy.cwd)
                   : [],
               );
             }).pipe(
@@ -6650,7 +6690,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 );
               }
 
-              const codexInput = yield* toCodexInput(turnInput);
+              const codexInput = yield* toCodexInput(turnInput, activeTurn.input.runtimePolicy.cwd);
               yield* client.request("turn/steer", {
                 expectedTurnId: activeTurn.nativeTurnId,
                 input: codexInput,
