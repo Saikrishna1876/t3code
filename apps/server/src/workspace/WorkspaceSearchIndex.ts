@@ -494,7 +494,7 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
   const searchContents: WorkspaceSearchIndex["Service"]["searchContents"] = Effect.fn(
     "WorkspaceSearchIndex.searchContents",
   )(function* (input) {
-    const { searchQuery, regexMode } = buildContentSearchQuery(input);
+    let { searchQuery, regexMode } = buildContentSearchQuery(input);
     const deadline = performance.now() + CONTENT_SEARCH_TIME_BUDGET_MS;
     // Grep cursors advance by file, so whole-word post-filtering needs enough
     // raw candidates from the current file before moving to the next one.
@@ -521,9 +521,11 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
 
       regexFallbackError ??= result.regexFallbackError;
       if (regexMode && !input.caseSensitive && result.regexFallbackError !== undefined) {
+        searchQuery = input.query.toLowerCase();
+        regexMode = false;
         // The engine's literal fallback includes our inline case flag. Search the user's text instead.
         result = yield* runSearch(input.query, input.limit, "grep", () =>
-          finder.grep(input.query.toLowerCase(), {
+          finder.grep(searchQuery, {
             mode: "plain",
             smartCase: true,
             maxMatchesPerFile: Math.min(CONTENT_SEARCH_MAX_MATCHES_PER_FILE, rawPageSize),

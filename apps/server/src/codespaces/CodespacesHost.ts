@@ -179,8 +179,13 @@ ${Buffer.from(worker).toString("base64")}
 WORKER
 binary="$state/codex-0.160.1"
 if [ ! -x "$binary" ]; then
-  case "$(uname -m)" in x86_64) target=x86_64-unknown-linux-musl ;; aarch64|arm64) target=aarch64-unknown-linux-musl ;; *) exit 1 ;; esac
+  case "$(uname -m)" in
+    x86_64) target=x86_64-unknown-linux-musl; sha=9226581be592d18f7e7f740a352fdb63aa61e45e39f7eb9b09d3888c84bba33f ;;
+    aarch64|arm64) target=aarch64-unknown-linux-musl; sha=f54dc5852042445bf41da3aa31156f3cb02f52c5a1a04074de73dc5598f7e1f7 ;;
+    *) exit 1 ;;
+  esac
   curl -fsSL --retry 2 "https://github.com/openai/codex/releases/download/rust-v0.160.1/codex-$target.tar.gz" -o "$state/codex.tar.gz"
+  printf '%s  %s\\n' "$sha" "$state/codex.tar.gz" | sha256sum -c - >/dev/null || { echo 'codex-checksum-mismatch' >&2; exit 1; }
   tar -xzf "$state/codex.tar.gz" -C "$state"
   mv "$state/codex-$target" "$binary"
   chmod 700 "$binary"
@@ -209,6 +214,7 @@ exec_port=$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1
 cd "$workspace"
 nohup "$binary" exec-server --listen "ws://127.0.0.1:$exec_port" --ws-auth capability-token --ws-token-file "$state/token" > "$state/executor.log" 2>&1 < /dev/null &
 printf '%s' "$!" > "$state/executor.pid"
+rm -f "$state/worker.log"
 nohup node "$state/worker.mjs" "$workspace" "$state/token" > "$state/worker.log" 2>&1 < /dev/null &
 printf '%s' "$!" > "$state/worker.pid"
 node - "$state/worker.log" "$exec_port" "$workspace" <<'NODE'

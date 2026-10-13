@@ -414,3 +414,68 @@ it.effect("continues whole-word searches after a filtered grep page", () =>
     }),
   ),
 );
+
+it.effect("keeps invalid regex searches in plain mode across pages", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const cursor = { __brand: "GrepCursor", _offset: 1 } as GrepCursor;
+      const grep = vi.fn((_query: string, options?: GrepOptions) => {
+        const regex = options?.mode === "regex";
+        const lineContent = options?.cursor ? "[needle next" : "[NEEDLE first";
+        const result: GrepResult = {
+          items: regex
+            ? []
+            : [
+                {
+                  relativePath: options?.cursor ? "next.txt" : "first.txt",
+                  fileName: options?.cursor ? "next.txt" : "first.txt",
+                  gitStatus: "unmodified",
+                  size: lineContent.length,
+                  modified: 0,
+                  isBinary: false,
+                  totalFrecencyScore: 0,
+                  accessFrecencyScore: 0,
+                  modificationFrecencyScore: 0,
+                  lineNumber: 1,
+                  col: 0,
+                  byteOffset: 0,
+                  lineContent,
+                  matchRanges: [[0, 7]],
+                },
+              ],
+          totalMatched: regex ? 0 : 1,
+          totalFilesSearched: 1,
+          totalFiles: 2,
+          filteredFileCount: 2,
+          nextCursor: regex || options?.cursor ? null : cursor,
+          ...(regex ? { regexFallbackError: "unclosed character class" } : {}),
+        };
+        return { ok: true as const, value: result };
+      });
+      const finder = {
+        destroy: vi.fn(),
+        waitForIndexReady: vi.fn(async () => ({ ok: true as const, value: true })),
+        grep,
+      } as unknown as FileFinder;
+      vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
+      const searchIndex = yield* WorkspaceSearchIndex.make("/workspace/project", "content");
+      const result = yield* searchIndex.searchContents({
+        query: "[NEEDLE",
+        limit: 2,
+        caseSensitive: false,
+        wholeWord: false,
+        useRegex: true,
+      });
+      expect(result.matches.map((match) => match.path)).toEqual(["first.txt", "next.txt"]);
+      expect(result.regexFallbackError).toBe("unclosed character class");
+      expect(result.truncated).toBe(false);
+      expect(grep.mock.calls.map(([, options]) => options?.mode)).toEqual([
+        "regex",
+        "plain",
+        "plain",
+      ]);
+      expect(grep.mock.calls[2]?.[0]).toBe("[needle");
+      expect(grep.mock.calls[2]?.[1]?.cursor).toBe(cursor);
+    }),
+  ),
+);

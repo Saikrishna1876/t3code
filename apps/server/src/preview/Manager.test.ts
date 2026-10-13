@@ -4,6 +4,8 @@ import { it } from "@effect/vitest";
 import { type PreviewEvent, ThreadId } from "@t3tools/contracts";
 import { PreviewUrlNormalizationError } from "@t3tools/shared/preview";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import { expect } from "vite-plus/test";
@@ -615,3 +617,59 @@ it.effect("refresh resolves the application URL again after a Codespace reconnec
     ),
   );
 });
+
+it.effect("remote refresh leaves other tabs usable and preserves concurrent navigation", () =>
+  Effect.gen(function* () {
+    const entered = yield* Deferred.make<void>();
+    const ready = yield* Deferred.make<void>();
+    let blockNextResolution = false;
+    yield* Effect.gen(function* () {
+      const manager = yield* PreviewManager.PreviewManager;
+      const threadId = freshThreadId();
+      const opened = yield* manager.open({ threadId, url: "http://localhost:4173/page" });
+      const events = yield* manager.subscribeEvents;
+      blockNextResolution = true;
+      const refresh = yield* manager
+        .refresh({ threadId, tabId: opened.tabId })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(entered);
+      const otherThread = freshThreadId();
+      yield* manager.open({ threadId: otherThread });
+      expect((yield* manager.list({ threadId: otherThread })).sessions).toHaveLength(1);
+      const navigated = yield* manager.navigate({
+        threadId,
+        tabId: opened.tabId,
+        url: "http://localhost:4173/page",
+        resolvedTitle: "New navigation",
+      });
+      yield* Deferred.succeed(ready, undefined);
+      yield* Fiber.join(refresh);
+      expect((yield* manager.list({ threadId })).sessions[0]).toEqual(navigated);
+      expect((yield* PubSub.takeUpTo(events, DRAIN_LIMIT)).map((event) => event.type)).toEqual([
+        "opened",
+        "navigated",
+      ]);
+    }).pipe(
+      Effect.provide(
+        layer.pipe(
+          Layer.provide(
+            Layer.mock(CodespacesPreview.CodespacesPreview)({
+              workspaceUrl: (_threadId, url) =>
+                Effect.succeed(url.replace("127.0.0.1:60000", "localhost:4173")),
+              resolve: (_threadId, url) =>
+                Effect.suspend(() => {
+                  if (!blockNextResolution)
+                    return Effect.succeed(url.replace("localhost:4173", "127.0.0.1:60000"));
+                  blockNextResolution = false;
+                  return Deferred.succeed(entered, undefined).pipe(
+                    Effect.andThen(Deferred.await(ready)),
+                    Effect.as(url.replace("localhost:4173", "127.0.0.1:61000")),
+                  );
+                }),
+            }),
+          ),
+        ),
+      ),
+    );
+  }),
+);

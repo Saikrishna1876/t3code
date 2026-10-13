@@ -449,16 +449,30 @@ export const make = Effect.gen(function* PreviewManagerMake() {
   const refresh: PreviewManager["Service"]["refresh"] = Effect.fn("PreviewManager.refresh")(
     function* (input) {
       // Reconnects replace SSH forwards. Re-resolve the application address before reloading.
+      const current = (yield* SynchronizedRef.get(stateRef)).sessions.get(
+        compositeKey(input.threadId, input.tabId),
+      );
+      if (!current)
+        return yield* new PreviewSessionLookupError({
+          threadId: input.threadId,
+          tabId: input.tabId,
+        });
+      const previousSnapshot = current.snapshot;
+      if (previousSnapshot.navStatus._tag === "Idle" || !previousSnapshot.sourceUrl) return;
+      const url = yield* resolveUrl({
+        threadId: input.threadId,
+        url: previousSnapshot.sourceUrl,
+      });
       yield* mutateExistingSession(input.threadId, input.tabId, (session) =>
         Effect.gen(function* () {
           const previous = session.snapshot.navStatus;
-          if (previous._tag === "Idle" || !session.snapshot.sourceUrl)
+          if (
+            previous._tag === "Idle" ||
+            previous !== previousSnapshot.navStatus ||
+            session.snapshot.sourceUrl !== previousSnapshot.sourceUrl ||
+            url === previous.url
+          )
             return { next: session, emit: null, result: undefined as void };
-          const url = yield* resolveUrl({
-            threadId: input.threadId,
-            url: session.snapshot.sourceUrl,
-          });
-          if (url === previous.url) return { next: session, emit: null, result: undefined as void };
           const snapshot: PreviewSessionSnapshot = {
             ...session.snapshot,
             navStatus: { _tag: "Loading", url, title: previous.title },
