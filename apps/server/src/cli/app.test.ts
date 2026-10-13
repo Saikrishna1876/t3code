@@ -21,17 +21,15 @@ import { makeCli } from "../binCli.ts";
 import { PersistedServerRuntimeState } from "../serverRuntimeState.ts";
 
 const encodeRuntimeState = Schema.encodeEffect(Schema.fromJsonString(PersistedServerRuntimeState));
+const layerCliRuntime = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
-const runCli = (args: ReadonlyArray<string>, env: Record<string, string> = {}) =>
-  Command.runWith(makeCli(), { version: "0.0.0" })(args).pipe(
-    Effect.provide(
-      Layer.mergeAll(
-        NodeServices.layer,
-        NetService.layer,
-        ConfigProvider.layer(ConfigProvider.fromEnv({ env })),
-      ),
-    ),
+const runCli = (args: ReadonlyArray<string>, env: Record<string, string> = {}) => {
+  const layer = Layer.mergeAll(
+    layerCliRuntime,
+    ConfigProvider.layer(ConfigProvider.fromEnv({ env })),
   );
+  return Command.runWith(makeCli(), { version: "0.0.0" })(args).pipe(Effect.provide(layer));
+};
 
 const pathExists = (path: string) =>
   Effect.promise(() =>

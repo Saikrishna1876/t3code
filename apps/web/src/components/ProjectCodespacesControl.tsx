@@ -469,7 +469,7 @@ function ProjectCodespacesControlPanel({
           ) : null}
           {info.name ? (
             <details className="border-t pt-3 text-sm">
-              <summary className="min-h-11 cursor-pointer rounded-sm py-1.5 text-muted-foreground outline-none sm:min-h-6 sm:py-0 focus-visible:ring-2 focus-visible:ring-ring">
+              <summary className="min-h-11 cursor-pointer rounded-sm py-1.5 text-muted-foreground outline-none sm:min-h-6 sm:py-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
                 Workspace options
               </summary>
               <div className="space-y-3 pt-3">
@@ -501,7 +501,7 @@ function ProjectCodespacesControlPanel({
       ) : null}
       <div className="flex flex-col items-start justify-between gap-3 border-t pt-3 sm:flex-row">
         <details className="w-full min-w-0 text-sm sm:w-auto sm:flex-1">
-          <summary className="min-h-11 cursor-pointer rounded-sm py-1.5 text-muted-foreground outline-none sm:min-h-6 sm:py-0 focus-visible:ring-2 focus-visible:ring-ring">
+          <summary className="min-h-11 cursor-pointer rounded-sm py-1.5 text-muted-foreground outline-none sm:min-h-6 sm:py-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
             Requirements & agent access
           </summary>
           <div className="space-y-4 pt-3">
