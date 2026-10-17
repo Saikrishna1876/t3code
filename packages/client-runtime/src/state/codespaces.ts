@@ -28,6 +28,7 @@ export function createCodespacesEnvironmentAtoms<R, E>(
       if (!snapshot) return previous?.revision ?? 0;
       const signature = JSON.stringify([
         snapshot.bindingRevision ?? 0,
+        snapshot.authorization?.phase === "succeeded",
         snapshot.operations.map(({ clientRequestId, projectId, name, status }) => [
           clientRequestId,
           projectId,
@@ -43,6 +44,10 @@ export function createCodespacesEnvironmentAtoms<R, E>(
     });
   });
   return {
+    authorize: createEnvironmentRpcCommand(runtime, {
+      label: "codespaces:authorize",
+      tag: WS_METHODS.codespacesAuthorize,
+    }),
     project: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "codespaces:project",
       tag: WS_METHODS.codespacesProject,

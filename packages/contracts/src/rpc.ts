@@ -4,6 +4,8 @@ import {
   OrchestrationV2SearchThreadResult,
 } from "./orchestrationV2.ts";
 import {
+  CodespacesAuthorizeInput,
+  CodespacesAuthorization,
   CodespacesProjectInput,
   CodespacesBindInput,
   CodespacesProject,
@@ -388,6 +390,7 @@ import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 export const WS_METHODS = {
   codespacesProject: "codespaces.project",
   codespacesBind: "codespaces.bind",
+  codespacesAuthorize: "codespaces.authorize",
   codespacesList: "codespaces.list",
   codespacesOptions: "codespaces.options",
   codespacesConfigure: "codespaces.configure",
@@ -1906,6 +1909,11 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
   { error: EnvironmentAuthorizationError },
 ) {}
 
+const WsCodespacesAuthorizeRpc = Rpc.make(WS_METHODS.codespacesAuthorize, {
+  payload: CodespacesAuthorizeInput,
+  success: CodespacesAuthorization,
+  error: CodespacesError,
+});
 const WsCodespacesProjectRpc = Rpc.make(WS_METHODS.codespacesProject, {
   payload: CodespacesProjectInput,
   success: CodespacesProject,
@@ -1946,6 +1954,7 @@ const WsCodespacesSubscribeRpc = Rpc.make(WS_METHODS.codespacesSubscribe, {
   stream: true,
 });
 export const WsRpcGroup = RpcGroup.make(
+  WsCodespacesAuthorizeRpc,
   WsCodespacesProjectRpc,
   WsCodespacesBindRpc,
   WsCodespacesListRpc,

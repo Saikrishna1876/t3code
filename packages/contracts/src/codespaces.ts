@@ -121,7 +121,16 @@ export const CodespacesManagedEnvironment = Schema.Struct({
   connected: Schema.Boolean,
 });
 export type CodespacesManagedEnvironment = typeof CodespacesManagedEnvironment.Type;
+export const CodespacesAuthorization = Schema.Struct({
+  phase: Schema.Literals(["idle", "starting", "waiting", "succeeded", "failed"]),
+  code: Schema.NullOr(Schema.String),
+  message: Schema.String,
+});
+export type CodespacesAuthorization = typeof CodespacesAuthorization.Type;
+export const CodespacesAuthorizeInput = Schema.Struct({ cancel: Schema.Boolean });
+
 export const CodespacesSnapshot = Schema.Struct({
+  authorization: Schema.optionalKey(CodespacesAuthorization),
   bindingRevision: Schema.optionalKey(Schema.Number),
   configuration: CodespacesConfiguration,
   operations: Schema.Array(CodespacesOperation),

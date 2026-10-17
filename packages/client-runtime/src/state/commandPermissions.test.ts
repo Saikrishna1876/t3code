@@ -86,6 +86,7 @@ describe("command permissions", () => {
     ),
   );
   it.effect.each([
+    WS_METHODS.codespacesAuthorize,
     WS_METHODS.codespacesBind,
     WS_METHODS.codespacesOptions,
     WS_METHODS.codespacesConfigure,

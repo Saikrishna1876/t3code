@@ -17,6 +17,7 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import { codespacesEnvironment } from "~/state/codespaces";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { ensureLocalApi } from "~/localApi";
 import { randomUUID } from "~/lib/utils";
 import { useEnvironment } from "~/state/environments";
 import { Alert, AlertTitle, AlertDescription } from "./ui/alert";
@@ -39,7 +40,9 @@ export function ProjectCodespacesControl(props: {
   projectId: ProjectId;
 }) {
   const environment = useEnvironment(props.environmentId);
-  const canManage = useAtomValue(codespacesEnvironment.run.permissionAtom(props.environmentId));
+  const canManage = useAtomValue(
+    codespacesEnvironment.authorize.permissionAtom(props.environmentId),
+  );
   return canManage && environment?.serverConfig?.environment.capabilities.codespaces ? (
     <ProjectCodespacesControlPanel {...props} />
   ) : null;
@@ -61,6 +64,7 @@ function ProjectCodespacesControlPanel({
   const inventory = useEnvironmentQuery(
     codespacesEnvironment.list({ environmentId, input: undefined }),
   );
+  const authorize = useAtomCommand(codespacesEnvironment.authorize, { reportFailure: false });
   const run = useAtomCommand(codespacesEnvironment.run, { reportFailure: false });
   const bind = useAtomCommand(codespacesEnvironment.bind, { reportFailure: false });
   const loadOptions = useAtomCommand(codespacesEnvironment.options, { reportFailure: false });
@@ -73,6 +77,23 @@ function ProjectCodespacesControlPanel({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<CodespacesRunInput | null>(null);
+  const authorization = state.data?.authorization;
+  const authorizing = authorization?.phase === "starting" || authorization?.phase === "waiting";
+  const [authorizationPending, setAuthorizationPending] = useState(false);
+  const updatePermissions = async (cancel: boolean) => {
+    setAuthorizationPending(true);
+    setError(null);
+    try {
+      const result = await authorize({ environmentId, input: { cancel } });
+      if (result._tag === "Failure") {
+        const cause = squashAtomCommandFailure(result);
+        setError(cause instanceof Error ? cause.message : "Could not update GitHub permissions.");
+      }
+      state.refresh();
+    } finally {
+      setAuthorizationPending(false);
+    }
+  };
   const info = project.data;
   const recent = state.data?.operations.findLast((operation) => operation.projectId === projectId);
   const busy = pending || recent?.status === "running";
@@ -205,6 +226,51 @@ function ProjectCodespacesControlPanel({
             <p>Refresh status before trying again.</p>
           </AlertDescription>
         </Alert>
+      ) : null}
+      {state.data ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={authorizationPending || (busy && !authorizing)}
+              onClick={() => void updatePermissions(Boolean(authorizing))}
+            >
+              {authorizing ? "Cancel GitHub sign-in" : "Sign in for Codespaces access"}
+            </Button>
+            {authorization?.phase === "waiting" && authorization.code ? (
+              <Button
+                size="sm"
+                onClick={() => {
+                  void ensureLocalApi()
+                    .shell.openExternal("https://github.com/login/device")
+                    .catch(() =>
+                      setError(
+                        "Could not open GitHub. Visit https://github.com/login/device and enter the code shown here.",
+                      ),
+                    );
+                }}
+              >
+                Open GitHub
+              </Button>
+            ) : null}
+          </div>
+          {authorization?.code ? (
+            <p className="text-sm">
+              GitHub code: <code className="select-all font-mono">{authorization.code}</code>
+            </p>
+          ) : null}
+          <p
+            role={authorization?.phase === "failed" ? "alert" : "status"}
+            className={
+              "text-xs " +
+              (authorization?.phase === "failed" ? "text-destructive" : "text-muted-foreground")
+            }
+          >
+            {authorization?.message ||
+              "Add Codespaces permission while keeping your existing GitHub permissions."}
+          </p>
+        </div>
       ) : null}
       {pending || feedback ? (
         <div

@@ -32,11 +32,15 @@ import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
 import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { forkParked } from "../serverActivation.ts";
+import * as CodespacesAuthorization from "./CodespacesAuthorization.ts";
 import * as CodespacesHost from "./CodespacesHost.ts";
 
 export class Codespaces extends Context.Service<
   Codespaces,
   {
+    readonly authorize: (input: {
+      cancel: boolean;
+    }) => Effect.Effect<import("@t3tools/contracts").CodespacesAuthorization, CodespacesError>;
     readonly project: (input: {
       projectId: ProjectId;
     }) => Effect.Effect<CodespacesProject, CodespacesError>;
@@ -378,6 +382,7 @@ const make = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const host = yield* CodespacesHost.CodespacesHost;
   const scope = yield* Effect.scope;
+  const authorization = yield* CodespacesAuthorization.make;
   const mutex = yield* Semaphore.make(1);
   const initial = yield* secrets.get("codespaces-controller-v1").pipe(
     Effect.mapError(() => error("storage", "Could not read Codespaces controller state.")),
@@ -967,18 +972,25 @@ const make = Effect.gen(function* () {
     }),
   ).pipe(Effect.ignore, forkParked);
   return Codespaces.of({
+    authorize: authorization.authorize,
     project,
     bind,
-    snapshot: SubscriptionRef.get(state).pipe(
-      Effect.map(({ requests: _requests, ...snapshot }) => snapshot),
+    snapshot: Effect.all([SubscriptionRef.get(state), authorization.snapshot]).pipe(
+      Effect.map(([{ requests: _requests, ...snapshot }, authorization]) => ({
+        ...snapshot,
+        authorization,
+      })),
     ),
     list: pinned(list),
     options: (input) => pinned(options(input)),
     configure,
     run: (input, callerProjectId) => pinned(run(input, callerProjectId)),
     pair: (input) => pinned(pair(input)),
-    changes: SubscriptionRef.changes(state).pipe(
-      Stream.map(({ requests: _requests, ...snapshot }) => snapshot),
+    changes: Stream.zipLatest(SubscriptionRef.changes(state), authorization.changes).pipe(
+      Stream.map(([{ requests: _requests, ...snapshot }, authorization]) => ({
+        ...snapshot,
+        authorization,
+      })),
     ),
   });
 });

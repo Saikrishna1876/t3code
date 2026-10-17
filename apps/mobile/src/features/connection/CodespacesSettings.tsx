@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
-import { Alert, Pressable, Switch, View } from "react-native";
+import { Alert, Linking, Pressable, Switch, View } from "react-native";
 import type {
   EnvironmentId,
   ProjectId,
@@ -29,7 +29,9 @@ export function ProjectCodespacesControl(props: {
   projectId: ProjectId;
 }) {
   const { environments } = useEnvironments();
-  const canManage = useAtomValue(codespacesEnvironment.run.permissionAtom(props.environmentId));
+  const canManage = useAtomValue(
+    codespacesEnvironment.authorize.permissionAtom(props.environmentId),
+  );
   return canManage &&
     environments.find((environment) => environment.environmentId === props.environmentId)
       ?.serverConfig?.environment.capabilities.codespaces ? (
@@ -53,6 +55,7 @@ function ProjectCodespacesControlPanel({
   const state = useEnvironmentQuery(
     codespacesEnvironment.state({ environmentId, input: undefined }),
   );
+  const authorize = useAtomCommand(codespacesEnvironment.authorize, { reportFailure: false });
   const configure = useAtomCommand(codespacesEnvironment.configure, { reportFailure: false });
   const run = useAtomCommand(codespacesEnvironment.run, { reportFailure: false });
   const bind = useAtomCommand(codespacesEnvironment.bind, { reportFailure: false });
@@ -66,6 +69,23 @@ function ProjectCodespacesControlPanel({
   const [showDetails, setShowDetails] = useState(false);
   const [machine, setMachine] = useState("");
   const [container, setContainer] = useState("");
+  const authorization = state.data?.authorization;
+  const authorizing = authorization?.phase === "starting" || authorization?.phase === "waiting";
+  const [authorizationPending, setAuthorizationPending] = useState(false);
+  const updatePermissions = async (cancel: boolean) => {
+    setAuthorizationPending(true);
+    setError(null);
+    try {
+      const result = await authorize({ environmentId, input: { cancel } });
+      if (result._tag === "Failure") {
+        const cause = squashAtomCommandFailure(result);
+        setError(cause instanceof Error ? cause.message : "Could not update GitHub permissions.");
+      }
+      state.refresh();
+    } finally {
+      setAuthorizationPending(false);
+    }
+  };
   const info = project.data;
   const operation = state.data?.operations.findLast((item) => item.projectId === projectId);
   const feedback = operation ? codespacesOperationPresentation(operation) : null;
@@ -166,6 +186,47 @@ function ProjectCodespacesControlPanel({
             </Text>
             <Text className="text-xs text-foreground-muted">
               Refresh status before trying again.
+            </Text>
+          </View>
+        ) : null}
+        {state.data ? (
+          <View className="gap-2">
+            <MaterialButton
+              fullWidth
+              tone="secondary"
+              label={authorizing ? "Cancel GitHub sign-in" : "Sign in for Codespaces access"}
+              disabled={authorizationPending || (busy && !authorizing)}
+              onPress={() => void updatePermissions(Boolean(authorizing))}
+            />
+            {authorization?.code ? (
+              <>
+                <Text selectable className="text-sm text-foreground">
+                  GitHub code: {authorization.code}
+                </Text>
+                <MaterialButton
+                  fullWidth
+                  label="Open GitHub"
+                  onPress={() => {
+                    void Linking.openURL("https://github.com/login/device").catch(() =>
+                      setError(
+                        "Could not open GitHub. Visit https://github.com/login/device and enter the code shown here.",
+                      ),
+                    );
+                  }}
+                />
+              </>
+            ) : null}
+            <Text
+              accessibilityRole={authorization?.phase === "failed" ? "alert" : undefined}
+              accessibilityLiveRegion="polite"
+              className={
+                authorization?.phase === "failed"
+                  ? "text-xs text-destructive"
+                  : "text-xs text-foreground-muted"
+              }
+            >
+              {authorization?.message ||
+                "Add Codespaces permission while keeping your existing GitHub permissions."}
             </Text>
           </View>
         ) : null}

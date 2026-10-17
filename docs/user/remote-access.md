@@ -200,8 +200,13 @@ Your connected T3 host keeps the project, thread history, agent and provider
 login. It must remain online with GitHub CLI signed in:
 
 ```sh
-gh auth refresh -h github.com -s repo,read:org,gist,workflow,codespace
+gh auth refresh -h github.com -s codespace
 ```
+
+You can also choose **Sign in for Codespaces access** in the project's Codespace
+settings, then enter the displayed code on GitHub. This adds Codespaces permission
+while keeping existing GitHub permissions. If you use a token from Settings or the
+server environment, add Codespaces permission to that token instead.
 
 Use an existing Codespace for this repository and branch when available.
 Resume a stopped one to avoid creating a fresh container. Creating a new one

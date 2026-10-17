@@ -2103,6 +2103,7 @@ const layerWsRpc = (
           ),
         [WS_METHODS.codespacesProject]: (input) => codespaces.project(input),
         [WS_METHODS.codespacesBind]: (input) => codespaces.bind(input),
+        [WS_METHODS.codespacesAuthorize]: (input) => codespaces.authorize(input),
         [WS_METHODS.codespacesList]: () => codespaces.list,
         [WS_METHODS.codespacesOptions]: (input) => codespaces.options(input),
         [WS_METHODS.codespacesConfigure]: (input) => codespaces.configure(input),
