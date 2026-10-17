@@ -42,6 +42,7 @@ describe("RPC authorization scopes", () => {
       expect(AuthStandardClientScopes).toContain(requiredScopeForRpcMethod(method));
     }
     for (const method of [
+      WS_METHODS.codespacesAuthorize,
       WS_METHODS.codespacesBind,
       WS_METHODS.codespacesList,
       WS_METHODS.codespacesOptions,

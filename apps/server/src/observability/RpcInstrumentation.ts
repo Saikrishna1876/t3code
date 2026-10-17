@@ -196,6 +196,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.previewReportStatus]: "preview",
   [WS_METHODS.subscribePreviewEvents]: "preview",
   [WS_METHODS.subscribeDiscoveredLocalServers]: "preview",
+  [WS_METHODS.codespacesAuthorize]: "codespaces",
   [WS_METHODS.codespacesProject]: "codespaces",
   [WS_METHODS.codespacesBind]: "codespaces",
   [WS_METHODS.codespacesList]: "codespaces",

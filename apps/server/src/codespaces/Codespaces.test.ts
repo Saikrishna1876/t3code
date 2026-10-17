@@ -157,6 +157,7 @@ function harness(
   const layer = Codespaces.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
         Layer.succeed(
           FileSystem.FileSystem,
           FileSystem.makeNoop({

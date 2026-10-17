@@ -187,6 +187,12 @@ describe("Codespaces project status", () => {
       const local = yield* AtomRegistry.getResult(registry, project, { suspendOnWaiting: true });
       expect(local.name).toBeNull();
       expect(local.connected).toBe(false);
+      yield* SubscriptionRef.update(state, (current) => ({
+        ...current,
+        authorization: { phase: "succeeded" as const, code: null, message: "Permissions updated" },
+      }));
+      expect(yield* Queue.take(reads)).toBe(false);
+      yield* AtomRegistry.getResult(registry, project, { suspendOnWaiting: true });
     }),
   );
 });
