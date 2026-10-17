@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
+  AuthAccessWriteScope,
   AuthStandardClientScopes,
   EnvironmentId,
   ProjectId,
@@ -153,8 +154,8 @@ describe("Codespaces project status", () => {
             sessionMethods: [],
             sessionCookieName: "test",
           },
-          scopes: [...AuthStandardClientScopes],
-          permissions: [...AuthStandardClientScopes],
+          scopes: AuthStandardClientScopes.filter((scope) => scope !== AuthAccessWriteScope),
+          permissions: AuthStandardClientScopes.filter((scope) => scope !== AuthAccessWriteScope),
         }),
       );
       expect(registry.get(atoms.run.permissionAtom(environmentId))).toBe(false);

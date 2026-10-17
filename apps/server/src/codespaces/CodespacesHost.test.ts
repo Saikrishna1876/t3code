@@ -22,7 +22,7 @@ import { ChildProcessSpawner } from "effect/process";
 import * as Net from "@t3tools/shared/Net";
 import * as ServerConfig from "../config.ts";
 import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
-import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
+import * as GitHubRequestPolicy from "@t3tools/source-control-github/server/GitHubRequestPolicy";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as CodespacesHost from "./CodespacesHost.ts";
 
@@ -289,7 +289,7 @@ describe("Codespaces SSH host", () => {
         expect(test.commands[0]?.stdin).not.toContain("auth pairing create");
         expect(test.commands[0]?.stdin).not.toContain("provider login");
         const second = yield* host.connect(space, "example", configuration, first).pipe(
-          Effect.provideService(GitHubApi.PinnedGitHubCredential, {
+          Effect.provideService(GitHubRequestPolicy.PinnedGitHubCredential, {
             host: "github.com",
             token: Redacted.make("pinned-account-token"),
             credentialFingerprint: "pinned",

@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
+import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
 import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -55,7 +55,7 @@ const harness = (
       Effect.provide(
         Layer.mergeAll(
           Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          Layer.mock(GitHubApi.GitHubApi)({
+          Layer.mock(GitHubRest.GitHubRest)({
             rest: () =>
               Effect.succeed({
                 status: 200,

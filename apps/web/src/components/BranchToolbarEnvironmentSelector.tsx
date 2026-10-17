@@ -3,7 +3,7 @@ import { ComposerContextLabel } from "./ComposerContextLabel";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { CloudIcon, ScaleIcon } from "lucide-react";
-import { memo, useMemo } from "react";
+import { memo } from "react";
 
 import type { EnvironmentOption } from "./BranchToolbar.logic";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
@@ -39,23 +39,19 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   onEnvironmentChange,
 }: BranchToolbarEnvironmentSelectorProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
-  const activeEnvironment = useMemo(() => {
-    return availableEnvironments.find((env) => env.environmentId === environmentId) ?? null;
-  }, [availableEnvironments, environmentId]);
+  const activeEnvironment =
+    availableEnvironments.find((env) => env.environmentId === environmentId) ?? null;
 
-  const environmentItems = useMemo(
-    () => [
-      ...(onAutoEnvironment
-        ? [{ value: "auto", label: autoEnvironmentLabel ?? "Auto balance" }]
-        : []),
-      ...(onCodespaces ? [{ value: "codespace", label: codespaceLabel ?? "Codespace…" }] : []),
-      ...availableEnvironments.map((env) => ({
-        value: env.environmentId,
-        label: env.label,
-      })),
-    ],
-    [availableEnvironments, autoEnvironmentLabel, onAutoEnvironment, onCodespaces, codespaceLabel],
-  );
+  const environmentItems = [
+    ...(onAutoEnvironment
+      ? [{ value: "auto", label: autoEnvironmentLabel ?? "Auto balance" }]
+      : []),
+    ...(onCodespaces ? [{ value: "codespace", label: codespaceLabel ?? "Codespace…" }] : []),
+    ...availableEnvironments.map((env) => ({
+      value: env.environmentId,
+      label: env.label,
+    })),
+  ];
 
   // The static label carries the xs control's height (h-7 sm:h-6) as well as
   // its padding: the composer context strip has no min-height of its own, and

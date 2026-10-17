@@ -1,5 +1,6 @@
 import { CodespacesError, type CodespacesAuthorization } from "@t3tools/contracts";
-import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
+import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
+import * as GitHubRequestPolicy from "@t3tools/source-control-github/server/GitHubRequestPolicy";
 import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -15,7 +16,7 @@ const isCodespacesError = Schema.is(CodespacesError);
 
 /** Adds scopes through gh's refresh flow. Login and scope removal are deliberately absent. */
 export const make = Effect.gen(function* () {
-  const api = yield* GitHubApi.GitHubApi;
+  const api = yield* GitHubRest.GitHubRest;
   const credentials = yield* GitHubCredentials.GitHubCredentials;
   const process = yield* VcsProcess.VcsProcess;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -58,7 +59,7 @@ export const make = Effect.gen(function* () {
         path: "user",
       })
       .pipe(
-        Effect.provideService(GitHubApi.PinnedGitHubCredential, {
+        Effect.provideService(GitHubRequestPolicy.PinnedGitHubCredential, {
           host: "github.com",
           token: credential.token,
           credentialFingerprint: credential.fingerprint,

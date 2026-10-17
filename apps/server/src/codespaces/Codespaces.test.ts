@@ -20,7 +20,8 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
+import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
+import * as GitHubRequestPolicy from "@t3tools/source-control-github/server/GitHubRequestPolicy";
 import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
 import * as Codespaces from "./Codespaces.ts";
 import * as CodespacesHost from "./CodespacesHost.ts";
@@ -81,7 +82,7 @@ const create: CodespacesRunInput = {
 
 function harness(
   overrides: {
-    rest?: GitHubApi.GitHubApi["Service"]["rest"];
+    rest?: GitHubRest.GitHubRest["Service"]["rest"];
     connect?: CodespacesHost.CodespacesHost["Service"]["connect"];
     prepareStop?: CodespacesHost.CodespacesHost["Service"]["prepareStop"];
     saved?: Uint8Array;
@@ -99,7 +100,7 @@ function harness(
   const bindings = overrides.bindings ?? [
     { projectId: "project-test", localRoot: "/workspace/fork", name: "test-space-1" },
   ];
-  const requests: GitHubApi.GitHubRestInput[] = [];
+  const requests: GitHubRest.GitHubRestInput[] = [];
   const targetEvents: string[] = [];
   const pinnedTokens: string[] = [];
   let account = "example";
@@ -112,10 +113,10 @@ function harness(
   const stored = new Map<string, Uint8Array>(
     overrides.saved ? [["codespaces-controller-v1", overrides.saved]] : [],
   );
-  const rest: GitHubApi.GitHubApi["Service"]["rest"] = (input) =>
+  const rest: GitHubRest.GitHubRest["Service"]["rest"] = (input) =>
     Effect.gen(function* () {
       requests.push(input);
-      const credential = yield* GitHubApi.PinnedGitHubCredential;
+      const credential = yield* GitHubRequestPolicy.PinnedGitHubCredential;
       if (credential) pinnedTokens.push(Redacted.value(credential.token));
       if (input.path.includes("/machines"))
         return {
@@ -226,10 +227,9 @@ function harness(
               targetEvents.push("close:" + threadId);
             }),
         }),
-        Layer.succeed(GitHubApi.GitHubApi, {
+        Layer.succeed(GitHubRest.GitHubRest, {
           rest,
           credential: () => Effect.succeed({ token: Redacted.make(token), fingerprint: token }),
-          graphql: () => Effect.die("Unexpected GraphQL"),
         }),
         Layer.succeed(GitHubCredentials.GitHubCredentials, {
           get: () =>
@@ -806,7 +806,7 @@ describe("Codespaces controller", () => {
           Effect.gen(function* () {
             yield* Deferred.succeed(entered, undefined);
             yield* Deferred.await(release);
-            const credential = yield* GitHubApi.PinnedGitHubCredential;
+            const credential = yield* GitHubRequestPolicy.PinnedGitHubCredential;
             hostTokens.push(Redacted.value(credential!.token));
             return managed;
           }),

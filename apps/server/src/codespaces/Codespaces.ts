@@ -28,7 +28,8 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Schedule from "effect/Schedule";
 import * as DateTime from "effect/DateTime";
-import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
+import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
+import * as GitHubRequestPolicy from "@t3tools/source-control-github/server/GitHubRequestPolicy";
 import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { forkParked } from "../serverActivation.ts";
@@ -359,7 +360,7 @@ const make = Effect.gen(function* () {
     }
     return yield* project(input);
   }, Effect.scoped);
-  const api = yield* GitHubApi.GitHubApi;
+  const api = yield* GitHubRest.GitHubRest;
   const credentials = yield* GitHubCredentials.GitHubCredentials;
   const pinned = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.gen(function* () {
@@ -373,7 +374,7 @@ const make = Effect.gen(function* () {
             ),
           ),
         );
-      return yield* Effect.provideService(effect, GitHubApi.PinnedGitHubCredential, {
+      return yield* Effect.provideService(effect, GitHubRequestPolicy.PinnedGitHubCredential, {
         host: "github.com",
         token: credential.token,
         credentialFingerprint: credential.fingerprint,
@@ -463,7 +464,7 @@ const make = Effect.gen(function* () {
     );
   const rest = (
     path: string,
-    method: GitHubApi.GitHubRestInput["method"] = "GET",
+    method: GitHubRest.GitHubRestInput["method"] = "GET",
     body?: unknown,
   ) =>
     api
@@ -994,7 +995,7 @@ const make = Effect.gen(function* () {
     ),
   });
 });
-function mapGitHubError(cause: GitHubApi.GitHubApiError): CodespacesError {
+function mapGitHubError(cause: GitHubRequestPolicy.GitHubApiError): CodespacesError {
   switch (cause._tag) {
     case "GitHubCliMissingError":
     case "GitHubNotSignedInError":

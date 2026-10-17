@@ -23,7 +23,7 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Crypto from "effect/Crypto";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
-import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
+import * as GitHubRequestPolicy from "@t3tools/source-control-github/server/GitHubRequestPolicy";
 import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as ServerConfig from "../config.ts";
@@ -80,7 +80,7 @@ const make = Effect.gen(function* () {
     { scope: Scope.Closeable; process: ChildProcessSpawner.ChildProcessHandle }
   >();
   const ghEnvironment = Effect.gen(function* () {
-    const pinned = yield* GitHubApi.PinnedGitHubCredential;
+    const pinned = yield* GitHubRequestPolicy.PinnedGitHubCredential;
     const token = pinned?.token ?? (yield* credentials.get("github.com")).token;
     return {
       GH_TOKEN: Redacted.value(token),
@@ -145,8 +145,8 @@ const make = Effect.gen(function* () {
   const connect: CodespacesHost["Service"]["connect"] = Effect.fn("CodespacesHost.connect")(
     function* (space, account) {
       const token =
-        (yield* crypto.randomUUIDv4.pipe(Effect.orDie)) +
-        (yield* crypto.randomUUIDv4.pipe(Effect.orDie));
+        (yield* crypto.randomUUIDv4().pipe(Effect.orDie)) +
+        (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
       const worker = yield* getWorkerSource;
       const script = `set -eu
 state="/workspaces/.t3-executors/$1"

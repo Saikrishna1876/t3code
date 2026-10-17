@@ -13,16 +13,16 @@ import {
   codespaceStateLabel,
 } from "@t3tools/client-runtime/codespaces-presentation";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { AppText as Text } from "../../components/AppText";
-import { SymbolView } from "../../components/AppSymbol";
-import { ControlPillMenu } from "../../components/ControlPillMenu";
+import { AppText as Text } from "../../components/ui/AppText";
+import { SymbolView } from "../../components/ui/AppSymbol";
+import { Menu } from "../../components/ui/Menu";
 import { useEnvironments } from "../../state/environments";
 import { codespacesEnvironment } from "../../state/codespaces";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { uuidv4 } from "../../lib/uuid";
 import { SettingsSection } from "../settings/components/SettingsSection";
-import { MaterialButton } from "../../components/MaterialButton";
+import { Button } from "../../components/ui/Button";
 
 export function ProjectCodespacesControl(props: {
   environmentId: EnvironmentId;
@@ -191,7 +191,7 @@ function ProjectCodespacesControlPanel({
         ) : null}
         {state.data ? (
           <View className="gap-2">
-            <MaterialButton
+            <Button
               fullWidth
               tone="secondary"
               label={authorizing ? "Cancel GitHub sign-in" : "Sign in for Codespaces access"}
@@ -203,7 +203,7 @@ function ProjectCodespacesControlPanel({
                 <Text selectable className="text-sm text-foreground">
                   GitHub code: {authorization.code}
                 </Text>
-                <MaterialButton
+                <Button
                   fullWidth
                   label="Open GitHub"
                   onPress={() => {
@@ -266,7 +266,7 @@ function ProjectCodespacesControlPanel({
                   </Text>
                   <Text className="text-xs text-foreground-muted">{workspaceLabel}</Text>
                 </View>
-                <MaterialButton
+                <Button
                   fullWidth
                   label={
                     info.connected
@@ -284,7 +284,7 @@ function ProjectCodespacesControlPanel({
                     )
                   }
                 />
-                <MaterialButton
+                <Button
                   fullWidth
                   label="Work locally"
                   disabled={busy}
@@ -344,7 +344,7 @@ function ProjectCodespacesControlPanel({
                     <Text className="text-xs text-foreground-muted">
                       {codespaceStateLabel(space.state)}
                     </Text>
-                    <MaterialButton
+                    <Button
                       fullWidth
                       label={space.state === "Shutdown" ? "Resume Codespace" : "Use Codespace"}
                       tone="primary"
@@ -400,7 +400,7 @@ function ProjectCodespacesControlPanel({
                   Stops after 30 idle minutes. GitHub retains files for one day after stopping.
                   Compute and storage charges may apply.
                 </Text>
-                <MaterialButton
+                <Button
                   fullWidth
                   label="Create Codespace"
                   tone="primary"
@@ -430,14 +430,14 @@ function ProjectCodespacesControlPanel({
                     )
                   }
                 />
-                <MaterialButton
+                <Button
                   fullWidth
                   label="Cancel setup"
                   disabled={busy}
                   onPress={() => setShowSetup(false)}
                 />
                 {!containers.length || !options.machines.length ? (
-                  <MaterialButton
+                  <Button
                     fullWidth
                     label="Refresh configuration"
                     disabled={busy}
@@ -447,7 +447,7 @@ function ProjectCodespacesControlPanel({
               </View>
             ) : !info.name ? (
               <View className="gap-2">
-                <MaterialButton
+                <Button
                   fullWidth
                   label="New Codespace"
                   tone={spaces.length ? "secondary" : "primary"}
@@ -470,7 +470,7 @@ function ProjectCodespacesControlPanel({
                   <View className="gap-3 pt-2">
                     <Text className="text-xs text-foreground-muted">{info.name}</Text>
                     {!showSetup ? (
-                      <MaterialButton
+                      <Button
                         fullWidth
                         label="New Codespace"
                         disabled={busy || !info.eligible}
@@ -480,7 +480,7 @@ function ProjectCodespacesControlPanel({
                     <Text className="text-xs text-foreground-muted">
                       Deletion permanently removes remote files, including unpushed changes.
                     </Text>
-                    <MaterialButton
+                    <Button
                       fullWidth
                       label="Delete Codespace"
                       tone="danger"
@@ -558,7 +558,7 @@ function ProjectCodespacesControlPanel({
               ) : null}
             </View>
           ) : null}
-          <MaterialButton
+          <Button
             fullWidth
             label={project.isPending || inventory.isPending ? "Refreshing…" : "Refresh status"}
             disabled={pending || project.isPending || inventory.isPending}
@@ -628,7 +628,7 @@ function CodespaceOptionPicker(props: {
   return props.disabled ? (
     content
   ) : (
-    <ControlPillMenu
+    <Menu
       title={props.label}
       actions={props.options.map((entry) => ({
         id: entry.value,
@@ -638,7 +638,7 @@ function CodespaceOptionPicker(props: {
       onPressAction={({ nativeEvent }) => props.onSelect(nativeEvent.event)}
     >
       {content}
-    </ControlPillMenu>
+    </Menu>
   );
 }
 
