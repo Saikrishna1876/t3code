@@ -41,19 +41,22 @@ vi.mock(import("../state/entities"), () => ({
   useThreadShellsForProjectRefs: () => [],
 }));
 
-vi.mock(import("../composerDraftStore"), async (original) => ({
-  ...(await original()),
-  useComposerDraftStore: Object.assign(
-    (select: (store: unknown) => unknown) =>
-      select({ getDraftThreadByRef: () => null, setDraftThreadContext: vi.fn() }),
-    {
-      getState: () => ({
-        getComposerDraft: () => ({ prompt: state.prompt }),
-        setPrompt: state.setPrompt,
-      }),
-    },
-  ) as never,
-}));
+vi.mock(import("../composerDraftStore"), async () => {
+  const Schema = await import("effect/Schema");
+  return {
+    DraftId: Schema.String.pipe(Schema.brand("DraftId")),
+    useComposerDraftStore: Object.assign(
+      (select: (store: unknown) => unknown) =>
+        select({ getDraftThreadByRef: () => null, setDraftThreadContext: vi.fn() }),
+      {
+        getState: () => ({
+          getComposerDraft: () => ({ prompt: state.prompt }),
+          setPrompt: state.setPrompt,
+        }),
+      },
+    ) as never,
+  };
+});
 vi.mock(import("../state/environments"), () => ({
   useEnvironment: (() => ({
     serverConfig: { environment: { capabilities: { codespaces: state.codespacesSupported } } },

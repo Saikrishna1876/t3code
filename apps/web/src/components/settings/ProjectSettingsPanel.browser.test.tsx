@@ -30,8 +30,7 @@ import { userEvent } from "vite-plus/test/browser";
 import type { Project } from "../../types";
 
 type SessionResult = AsyncResult.AsyncResult<AuthSessionState, Error>;
-vi.mock(import("../ProjectCodespacesControl"), async (original) => ({
-  ...(await original()),
+vi.mock(import("../ProjectCodespacesControl"), () => ({
   ProjectCodespacesControl: () => null,
 }));
 
