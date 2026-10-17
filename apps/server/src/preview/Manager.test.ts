@@ -710,3 +710,49 @@ it.effect("remote status resolution leaves other preview sessions usable", () =>
     );
   }),
 );
+
+it.effect("a delayed remote status report cannot overwrite a newer status", () =>
+  Effect.gen(function* () {
+    const entered = yield* Deferred.make<void>();
+    const ready = yield* Deferred.make<void>();
+    yield* Effect.gen(function* () {
+      const manager = yield* PreviewManager.PreviewManager;
+      const threadId = freshThreadId();
+      const opened = yield* manager.open({ threadId });
+      const events = yield* manager.subscribeEvents;
+      const report = (path: string) =>
+        manager.reportStatus({
+          threadId,
+          tabId: opened.tabId,
+          navStatus: { _tag: "Success", url: `http://127.0.0.1:60000/${path}`, title: path },
+          canGoBack: false,
+          canGoForward: false,
+        });
+      const older = yield* report("old").pipe(Effect.forkChild);
+      yield* Deferred.await(entered);
+      yield* report("new");
+      const latest = (yield* manager.list({ threadId })).sessions[0];
+      yield* Deferred.succeed(ready, undefined);
+      yield* Fiber.join(older);
+      expect((yield* manager.list({ threadId })).sessions[0]).toEqual(latest);
+      expect(latest?.sourceUrl).toBe("http://localhost:4173/new");
+      expect((yield* PubSub.takeUpTo(events, DRAIN_LIMIT)).map((event) => event.type)).toEqual([
+        "navigated",
+      ]);
+    }).pipe(
+      Effect.provide(
+        layer.pipe(
+          Layer.provide(
+            Layer.mock(CodespacesPreview.CodespacesPreview)({
+              workspaceUrl: (_threadId, url) =>
+                (url.endsWith("/old")
+                  ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(ready)))
+                  : Effect.void
+                ).pipe(Effect.as(url.replace("127.0.0.1:60000", "localhost:4173"))),
+            }),
+          ),
+        ),
+      ),
+    );
+  }),
+);

@@ -72,6 +72,7 @@ interface PreviewSessionState {
   readonly threadId: string;
   readonly tabId: string;
   readonly snapshot: PreviewSessionSnapshot;
+  readonly statusReport?: symbol;
 }
 
 interface ManagerState {
@@ -300,6 +301,20 @@ export const make = Effect.gen(function* PreviewManagerMake() {
   const reportStatus: PreviewManager["Service"]["reportStatus"] = Effect.fn(
     "PreviewManager.reportStatus",
   )(function* (input) {
+    const statusReport = Symbol();
+    const previousNavStatus = yield* mutateExistingSession(
+      input.threadId,
+      input.tabId,
+      Effect.fn("PreviewManager.beginStatusReport")(function* (session) {
+        if (session.snapshot.runtime === "server" && !input.serverControlled)
+          return yield* new PreviewControlRequiredError({ tabId: input.tabId });
+        return {
+          next: { ...session, statusReport },
+          emit: null,
+          result: session.snapshot.navStatus,
+        };
+      }),
+    );
     const reportedSourceUrl =
       input.navStatus._tag === "Idle"
         ? undefined
@@ -308,8 +323,12 @@ export const make = Effect.gen(function* PreviewManagerMake() {
       input.threadId,
       input.tabId,
       Effect.fn("PreviewManager.reportSessionStatus")(function* (session) {
-        if (session.snapshot.runtime === "server" && !input.serverControlled)
-          return yield* new PreviewControlRequiredError({ tabId: input.tabId });
+        // A newer report or navigation wins while the remote URL lookup is pending.
+        if (
+          session.statusReport !== statusReport ||
+          session.snapshot.navStatus !== previousNavStatus
+        )
+          return { next: session, emit: null, result: undefined as void };
         const updatedAt = yield* currentIsoTimestamp;
         const snapshot: PreviewSessionSnapshot = {
           ...session.snapshot,
