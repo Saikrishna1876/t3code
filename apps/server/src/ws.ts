@@ -102,6 +102,7 @@ import {
   type PullRequestRef,
   WS_METHODS,
   WsRpcGroup,
+  CodespacesRpcGroup,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import {
@@ -546,6 +547,19 @@ const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 
 // Middleware added later wraps middleware added earlier, so instrumentation wraps authorization.
 const ServerWsRpcGroup = WsRpcGroup.middleware(RpcInstrumentation);
+const ServerCodespacesRpcGroup = CodespacesRpcGroup.middleware(RpcInstrumentation);
+const CoreWsRpcGroup = ServerWsRpcGroup.omit(
+  WS_METHODS.codespacesProject,
+  WS_METHODS.codespacesBind,
+  WS_METHODS.codespacesAuthorize,
+  WS_METHODS.codespacesList,
+  WS_METHODS.codespacesOptions,
+  WS_METHODS.codespacesConfigure,
+  WS_METHODS.codespacesRun,
+  WS_METHODS.codespacesPair,
+  WS_METHODS.codespacesSubscribe,
+);
+
 // Replaying each intervening event costs a shell refetch; past this gap a
 // single O(active-threads) snapshot is cheaper and bounded.
 const SHELL_RESUME_MAX_GAP = 1_000;
@@ -1160,6 +1174,23 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
   },
 );
 
+const layerCodespacesRpc = ServerCodespacesRpcGroup.toLayer(
+  Effect.gen(function* () {
+    const codespaces = yield* Codespaces.Codespaces;
+    return ServerCodespacesRpcGroup.of({
+      [WS_METHODS.codespacesProject]: (input) => codespaces.project(input),
+      [WS_METHODS.codespacesBind]: (input) => codespaces.bind(input),
+      [WS_METHODS.codespacesAuthorize]: (input) => codespaces.authorize(input),
+      [WS_METHODS.codespacesList]: () => codespaces.list,
+      [WS_METHODS.codespacesOptions]: (input) => codespaces.options(input),
+      [WS_METHODS.codespacesConfigure]: (input) => codespaces.configure(input),
+      [WS_METHODS.codespacesRun]: (input) => codespaces.run(input),
+      [WS_METHODS.codespacesPair]: (input) => codespaces.pair(input),
+      [WS_METHODS.codespacesSubscribe]: () => codespaces.changes,
+    });
+  }),
+);
+
 const layerWsRpc = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   clientOrigin: OrchestrationClientOrigin,
@@ -1167,7 +1198,7 @@ const layerWsRpc = (
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
 ) =>
-  ServerWsRpcGroup.toLayer(
+  CoreWsRpcGroup.toLayer(
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
@@ -1237,7 +1268,6 @@ const layerWsRpc = (
       const keybindings = yield* Keybindings.Keybindings;
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
-      const codespaces = yield* Codespaces.Codespaces;
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const directEndpoints = yield* DirectEndpoints.DirectEndpoints;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
@@ -1791,7 +1821,7 @@ const layerWsRpc = (
         return result;
       });
 
-      const handlers = ServerWsRpcGroup.of({
+      const handlers = CoreWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,
@@ -2063,15 +2093,6 @@ const layerWsRpc = (
           Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
             Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
           ),
-        [WS_METHODS.codespacesProject]: (input) => codespaces.project(input),
-        [WS_METHODS.codespacesBind]: (input) => codespaces.bind(input),
-        [WS_METHODS.codespacesAuthorize]: (input) => codespaces.authorize(input),
-        [WS_METHODS.codespacesList]: () => codespaces.list,
-        [WS_METHODS.codespacesOptions]: (input) => codespaces.options(input),
-        [WS_METHODS.codespacesConfigure]: (input) => codespaces.configure(input),
-        [WS_METHODS.codespacesRun]: (input) => codespaces.run(input),
-        [WS_METHODS.codespacesPair]: (input) => codespaces.pair(input),
-        [WS_METHODS.codespacesSubscribe]: () => codespaces.changes,
         [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),
         [WS_METHODS.serverGetConfig]: (_input) => loadServerConfig({ usageLimitsCommand: false }),
         [WS_METHODS.serverSearchAcpRegistry]: (input) =>
@@ -3109,7 +3130,7 @@ const layerWsRpc = (
       });
       return handlers;
     }),
-  );
+  ).pipe(Layer.merge(layerCodespacesRpc));
 
 // RpcServer's default sends a socket-level Defect frame instead, and the client
 // ends every pending request on the socket with it.

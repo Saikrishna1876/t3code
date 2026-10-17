@@ -276,7 +276,7 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           ).toMatchObject({ _tag: "Failure" });
           expect(requests).toHaveLength(6);
           expect(yield* fs.readFileString(report)).toBe("host report");
-        }).pipe(Effect.provide(remoteLayer), Effect.provide(layerKnownWorkspacesTest));
+        }).pipe(Effect.provide(Layer.merge(remoteLayer, layerKnownWorkspacesTest)));
       },
     );
 

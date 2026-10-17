@@ -680,6 +680,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   });
   useEffect(() => {
     if (codespacesOpen && codespace.data && !codespace.data.eligible && !codespace.data.name)
+      // oxlint-disable-next-line react/set-state-in-effect -- Async eligibility can arrive after opening; redirect that dialog to the setup draft.
       closeIncompatibleCodespace();
   }, [codespacesOpen, codespace.data]);
 

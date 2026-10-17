@@ -304,7 +304,6 @@ import {
   DeviceSession,
   DeviceShutdownInput,
 } from "./device.ts";
-import {} from "./previewAutomation.ts";
 import {
   ServerConfigStreamEvent,
   DesktopUpdateCommitInput,
@@ -1931,7 +1930,7 @@ const WsCodespacesSubscribeRpc = Rpc.make(WS_METHODS.codespacesSubscribe, {
   error: CodespacesError,
   stream: true,
 });
-export const WsRpcGroup = RpcGroup.make(
+export const CodespacesRpcGroup = RpcGroup.make(
   WsCodespacesAuthorizeRpc,
   WsCodespacesProjectRpc,
   WsCodespacesBindRpc,
@@ -1941,6 +1940,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsCodespacesRunRpc,
   WsCodespacesPairRpc,
   WsCodespacesSubscribeRpc,
+).middleware(RpcScopeAuthorization);
+
+export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -2137,4 +2139,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeShellRpc,
   WsOrchestrationV2SubscribeThreadRpc,
   WsOrchestrationV2SubscribeCommandOutputRpc,
-).middleware(RpcScopeAuthorization);
+)
+  .middleware(RpcScopeAuthorization)
+  .merge(CodespacesRpcGroup);

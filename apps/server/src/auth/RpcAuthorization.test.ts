@@ -35,11 +35,15 @@ import {
 } from "./RpcAuthorization.ts";
 import * as RpcAuthorization from "./RpcAuthorization.ts";
 
+const limitedTaskClientScopes = AuthStandardClientScopes.filter(
+  (scope) => scope !== AuthAccessWriteScope,
+);
+
 describe("RPC authorization scopes", () => {
-  it("lets standard task clients observe bindings while keeping account management protected", () => {
+  it("lets task clients without account management observe bindings", () => {
     for (const method of [WS_METHODS.codespacesProject, WS_METHODS.codespacesSubscribe]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
-      expect(AuthStandardClientScopes).toContain(requiredScopeForRpcMethod(method));
+      expect(limitedTaskClientScopes).toContain(requiredScopeForRpcMethod(method));
     }
     for (const method of [
       WS_METHODS.codespacesAuthorize,
@@ -51,7 +55,7 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.codespacesPair,
     ]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthAccessWriteScope);
-      expect(AuthStandardClientScopes).not.toContain(requiredScopeForRpcMethod(method));
+      expect(limitedTaskClientScopes).not.toContain(requiredScopeForRpcMethod(method));
     }
   });
   it("declares exactly one scope for every RPC in the server group", () => {
@@ -222,7 +226,7 @@ describe("RPC authorization scopes", () => {
   });
 });
 
-it.effect("standard paired clients read bound status and changes but cannot change targets", () =>
+it.effect("paired clients without account management read bindings but cannot change targets", () =>
   Effect.gen(function* () {
     const tested = [
       WS_METHODS.codespacesProject,
@@ -269,7 +273,7 @@ it.effect("standard paired clients read bound status and changes but cannot chan
           group.toLayerHandler(WS_METHODS.codespacesSubscribe, () => Stream.make(snapshot)),
           group.toLayerHandler(WS_METHODS.codespacesBind, () => mutation),
           group.toLayerHandler(WS_METHODS.codespacesRun, () => mutation),
-          RpcAuthorization.layer(AuthStandardClientScopes),
+          RpcAuthorization.layer(limitedTaskClientScopes),
         ),
       ),
     );

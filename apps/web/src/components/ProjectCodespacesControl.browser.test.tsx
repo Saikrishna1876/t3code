@@ -31,16 +31,20 @@ vi.mock(import("~/state/environments"), async (original) => ({
       serverConfig: { environment: { capabilities: { codespaces: true } } },
     }) as never,
 }));
-vi.mock(import("~/state/codespaces"), async (original) => ({
-  ...(await original()),
-  codespacesEnvironment: {
-    run: { permissionAtom: () => Atom.make(true) },
-    project: () => "project",
-    state: () => "state",
-    list: () => "list",
-    configure: "configure",
-  } as never,
-}));
+vi.mock(import("~/state/codespaces"), async (original) => {
+  const allowed = Atom.make(true);
+  return {
+    ...(await original()),
+    codespacesEnvironment: {
+      authorize: { permissionAtom: () => allowed },
+      run: { permissionAtom: () => allowed },
+      project: () => "project",
+      state: () => "state",
+      list: () => "list",
+      configure: "configure",
+    } as never,
+  };
+});
 vi.mock(import("~/state/use-atom-command"), async (original) => ({
   ...(await original()),
   useAtomCommand: ((command: string) =>

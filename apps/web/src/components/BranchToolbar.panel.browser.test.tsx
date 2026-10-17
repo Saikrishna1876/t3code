@@ -28,12 +28,10 @@ vi.mock(import("../hooks/useCopyToClipboard"), async (original) => ({
   ...(await original()),
   writeTextToClipboard: state.writeTextToClipboard,
 }));
-vi.mock(import("./BranchToolbarBranchSelector"), async (original) => ({
-  ...(await original()),
+vi.mock(import("./BranchToolbarBranchSelector"), () => ({
   BranchToolbarBranchSelector: (() => null) as never,
 }));
-vi.mock(import("../state/entities"), async (original) => ({
-  ...(await original()),
+vi.mock(import("../state/entities"), () => ({
   useQuietThreadShell: (() => ({
     environmentId: "local",
     projectId: "project",
@@ -56,21 +54,24 @@ vi.mock(import("../composerDraftStore"), async (original) => ({
     },
   ) as never,
 }));
-vi.mock(import("../state/environments"), async (original) => ({
-  ...(await original()),
+vi.mock(import("../state/environments"), () => ({
   useEnvironment: (() => ({
     serverConfig: { environment: { capabilities: { codespaces: state.codespacesSupported } } },
   })) as never,
 }));
-vi.mock(import("../state/codespaces"), async (original) => ({
-  ...(await original()),
-  codespacesEnvironment: {
-    run: { permissionAtom: () => Atom.make(state.canManageCodespaces) },
-    project: () => "project",
-    state: () => "state",
-    list: () => "list",
-  } as never,
-}));
+vi.mock(import("../state/codespaces"), () => {
+  const allowed = Atom.make(true);
+  const denied = Atom.make(false);
+  return {
+    codespacesEnvironment: {
+      authorize: { permissionAtom: () => (state.canManageCodespaces ? allowed : denied) },
+      run: { permissionAtom: () => (state.canManageCodespaces ? allowed : denied) },
+      project: () => "project",
+      state: () => "state",
+      list: () => "list",
+    } as never,
+  };
+});
 vi.mock(import("../state/query"), async (original) => ({
   ...(await original()),
   useEnvironmentQuery: ((kind: string | null) => ({

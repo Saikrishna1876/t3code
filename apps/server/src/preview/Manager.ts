@@ -300,6 +300,10 @@ export const make = Effect.gen(function* PreviewManagerMake() {
   const reportStatus: PreviewManager["Service"]["reportStatus"] = Effect.fn(
     "PreviewManager.reportStatus",
   )(function* (input) {
+    const reportedSourceUrl =
+      input.navStatus._tag === "Idle"
+        ? undefined
+        : yield* sourceUrl(input.threadId, input.navStatus.url);
     yield* mutateExistingSession(
       input.threadId,
       input.tabId,
@@ -310,9 +314,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
         const snapshot: PreviewSessionSnapshot = {
           ...session.snapshot,
           navStatus: input.navStatus,
-          ...(input.navStatus._tag === "Idle"
-            ? {}
-            : { sourceUrl: yield* sourceUrl(input.threadId, input.navStatus.url) }),
+          ...(reportedSourceUrl === undefined ? {} : { sourceUrl: reportedSourceUrl }),
           canGoBack: input.canGoBack,
           canGoForward: input.canGoForward,
           viewport: session.snapshot.viewport ?? FILL_PREVIEW_VIEWPORT,

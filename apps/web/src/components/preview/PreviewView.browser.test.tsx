@@ -298,7 +298,7 @@ describe("PreviewView", () => {
     mocks.supportsCodespaces = true;
     mocks.canResolveUrl = false;
     await render(view());
-    await submitAddress("localhost:3000/app");
+    await expect.element(page.getByPlaceholder("Search or enter URL")).toBeDisabled();
     expect(mocks.resolveUrl).not.toHaveBeenCalled();
     expect(mocks.navigate).not.toHaveBeenCalled();
     expect(mocks.openPreviewSession).not.toHaveBeenCalled();

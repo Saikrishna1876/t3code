@@ -666,3 +666,47 @@ it.effect("remote refresh leaves other tabs usable and preserves concurrent navi
     );
   }),
 );
+
+it.effect("remote status resolution leaves other preview sessions usable", () =>
+  Effect.gen(function* () {
+    const entered = yield* Deferred.make<void>();
+    const ready = yield* Deferred.make<void>();
+    yield* Effect.gen(function* () {
+      const manager = yield* PreviewManager.PreviewManager;
+      const threadId = freshThreadId();
+      const opened = yield* manager.open({ threadId });
+      const report = yield* manager
+        .reportStatus({
+          threadId,
+          tabId: opened.tabId,
+          navStatus: { _tag: "Success", url: "http://127.0.0.1:60000/page", title: "Page" },
+          canGoBack: false,
+          canGoForward: false,
+        })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(entered);
+      const otherThread = freshThreadId();
+      yield* manager.open({ threadId: otherThread });
+      expect((yield* manager.list({ threadId: otherThread })).sessions).toHaveLength(1);
+      yield* Deferred.succeed(ready, undefined);
+      yield* Fiber.join(report);
+      expect((yield* manager.list({ threadId })).sessions[0]?.sourceUrl).toBe(
+        "http://localhost:4173/page",
+      );
+    }).pipe(
+      Effect.provide(
+        layer.pipe(
+          Layer.provide(
+            Layer.mock(CodespacesPreview.CodespacesPreview)({
+              workspaceUrl: (_threadId, url) =>
+                Deferred.succeed(entered, undefined).pipe(
+                  Effect.andThen(Deferred.await(ready)),
+                  Effect.as(url.replace("127.0.0.1:60000", "localhost:4173")),
+                ),
+            }),
+          ),
+        ),
+      ),
+    );
+  }),
+);
