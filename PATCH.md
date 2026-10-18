@@ -74,6 +74,15 @@ Keep project Codespaces work available with the user's existing local provider l
 - Verification: `./node_modules/.bin/vp run --filter t3 typecheck` and a successful Linux CI Typecheck job. Focus-ring lint and fork production-job guards remain covered by P004 and P005.
 - Retirement: a later `tsc-rs` version checks the unchanged full-CLI tests successfully on Linux with the same strict settings.
 
+## P007: Serve packaged desktop assets on Electron 43
+
+- Status: active. Native startup verified on the target Intel Mac on 2026-10-18.
+- Required behavior: packaged desktop startup must load JavaScript, styles, and images from ASAR with Electron `43.6.0`. Keep missing-file responses, MIME types, HEAD requests, navigation fallback, and path containment intact.
+- Constraint: Electron returns number-valued ASAR metadata even for `fs.stat` with `bigint: true`. Effect `4.0.5` rejects it with `FileSystem.stat: Cannot convert 1 to a BigInt`. Treating that failure as a missing file left the app on its splash screen with 404 responses for existing assets.
+- Implementation: `apps/desktop/src/electron/ElectronProtocol.ts` reads assets directly before applying the existing navigation fallback. It needs no metadata lookup. `ElectronProtocol.test.ts` covers script/image responses and navigation when archive metadata cannot be decoded.
+- Verification: `vp test run apps/desktop/src/electron/ElectronProtocol.test.ts`, scoped desktop typecheck, targeted lint and formatting, then launch the packaged app with an isolated `T3CODE_HOME`. Verify the native `t3code://app/` renderer reaches the chat UI and serves its actual entry script and logo with status 200. A development browser alone does not exercise ASAR.
+- Retirement: the pinned Electron runtime and Effect metadata decoder interoperate and a packaged startup test proves it. Direct reads may remain as the simpler asset-serving path.
+
 ## Validation policy
 
 Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use requires the authorization described there. Keep runtime state away from the live install. Record manual graphics and clipboard checks as pending when unavailable.
@@ -110,3 +119,13 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Local unsigned Intel macOS release `0.1.1` built successfully with Node `24.22.0` and publishing disabled. Artifacts, update manifest, blockmaps, metadata, release notes and SHA-256 checksums are in `/Users/saikrishnaambeti/Documents/opensource/t3code/release/20261018`. DMG and ZIP integrity, app version, packaged Electron `43.6.0`, x64 architecture, embedded source commit, fork update feed and update-manifest hashes passed. Runtime source: `e69d5786493666a3616f071fd5e3d79053296ba6`; the subsequent source commit changes only browser fixtures. Temporary release package versions were restored byte-for-byte after packaging; the temporary public `.env.example` copy was removed. No GitHub release, tag or workflow dispatch was created.
 - Focused Chromium tests were explicitly authorized. Hardware rendering, interactive native clipboard, native mobile and automatic installation acceptance remain pending; the last behaviorally verified baseline is unchanged. Live T3 state and existing dev servers were not used or modified.
 - Evidence: `/tmp/t3-patch-20261017-*.log`, `/tmp/t3-patch-20261018-*.log`, `/tmp/t3-release-20261018.log`. Earlier superseded draft backup remains stash `4c401cf5adfacf18b91ce3759948713f10ec559d` and was not replayed. The final fixture formatting hook hit a Git staging error; manual formatting and lint passed before committing with that hook disabled. Its automatic backup remains available.
+
+## Installed desktop startup repair, 2026-10-18
+
+- Starting source: `67639873a800287a9057f5e768398da5f3b02744`. The installed unsigned `0.1.1` app reproduced the reported broken-logo splash. Native renderer logs showed 404 responses for an existing entry script and icon. Running Effect's real filesystem service under the packaged Electron runtime confirmed the BigInt metadata error described in P007.
+- Changed only desktop asset serving and its regression coverage. Web development proxying, mobile, providers, RPC contracts, and application entry points are unchanged. No upstream update was integrated.
+- Nine focused protocol tests, desktop typecheck with `tsc-rs`, targeted lint/formatting, and whitespace checks passed. Existing Effect style suggestions remain outside the changed files. Personal CodeRabbit reviewed the fix with zero findings. Greptile was unavailable for this repository during the preceding integration.
+- Rebuilt the desktop main bundle against the locked dependencies. Repacked the installed app, preserved all 2,309 archive entries and 95 unpacked native files, and refreshed its ASAR integrity header. Electron remains `43.6.0`; app version remains `0.1.1`. Original app backup: `/Applications/T3 Code (Beta).app.before-startup-fix-20261018`.
+- Native verification used the repaired `/Applications/T3 Code (Beta).app` with an isolated T3 home, seeded through the read-only migration helper with two projects and stopped threads. The chat UI loaded; its real entry script and logo returned 200 with their expected MIME types. A deliberately missing script returned 404. The test did not start a server against live T3 data or run a provider turn.
+- The native test shared the existing Electron profile and logged IndexedDB cache-lock warnings while another desktop process held it. These did not prevent the verified UI from loading. No browser cache or live data was cleared. GPU acceleration and clipboard behavior remain unverified.
+- Repair evidence and logs are under `/tmp/t3-beta-startup-*` and `/tmp/t3-beta-*.log`. Original `release/20261018` DMG and ZIP predate this repair and must not be used to reinstall it. No GitHub release was published.

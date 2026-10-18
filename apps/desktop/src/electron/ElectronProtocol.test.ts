@@ -5,6 +5,7 @@ import * as Fiber from "effect/Fiber";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as PlatformError from "effect/PlatformError";
 import * as TestClock from "effect/testing/TestClock";
 import { beforeEach, vi } from "vite-plus/test";
 
@@ -67,6 +68,60 @@ describe("ElectronProtocol", () => {
       assert.equal((yield* request("/", { method: "POST" })).status, 405);
       assert.equal(netFetchMock.mock.calls.length, 0);
     }).pipe(Effect.provide(Layer.merge(layerProtocol, NodeServices.layer)), Effect.scoped),
+  );
+
+  it.effect("serves packaged assets when Electron archive metadata cannot be decoded", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = yield* fileSystem.makeTempDirectoryScoped();
+      yield* fileSystem.writeFileString(`${directory}/index.html`, "<html>app</html>");
+      yield* fileSystem.writeFileString(`${directory}/app.js`, "export default 1;");
+      const image = new Uint8Array([137, 80, 78, 71]);
+      yield* fileSystem.writeFile(`${directory}/logo.png`, image);
+      const archiveFileSystem = FileSystem.make({
+        ...fileSystem,
+        stat: () =>
+          Effect.fail(
+            PlatformError.badArgument({
+              module: "FileSystem",
+              method: "stat",
+              description: "Cannot convert 1 to a BigInt",
+            }),
+          ),
+      });
+      const protocolLayer = ElectronProtocol.layer.pipe(
+        Layer.provide(Layer.succeed(FileSystem.FileSystem, archiveFileSystem)),
+      );
+      yield* Effect.gen(function* () {
+        let handler: ((request: Request) => Promise<Response>) | undefined;
+        handleMock.mockImplementation((_scheme, nextHandler) => {
+          handler = nextHandler;
+        });
+        const protocol = yield* ElectronProtocol.ElectronProtocol;
+        yield* protocol.registerDesktopProtocol({
+          scheme: "t3code",
+          assetDirectory: directory,
+          clerkFrontendApiHostname: undefined,
+        });
+        const request = (pathname: string, init?: RequestInit) =>
+          Effect.promise(() => handler!(new Request(`t3code://app${pathname}`, init)));
+        const script = yield* request("/app.js?v=1");
+        assert.equal(script.status, 200);
+        assert.include(script.headers.get("content-type") ?? "", "javascript");
+        assert.equal(yield* Effect.promise(() => script.text()), "export default 1;");
+        const logo = yield* request("/logo.png");
+        assert.equal(logo.status, 200);
+        assert.equal(logo.headers.get("content-type"), "image/png");
+        assert.deepEqual(new Uint8Array(yield* Effect.promise(() => logo.arrayBuffer())), image);
+        const head = yield* request("/app.js", { method: "HEAD" });
+        assert.equal(head.status, 200);
+        assert.equal(yield* Effect.promise(() => head.text()), "");
+        const page = yield* request("/settings/connections");
+        assert.equal(yield* Effect.promise(() => page.text()), "<html>app</html>");
+        assert.equal((yield* request("/missing.js")).status, 404);
+        assert.equal((yield* request("/%2e%2e%2fsecret.txt")).status, 404);
+      }).pipe(Effect.provide(protocolLayer));
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 
   it.effect("proxies the stable renderer origin to the current app server", () =>

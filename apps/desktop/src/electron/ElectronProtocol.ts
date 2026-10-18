@@ -227,16 +227,18 @@ const serveDesktopAsset = Effect.fn("desktop.protocol.serveAsset")(function* (
   if (assetPath !== root && !assetPath.startsWith(root + path.sep)) {
     return new Response(null, { status: 404 });
   }
-  const stat = yield* fileSystem.stat(assetPath).pipe(Effect.orElseSucceed(() => null));
+  // Electron ASAR stats use numbers even with bigint enabled, which Effect rejects.
+  // Reading directly also avoids a metadata lookup for every bundled asset.
   let filePath = assetPath;
-  if (stat?.type !== "File") {
+  let contents = yield* fileSystem.readFile(filePath).pipe(Effect.orElseSucceed(() => null));
+  if (contents === null) {
     const wantsHtml = request.headers.get("accept")?.includes("text/html") ?? false;
     if (path.extname(assetPath) !== "" && !wantsHtml) {
       return new Response(null, { status: 404 });
     }
     filePath = path.join(root, "index.html");
+    contents = yield* fileSystem.readFile(filePath).pipe(Effect.orElseSucceed(() => null));
   }
-  const contents = yield* fileSystem.readFile(filePath).pipe(Effect.orElseSucceed(() => null));
   if (contents === null) return new Response(null, { status: 404 });
   return new Response(request.method === "HEAD" ? null : new Uint8Array(contents), {
     headers: {
