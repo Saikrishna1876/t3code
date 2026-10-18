@@ -34,6 +34,7 @@ import {
 } from "@t3tools/shared/searchRanking";
 import { fileHeaderMimeType } from "../workspace/fileHeaderMimeType.ts";
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
+import { handleClaudeWorkspaceMcp } from "./ClaudeWorkspaceMcp.ts";
 
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 const encodeVcsError = Schema.encodeSync(Schema.toCodecJson(VcsError));
@@ -444,6 +445,10 @@ export async function startWorker(root: string, token: string, port = 0) {
     }
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
+      if (url.pathname.startsWith("/claude/mcp") && request.method !== "POST") {
+        response.writeHead(405, { Allow: "POST" }).end();
+        return;
+      }
       if (request.method === "POST" && url.pathname === "/files/write") {
         const cwd = url.searchParams.get("cwd");
         const relativePath = url.searchParams.get("relativePath");
@@ -473,6 +478,34 @@ export async function startWorker(root: string, token: string, port = 0) {
         chunks.push(Buffer.from(chunk));
       }
       const payload: unknown = JSON.parse(Buffer.concat(chunks).toString());
+      if (
+        request.method === "POST" &&
+        (url.pathname === "/claude/mcp" || url.pathname === "/claude/mcp/read-only")
+      ) {
+        await handleClaudeWorkspaceMcp({
+          request,
+          response,
+          payload,
+          root: workspaceRoot,
+          readOnly: url.pathname.endsWith("/read-only"),
+          validPath,
+          readPath: async (path) => {
+            const resolved = NodePath.resolve(workspaceRoot, path);
+            // Attachments are staged outside Git so checkpoints never capture them.
+            if (
+              NodePath.dirname(resolved) === attachmentDirectory &&
+              /^[a-f0-9]{64}(\.[a-zA-Z0-9]+)?$/.test(NodePath.basename(resolved))
+            ) {
+              if ((await NodeFSP.realpath(resolved)) !== resolved)
+                throw new Error("Attachment path changed.");
+              return resolved;
+            }
+            return validPath(path);
+          },
+          searchContents: entries.searchContents,
+        });
+        return;
+      }
       if (request.method === "POST" && request.url === "/asset") {
         if (
           !payload ||

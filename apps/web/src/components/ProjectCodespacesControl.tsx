@@ -572,8 +572,9 @@ function ProjectCodespacesControlPanel({
           </summary>
           <div className="space-y-4 pt-3">
             <p className="text-xs text-muted-foreground">
-              Requires Codex 0.160.1 or later and the main checkout. Existing project terminals
-              close when switching workspaces. Provider login stays on your T3 host.
+              Use Claude Code or Codex from the main checkout. Codex requires version 0.160.1 or
+              later. Existing project terminals close when switching workspaces. Provider login
+              stays on your T3 host.
             </p>
             {state.data ? (
               <CodespacesAgentAccess

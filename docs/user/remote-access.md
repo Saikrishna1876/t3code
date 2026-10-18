@@ -224,12 +224,17 @@ commands can reduce it.
 The container needs Node.js 22.13 or later, npm, and an SSH server. T3 installs
 its search engine once and reuses it when reconnecting.
 
-Remote execution currently requires local Codex 0.160.1 or later and uses
-the project's main checkout. No provider sign-in is required inside the
+Remote execution supports local Claude Code or Codex 0.160.1 or later and
+uses the project's main checkout. No provider sign-in is required inside the
 Codespace. Agent commands, file browsing, terminals, Git and checkpoints
 operate on its filesystem. Loopback preview URLs are forwarded privately
 through the T3 host. Other providers and additional worktrees are not yet
 supported for this execution target.
+
+Claude uses remote tools for reading, searching, editing and shell commands.
+Native Claude skills, subagents and background shell commands are unavailable
+on this target. Use T3 delegation for agents and the project terminal for
+persistent commands such as development servers.
 
 Stop compute when finished. Finish or stop active turns before stopping or
 switching targets. Resume reconnects the same Codespace and files. Work locally

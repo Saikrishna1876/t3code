@@ -23,6 +23,9 @@ import type {
   ProjectWriteFileResult,
 } from "@t3tools/contracts";
 import { startWorker } from "./worker.ts";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 const execute = NodeUtil.promisify(NodeChildProcess.execFile);
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -72,6 +75,195 @@ async function fixture() {
   return { local, remote, call, worker };
 }
 describe("Codespace workspace worker", () => {
+  async function claudeClient(readOnly = false) {
+    const test = await fixture();
+    const client = new Client({ name: "claude-workspace-test", version: "1.0.0" });
+    await client.connect(
+      new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${test.worker.port}/claude/mcp${readOnly ? "/read-only" : ""}`),
+        { requestInit: { headers: { Authorization: "Bearer executor-token" } } },
+      ) as Transport,
+    );
+    cleanups.push(() => client.close());
+    return { ...test, client };
+  }
+
+  it("runs Claude file tools and commands on remote files without changing the host checkout", async () => {
+    const test = await claudeClient();
+    await NodeFSP.writeFile(NodePath.join(test.local, "proof.txt"), "host-only\n");
+    const tools = await test.client.listTools();
+    expect(tools.tools.map((tool) => tool.name)).toEqual([
+      "Read",
+      "Glob",
+      "Grep",
+      "Write",
+      "Edit",
+      "Bash",
+    ]);
+    expect(
+      await test.client.callTool({ name: "Read", arguments: { file_path: "proof.txt" } }),
+    ).toMatchObject({ content: [{ text: "1\tbaseline\n2\t" }] });
+    expect(
+      await test.client.callTool({
+        name: "Write",
+        arguments: { file_path: "src/new.txt", content: "replace replace" },
+      }),
+    ).not.toHaveProperty("isError");
+    expect(
+      await test.client.callTool({
+        name: "Edit",
+        arguments: {
+          file_path: "src/new.txt",
+          old_string: "replace",
+          new_string: "literal $&",
+          replace_all: true,
+        },
+      }),
+    ).not.toHaveProperty("isError");
+    expect(await NodeFSP.readFile(NodePath.join(test.remote, "src/new.txt"), "utf8")).toBe(
+      "literal $& literal $&",
+    );
+    expect(
+      await test.client.callTool({ name: "Glob", arguments: { pattern: "src/*.txt" } }),
+    ).toMatchObject({ content: [{ text: "src/new.txt" }] });
+    const command = await test.client.callTool({
+      name: "Bash",
+      arguments: { command: "printf remote-command > proof.txt; pwd" },
+    });
+    expect(command).toMatchObject({ content: [{ text: expect.stringContaining(test.remote) }] });
+    expect(await NodeFSP.readFile(NodePath.join(test.remote, "proof.txt"), "utf8")).toBe(
+      "remote-command",
+    );
+    expect(await NodeFSP.readFile(NodePath.join(test.local, "proof.txt"), "utf8")).toBe(
+      "host-only\n",
+    );
+  });
+
+  it("enforces read-only Claude tools at the remote endpoint", async () => {
+    const test = await claudeClient(true);
+    expect((await test.client.listTools()).tools.map((tool) => tool.name)).toEqual([
+      "Read",
+      "Glob",
+      "Grep",
+    ]);
+    for (const name of ["Bash", "Write", "Edit"]) {
+      expect(
+        await test.client.callTool({
+          name,
+          arguments: {
+            command: "touch bad",
+            file_path: "proof.txt",
+            content: "bad",
+            old_string: "baseline",
+            new_string: "bad",
+          },
+        }),
+      ).toMatchObject({ isError: true });
+    }
+    expect(await NodeFSP.readFile(NodePath.join(test.remote, "proof.txt"), "utf8")).toBe(
+      "baseline\n",
+    );
+  });
+
+  it("reads later Claude file sections after skipping more than 1 MiB", async () => {
+    const test = await claudeClient(true);
+    await NodeFSP.writeFile(
+      NodePath.join(test.remote, "large.txt"),
+      "skip\n".repeat(230000) + "later\nlast\n",
+    );
+    expect(
+      await test.client.callTool({
+        name: "Read",
+        arguments: { file_path: "large.txt", offset: 230001, limit: 2 },
+      }),
+    ).toMatchObject({ content: [{ text: "230001\tlater\n230002\tlast" }] });
+    expect(
+      await test.client.callTool({
+        name: "Read",
+        arguments: { file_path: "large.txt", offset: 230010 },
+      }),
+    ).toMatchObject({ content: [{ text: "" }] });
+    await NodeFSP.writeFile(
+      NodePath.join(test.remote, "long-line.txt"),
+      "x".repeat(2 * 1024 * 1024) + "\nlater café\n",
+    );
+    expect(
+      await test.client.callTool({
+        name: "Read",
+        arguments: { file_path: "long-line.txt", offset: 2, limit: 1 },
+      }),
+    ).toMatchObject({ content: [{ text: "2\tlater café" }] });
+    expect(
+      await test.client.callTool({
+        name: "Read",
+        arguments: { file_path: "long-line.txt", limit: 1 },
+      }),
+    ).toMatchObject({
+      content: [{ text: "1\t" + "x".repeat(1024 * 1024) + "\n[Output truncated at 1 MiB]" }],
+    });
+  });
+
+  it("returns workspace-relative Claude search paths from nested directories", async () => {
+    const test = await claudeClient(true);
+    await NodeFSP.mkdir(NodePath.join(test.remote, "src"));
+    await NodeFSP.writeFile(NodePath.join(test.remote, "index.txt"), "wrong root file");
+    await NodeFSP.writeFile(NodePath.join(test.remote, "src/index.txt"), "nested match");
+    expect(
+      await test.client.callTool({ name: "Glob", arguments: { path: "src", pattern: "*.txt" } }),
+    ).toMatchObject({ content: [{ text: "src/index.txt" }] });
+    expect(
+      await test.client.callTool({ name: "Grep", arguments: { path: "src", pattern: "nested" } }),
+    ).toMatchObject({ content: [{ text: expect.stringContaining('"path":"src/index.txt"') }] });
+    expect(
+      await test.client.callTool({ name: "Read", arguments: { file_path: "src/index.txt" } }),
+    ).toMatchObject({ content: [{ text: "1\tnested match" }] });
+  });
+
+  it("refuses Claude file paths outside the remote root, including symlinks", async () => {
+    const test = await claudeClient();
+    await NodeFSP.symlink(test.local, NodePath.join(test.remote, "host-link"));
+    for (const file_path of [
+      NodePath.join(test.local, "proof.txt"),
+      "../local/proof.txt",
+      "host-link/proof.txt",
+    ]) {
+      expect(await test.client.callTool({ name: "Read", arguments: { file_path } })).toMatchObject({
+        isError: true,
+      });
+      expect(
+        await test.client.callTool({ name: "Write", arguments: { file_path, content: "bad" } }),
+      ).toMatchObject({ isError: true });
+    }
+    expect(await NodeFSP.readFile(NodePath.join(test.local, "proof.txt"), "utf8")).toBe(
+      "baseline\n",
+    );
+  });
+
+  it("bounds Claude command duration and output, and refuses background execution", async () => {
+    const test = await claudeClient();
+    expect(
+      await test.client.callTool({
+        name: "Bash",
+        arguments: { command: "node -e 'setInterval(() => {}, 1000)'", timeout: 30 },
+      }),
+    ).toMatchObject({ isError: true });
+    expect(
+      await test.client.callTool({
+        name: "Bash",
+        arguments: { command: "node -e 'process.stdout.write(Buffer.alloc(2000000, 120))'" },
+      }),
+    ).toMatchObject({
+      isError: true,
+      content: [{ text: expect.stringContaining("output limit exceeded") }],
+    });
+    expect(
+      await test.client.callTool({
+        name: "Bash",
+        arguments: { command: "touch background-proof", run_in_background: true },
+      }),
+    ).toMatchObject({ isError: true });
+    await expect(NodeFSP.stat(NodePath.join(test.remote, "background-proof"))).rejects.toThrow();
+  });
   it("reads remote metadata, detects extensionless images and refuses outside paths", async () => {
     const test = await fixture();
     const image = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");

@@ -1,4 +1,7 @@
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
+import * as CodespacesWorkspace from "../../codespaces/CodespacesWorkspace.ts";
+import { claudeWorkspaceExecution } from "../../codespaces/ClaudeWorkspaceExecution.ts";
+import { resolveCodexWorkspaceAttachments } from "../../codespaces/CodexWorkspaceAttachments.ts";
 import { claudeTaskOutputRoot, tailClaudeTaskOutput } from "./ClaudeTaskOutputTail.ts";
 import {
   dynamicToolTitle,
@@ -1074,6 +1077,7 @@ export function makeClaudeQueryOptions(input: {
   readonly onUserDialog?: ClaudeQueryOptions["onUserDialog"];
   readonly supportedDialogKinds?: ClaudeQueryOptions["supportedDialogKinds"];
   readonly allowDangerouslySkipPermissions?: boolean;
+  readonly workspaceInstructions?: string;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
   const {
@@ -1158,7 +1162,8 @@ export function makeClaudeQueryOptions(input: {
       preset: "claude_code" as const,
       append:
         buildRuntimeInstructions({ harness: "Claude Code" }) +
-        (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS),
+        (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS) +
+        (input.workspaceInstructions ?? ""),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };
@@ -1582,6 +1587,7 @@ const makeClaudeUserMessageWithAttachments = Effect.fnUntraced(function* (input:
   readonly attachmentsDir: string;
   readonly fileSystem: FileSystem.FileSystem;
   readonly skillNames?: ReadonlySet<string>;
+  readonly attachmentPaths?: ReadonlyMap<string, string>;
 }) {
   if (input.attachments.length === 0) {
     return makeClaudeUserMessage({
@@ -1596,6 +1602,7 @@ const makeClaudeUserMessageWithAttachments = Effect.fnUntraced(function* (input:
     text: input.text,
     attachments: input.attachments,
     resolveAttachmentPath: (attachment) =>
+      input.attachmentPaths?.get(attachment.id) ??
       resolveAttachmentPath({ attachmentsDir: input.attachmentsDir, attachment }),
   });
 
@@ -3363,23 +3370,30 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
     offer: () => Effect.void,
   };
 
-  const userInvocableSkillNames = (cwd: string | null) =>
-    discoverClaudeSkills(
-      adapterOptions.settings,
-      cwd ?? undefined,
-      adapterOptions.environment,
-    ).pipe(
-      Effect.map(
-        (skills) =>
-          new Set(
-            skills
-              .filter((skill) => skill.enabled && skill.userInvocable !== false)
-              .map((skill) => skill.name),
-          ),
-      ),
-      Effect.provideService(FileSystem.FileSystem, fileSystem),
-      Effect.provideService(Path.Path, path),
-    );
+  const userInvocableSkillNames = (
+    cwd: string | null,
+    workspaceService: CodespacesWorkspace.CodespacesWorkspace["Service"] | undefined,
+  ) =>
+    Effect.gen(function* () {
+      if (workspaceService && cwd && (yield* workspaceService.lookup(cwd)))
+        return new Set<string>();
+      return yield* discoverClaudeSkills(
+        adapterOptions.settings,
+        cwd ?? undefined,
+        adapterOptions.environment,
+      ).pipe(
+        Effect.map(
+          (skills) =>
+            new Set(
+              skills
+                .filter((skill) => skill.enabled && skill.userInvocable !== false)
+                .map((skill) => skill.name),
+            ),
+        ),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      );
+    });
 
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: adapterOptions.instanceId,
@@ -3389,6 +3403,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
     openSession: Effect.fn("ClaudeAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
         const sessionScope = yield* Effect.scope;
+        const workspaceService = Option.getOrUndefined(
+          yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+        );
         const now = yield* DateTime.now;
         const session = providerSession({
           providerSessionId: input.providerSessionId,
@@ -8039,7 +8056,22 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           nativeThreadId: string,
         ) {
           const queryPolicy = claudeRuntimeQueryPolicyForRuntimePolicy(turnInput.runtimePolicy);
-          const mcpOverrides = claudeMcpQueryOverrides({
+          const workspaceExecution = yield* claudeWorkspaceExecution(
+            workspaceService,
+            turnInput.runtimePolicy.cwd,
+            sandboxPolicyKindForClaudeRuntimePolicy(turnInput.runtimePolicy) === "readOnly" ||
+              queryPolicy.permissionMode === "plan",
+          ).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapter.ProviderAdapterProtocolError({
+                  driver: CLAUDE_PROVIDER,
+                  detail: cause.message,
+                  payload: cause,
+                }),
+            ),
+          );
+          const baseMcpOverrides = claudeMcpQueryOverrides({
             mcpSession: yield* mcpSessions.read(turnInput.threadId),
             readOnlySandbox:
               sandboxPolicyKindForClaudeRuntimePolicy(turnInput.runtimePolicy) === "readOnly",
@@ -8047,6 +8079,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               ? {}
               : { allowedTools: queryPolicy.allowedTools }),
           });
+          const mcpOverrides = workspaceExecution
+            ? {
+                mcpServers: { ...baseMcpOverrides.mcpServers, ...workspaceExecution.mcpServers },
+                allowedTools: [
+                  ...(baseMcpOverrides.allowedTools ?? []),
+                  ...workspaceExecution.allowedTools,
+                ],
+              }
+            : baseMcpOverrides;
           const queryPolicyKey = claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides);
           const compiledSelection = compileClaudeModelSelection(turnInput.modelSelection);
           const resumeSessionAt = yield* getNativeConversationHeadId(turnInput.providerThread);
@@ -8128,7 +8169,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             turnInput.nativeThreadHasTurns ?? turnInput.providerTurnOrdinal > 1;
           const shouldResume =
             resumeSessionAt !== undefined || openedWithResume || hasPersistedProviderTurn;
-          const queryOptions = makeClaudeQueryOptions({
+          const baseQueryOptions = makeClaudeQueryOptions({
             modelSelection: turnInput.modelSelection,
             nativeThreadId,
             resume: shouldResume,
@@ -8153,7 +8194,25 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             canUseTool,
             onUserDialog,
             supportedDialogKinds: ["resume_return"],
+            ...(workspaceExecution
+              ? { workspaceInstructions: workspaceExecution.instructions }
+              : {}),
           });
+          const queryOptions = workspaceExecution
+            ? {
+                ...baseQueryOptions,
+                tools: workspaceExecution.tools,
+                disallowedTools: workspaceExecution.disallowedTools,
+                toolAliases: workspaceExecution.toolAliases,
+                settingSources: workspaceExecution.settingSources,
+                settings: {
+                  ...(typeof baseQueryOptions.settings === "object"
+                    ? baseQueryOptions.settings
+                    : {}),
+                  disableAllHooks: true,
+                },
+              }
+            : baseQueryOptions;
           const querySession = yield* queryRunner
             .open({
               threadId: turnInput.threadId,
@@ -8347,9 +8406,26 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                       compileClaudeModelSelection(turnInput.modelSelection).promptEffort,
                     ),
                     attachments: turnInput.message.attachments,
+                    attachmentPaths: yield* resolveCodexWorkspaceAttachments(workspaceService, {
+                      cwd: turnInput.runtimePolicy.cwd,
+                      attachmentsDir,
+                      attachments: turnInput.message.attachments,
+                    }).pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new ProviderAdapter.ProviderAdapterProtocolError({
+                            driver: CLAUDE_PROVIDER,
+                            detail: cause.message,
+                            payload: cause,
+                          }),
+                      ),
+                    ),
                     attachmentsDir,
                     fileSystem,
-                    skillNames: yield* userInvocableSkillNames(turnInput.runtimePolicy.cwd),
+                    skillNames: yield* userInvocableSkillNames(
+                      turnInput.runtimePolicy.cwd,
+                      workspaceService,
+                    ),
                     uuid: promptUuid,
                   });
             const querySession = yield* openQuery(turnInput, nativeThreadId);
@@ -8640,10 +8716,27 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 compileClaudeModelSelection(currentTurn.input.modelSelection).promptEffort,
               ),
               attachments: turnInput.message.attachments,
+              attachmentPaths: yield* resolveCodexWorkspaceAttachments(workspaceService, {
+                cwd: currentTurn.input.runtimePolicy.cwd,
+                attachmentsDir,
+                attachments: turnInput.message.attachments,
+              }).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderAdapter.ProviderAdapterProtocolError({
+                      driver: CLAUDE_PROVIDER,
+                      detail: cause.message,
+                      payload: cause,
+                    }),
+                ),
+              ),
               priority: "now",
               attachmentsDir,
               fileSystem,
-              skillNames: yield* userInvocableSkillNames(currentTurn.input.runtimePolicy.cwd),
+              skillNames: yield* userInvocableSkillNames(
+                currentTurn.input.runtimePolicy.cwd,
+                workspaceService,
+              ),
             });
             yield* backgroundForegroundSubagents(existing);
             // The turn can end while the moves are answered. A steer offered

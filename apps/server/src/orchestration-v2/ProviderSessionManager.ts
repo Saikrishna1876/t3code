@@ -55,6 +55,7 @@ import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+const codespacesDrivers = new Set(["codex", "claudeAgent"]);
 const DEFAULT_MAX_IDLE_PIN_MS = 4 * 60 * 60 * 1000;
 const RELEASE_SCOPE_CLOSE_TIMEOUT_MS = 30 * 1000;
 
@@ -1889,7 +1890,7 @@ export const layerWithOptions = (
                   const target = yield* threadWorkspace(input.threadId, input.runtimePolicy.cwd);
                   if (
                     target &&
-                    (runtime.driver !== "codex" ||
+                    (!codespacesDrivers.has(runtime.driver) ||
                       !target.executor ||
                       input.runtimePolicy.cwd !== target.localRoot)
                   )
@@ -1899,7 +1900,7 @@ export const layerWithOptions = (
                       providerThreadId: input.providerThread.id,
                       runId: input.runId,
                       cause:
-                        "Resume the Codespace and use Codex from the project's main checkout before starting work.",
+                        "Resume the Codespace and use Codex or Claude from the project's main checkout before starting work.",
                     });
                 }).pipe(
                   Effect.mapError((cause) =>
@@ -2217,16 +2218,19 @@ export const layerWithOptions = (
                       }),
                   ),
                 );
-                if (selected.driver !== "codex" || !target.executor || cwd !== target.localRoot)
+                if (
+                  !codespacesDrivers.has(selected.driver) ||
+                  !target.executor ||
+                  cwd !== target.localRoot
+                )
                   return yield* new ProviderSessionOpenError({
                     instanceId: input.modelSelection.instanceId,
                     providerSessionId: input.providerSessionId,
-                    reason:
-                      selected.driver !== "codex"
-                        ? "Codespaces currently require Codex 0.160.1 or later. Provider login stays local."
-                        : !target.executor
-                          ? "Resume the project's Codespace before starting work."
-                          : "Codespaces currently use the project root. Select the main checkout.",
+                    reason: !codespacesDrivers.has(selected.driver)
+                      ? "Codespaces require Codex 0.160.1 or later, or Claude. Provider login stays local."
+                      : !target.executor
+                        ? "Resume the project's Codespace before starting work."
+                        : "Codespaces currently use the project root. Select the main checkout.",
                   });
               }
               const key = sessionKey(input.providerSessionId);

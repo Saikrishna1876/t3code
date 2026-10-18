@@ -515,8 +515,9 @@ function ProjectCodespacesControlPanel({
           {showDetails ? (
             <View className="gap-4">
               <Text className="text-xs text-foreground-muted">
-                Requires Codex 0.160.1 or later and the main checkout. Existing project terminals
-                close when switching workspaces. Provider login stays on your T3 host.
+                Use Claude Code or Codex from the main checkout. Codex requires version 0.160.1 or
+                later. Existing project terminals close when switching workspaces. Provider login
+                stays on your T3 host.
               </Text>
               {state.data ? (
                 <View className="flex-row items-start justify-between gap-3">
