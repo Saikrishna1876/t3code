@@ -4,6 +4,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeStream from "node:stream";
+import * as CodespacesWorkspace from "../../codespaces/CodespacesWorkspace.ts";
 
 import type {
   Query as ClaudeQuery,
@@ -1001,6 +1002,120 @@ describe("ClaudeAdapterV2 session permissions", () => {
       },
     ]);
   });
+});
+
+describe("ClaudeAdapterV2 Codespaces", () => {
+  it.effect("opens local inference with remote workspace tools and staged attachment paths", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-claude-codespace-",
+        });
+        const attachment = ChatFileAttachment.make({
+          type: "file",
+          id: ChatAttachmentId.make("claude-codespace-abcdefab-1234-1234-1234-123456789abc-txt"),
+          name: "notes.txt",
+          mimeType: "text/plain",
+          sizeBytes: 5,
+        });
+        let openedOptions: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions | undefined;
+        const prompts: SDKUserMessage[] = [];
+        const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
+          instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+          settings: DEFAULT_CLAUDE_SETTINGS,
+          environment: { CLAUDE_CONFIG_DIR: "/local-login" },
+          attachmentsDir,
+          fileSystem,
+          path: yield* Path.Path,
+          crypto: yield* Crypto.Crypto,
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          queryRunner: {
+            allocateSessionId: Effect.succeed("native-claude-codespace"),
+            open: (input) =>
+              Effect.sync(() => {
+                openedOptions = input.options;
+                return {
+                  messages: Stream.never,
+                  offer: (message) =>
+                    Effect.sync(() => {
+                      prompts.push(message);
+                    }),
+                  setModel: () => Effect.void,
+                  applyFlagSettings: () => Effect.void,
+                  setPermissionMode: () => Effect.void,
+                  backgroundTasks: () => Effect.succeed(false),
+                  stopTask: () => Effect.void,
+                  interrupt: Effect.void,
+                  close: Effect.void,
+                };
+              }),
+            forkSession: () => Effect.die("unused"),
+            subagentLaunchToolUseId: () => Effect.succeed(null),
+            assertComplete: Effect.void,
+          },
+        });
+        const threadId = ThreadId.make("claude-codespace");
+        const runtimePolicy = { ...CLAUDE_TEST_RUNTIME_POLICY, cwd: "/local/project" };
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("claude-codespace-session"),
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+        yield* runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId,
+            providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("claude-codespace-attempt"),
+            text: "Read the notes",
+            attachments: [attachment],
+            runtimePolicy,
+          }),
+        );
+        assert.deepEqual(openedOptions?.env, { CLAUDE_CONFIG_DIR: "/local-login" });
+        assert.equal(openedOptions?.cwd, "/local/project");
+        assert.equal(openedOptions?.toolAliases?.Bash, "mcp__t3-workspace__Bash");
+        assert.include(openedOptions?.disallowedTools ?? [], "Bash");
+        assert.include(openedOptions?.disallowedTools ?? [], "Agent");
+        assert.notInclude(openedOptions?.tools as string[], "Read");
+        assert.deepEqual(openedOptions?.settingSources, []);
+        assert.include(JSON.stringify(prompts), "/tmp/remote-notes.txt");
+        assert.notInclude(JSON.stringify(prompts), attachmentsDir);
+      }),
+    ).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+            lookup: () =>
+              Effect.succeed({
+                projectId: "project",
+                name: "space",
+                localRoot: "/local/project",
+                remoteCwd: "/workspaces/project",
+                executor: {
+                  name: "space",
+                  remoteRoot: "/workspaces/project",
+                  workerUrl: "http://localhost:1",
+                  execServerUrl: "ws://localhost:2",
+                  token: "fixture",
+                },
+              }),
+            stageAttachment: () => Effect.succeed("/tmp/remote-notes.txt"),
+          }),
+          McpProviderSessions.layer,
+          IdAllocator.layer,
+          NodeServices.layer,
+        ),
+      ),
+    ),
+  );
 });
 
 describe("ClaudeAdapterV2 Auto-accept edits", () => {

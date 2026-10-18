@@ -322,6 +322,7 @@ function unimplemented(detail: string) {
 const makeProviderAdapter = Effect.fnUntraced(function* (
   state: Ref.Ref<TestProviderRuntimeState>,
   options: {
+    readonly driver?: ProviderDriverKind;
     readonly failEventStream?: boolean;
     readonly capabilities?: OrchestrationV2ProviderCapabilities;
     readonly mcpConfigs?: Ref.Ref<
@@ -359,7 +360,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
   );
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: ProviderInstanceId.make("codex"),
-    driver: CODEX_DRIVER,
+    driver: options.driver ?? CODEX_DRIVER,
     getCapabilities: () => Effect.succeed(options.capabilities ?? CodexCapabilities),
     planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
     openSession: (input) =>
@@ -402,7 +403,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
 
         return {
           instanceId: ProviderInstanceId.make("codex"),
-          driver: CODEX_DRIVER,
+          driver: options.driver ?? CODEX_DRIVER,
           providerSessionId: input.providerSessionId,
           providerSession: session,
           events: options.failEventStream
@@ -460,6 +461,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
 });
 
 function layerTest(input: {
+  readonly driver?: ProviderDriverKind;
   readonly state: Ref.Ref<TestProviderRuntimeState>;
   readonly idleTimeoutMs: number;
   readonly maxIdlePinMs?: number;
@@ -504,6 +506,7 @@ function layerTest(input: {
             : layerTestEventSink;
   const layerRegistry = Layer.unwrap(
     makeProviderAdapter(input.state, {
+      ...(input.driver === undefined ? {} : { driver: input.driver }),
       failEventStream: input.failEventStream ?? false,
       ...(input.capabilities === undefined ? {} : { capabilities: input.capabilities }),
       ...(input.mcpConfigs === undefined ? {} : { mcpConfigs: input.mcpConfigs }),
@@ -827,9 +830,94 @@ function makePendingRuntimeRequestEvents(input: {
   });
 }
 
-it.effect.each([true, false])(
-  "ProviderSessionManagerV2 rejects outside-root worktrees with connected=%s",
-  (connected) =>
+it.effect.each(["codex", "claudeAgent", "opencode"] as const)(
+  "ProviderSessionManagerV2 opens a connected Codespace only for supported driver %s",
+  (driver) =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      const starts = yield* Ref.make(0);
+      const projectId = ProjectId.make("bound-provider-project");
+      const binding = { projectId, localRoot: runtimePolicy.cwd, name: "space" };
+      const workspaceLayer = Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+        bindings: Effect.succeed([binding]),
+        acquireWork: () => Effect.void,
+        lookup: () =>
+          Effect.succeed({
+            ...binding,
+            remoteCwd: "/workspaces/project",
+            executor: {
+              name: "space",
+              remoteRoot: "/workspaces/project",
+              workerUrl: "http://localhost:1",
+              execServerUrl: "ws://localhost:2",
+              token: "fixture",
+            },
+          }),
+      });
+      yield* Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const threadId = ThreadId.make("bound-provider-thread");
+        const now = yield* DateTime.now;
+        yield* eventSink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, projectId, now })],
+        });
+        const providerSessionId = yield* idAllocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        const result = yield* manager
+          .open({ threadId, providerSessionId, modelSelection, runtimePolicy })
+          .pipe(Effect.result);
+        expect(result._tag).toBe(driver === "opencode" ? "Failure" : "Success");
+        expect((yield* Ref.get(state)).openCount).toBe(driver === "opencode" ? 0 : 1);
+        if (result._tag === "Success") {
+          const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+          const runId = idAllocator.derive.run({ threadId, ordinal: 1 });
+          yield* result.success.startTurn({
+            appThread: (yield* projectionStore.getThreadProjection(threadId)).thread,
+            threadId,
+            runId,
+            runOrdinal: 1,
+            providerTurnOrdinal: 1,
+            attemptId: idAllocator.derive.runAttempt({ runId, attemptOrdinal: 1 }),
+            rootNodeId: idAllocator.derive.rootNode({ runId }),
+            providerThread: makeProviderThread({ idAllocator, threadId, providerSessionId, now }),
+            message: {
+              createdBy: "user",
+              creationSource: "web",
+              messageId: yield* idAllocator.allocate.message({ threadId, ordinal: 1 }),
+              text: "hello",
+              attachments: [],
+            },
+            modelSelection,
+            runtimePolicy,
+          });
+        }
+        expect(yield* Ref.get(starts)).toBe(driver === "opencode" ? 0 : 1);
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            state,
+            driver: ProviderDriverKind.make(driver),
+            idleTimeoutMs: 1000,
+            workspaceLayer,
+            startTurn: Ref.update(starts, (n) => n + 1),
+          }),
+        ),
+      );
+    }),
+);
+
+it.effect.each([
+  { driver: "codex", connected: true },
+  { driver: "codex", connected: false },
+  { driver: "claudeAgent", connected: true },
+  { driver: "claudeAgent", connected: false },
+])(
+  "ProviderSessionManagerV2 rejects outside-root Codespace worktrees with driver=$driver connected=$connected",
+  ({ driver, connected }) =>
     Effect.gen(function* () {
       const state = yield* Ref.make(emptyState);
       const projectId = ProjectId.make("bound-project");
@@ -877,7 +965,16 @@ it.effect.each([true, false])(
           connected ? "Select the main checkout" : "Resume the project's Codespace",
         );
         expect((yield* Ref.get(state)).openCount).toBe(0);
-      }).pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1000, workspaceLayer })));
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            state,
+            driver: ProviderDriverKind.make(driver),
+            idleTimeoutMs: 1000,
+            workspaceLayer,
+          }),
+        ),
+      );
     }),
 );
 
