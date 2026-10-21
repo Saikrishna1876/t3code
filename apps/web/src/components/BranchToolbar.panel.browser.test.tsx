@@ -1,4 +1,3 @@
-import { Atom } from "effect/reactivity";
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import type { ComponentProps } from "react";
 import { expect, it, vi } from "vite-plus/test";
@@ -31,6 +30,12 @@ vi.mock(import("../hooks/useCopyToClipboard"), async (original) => ({
 vi.mock(import("./BranchToolbarBranchSelector"), () => ({
   BranchToolbarBranchSelector: (() => null) as never,
 }));
+vi.mock(import("./AddProjectToMachineDialog"), () => ({
+  openAddProjectToMachine: vi.fn(),
+}));
+vi.mock(import("../hooks/useAddProjectTargets"), () => ({
+  useAddProjectTargets: () => [],
+}));
 vi.mock(import("../state/entities"), async (original) => ({
   ...(await original()),
   useProject: (() => ({ id: "project", workspaceRoot: "/tmp/project" })) as never,
@@ -40,6 +45,7 @@ vi.mock(import("../state/entities"), async (original) => ({
 vi.mock(import("../composerDraftStore"), async () => {
   const Schema = await import("effect/Schema");
   return {
+    clearComposerDraftsEnvironment: vi.fn(),
     DraftId: Schema.String.pipe(Schema.brand("DraftId")),
     useComposerDraftStore: Object.assign(
       (select: (store: unknown) => unknown) =>
@@ -58,7 +64,8 @@ vi.mock(import("../state/environments"), () => ({
     serverConfig: { environment: { capabilities: { codespaces: state.codespacesSupported } } },
   })) as never,
 }));
-vi.mock(import("../state/codespaces"), () => {
+vi.mock(import("../state/codespaces"), async () => {
+  const { Atom } = await import("effect/reactivity");
   const allowed = Atom.make(true);
   const denied = Atom.make(false);
   return {
@@ -304,3 +311,35 @@ it("shows a paired client's bound target and locks worktrees without exposing li
   expect(document.querySelector('[role="dialog"]')).toBeNull();
   expect(document.querySelector('[role="menu"]')).toBeNull();
 });
+
+it.each([false, true])(
+  "shows a paired client's bound Codespace in the composer with picker %s",
+  async (interactive) => {
+    setup();
+    state.codespacesSupported = true;
+    state.codespaceName = "project-space";
+    state.canManageCodespaces = false;
+    await using screen = await render(
+      {
+        layout: "composer",
+        showGitControls: false,
+        ...(interactive ? { onEnvironmentChange: vi.fn() } : {}),
+        availableEnvironments: ["local", "remote"].map((id) => ({
+          environmentId: EnvironmentId.make(id),
+          projectId: ProjectId.make("project"),
+          label: id,
+          isPrimary: id === "local",
+          machine: "server",
+        })),
+      },
+      { worktreePath: null },
+    );
+    expect(screen.container.textContent).toContain("Codespace");
+    if (interactive) {
+      await userEvent.click(page.getByRole("combobox", { name: "Run on" }));
+      await expect
+        .element(page.getByRole("option", { name: "Codespace", exact: true }))
+        .toHaveAttribute("aria-disabled", "true");
+    }
+  },
+);
