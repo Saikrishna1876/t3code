@@ -7,7 +7,7 @@ import {
   type CodespacesSnapshot,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
-import { AsyncResult, Atom } from "effect/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { act, render } from "../../test/render";
 import { expect, it, vi } from "vite-plus/test";
 
@@ -31,6 +31,7 @@ vi.mock(import("~/state/environments"), async (original) => ({
     }) as never,
 }));
 vi.mock(import("~/state/codespaces"), async (original) => {
+  const { Atom } = await import("effect/reactivity");
   const allowed = Atom.make(true);
   return {
     ...(await original()),

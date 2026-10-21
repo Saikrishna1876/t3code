@@ -229,6 +229,107 @@ const make = Effect.gen(function* () {
         remoteCwd: executor ? mapWorkspacePath(cwd, match.root, executor.remoteRoot) : null,
       };
     });
+  const call = Effect.fn("CodespacesWorkspace.call")(function* (
+    cwd: string,
+    group: string,
+    method: string,
+    args: ReadonlyArray<unknown>,
+  ) {
+    const target = yield* lookup(cwd);
+    if (!target?.executor)
+      return yield* new CodespacesError({
+        code: "conflict",
+        message: "Codespace is disconnected. Resume it from this project before continuing.",
+      });
+    const executor = target.executor;
+    const remoteArgs = args.map((argument, index) => {
+      if (index === 0 && typeof argument === "string")
+        return mapWorkspacePath(argument, target.localRoot, executor.remoteRoot);
+      if (
+        index === 1 &&
+        Array.isArray(argument) &&
+        ((group === "git" && method === "prepareCommitContext") ||
+          (group === "vcs" && method === "filterIgnoredPaths"))
+      )
+        return argument.map((path) =>
+          typeof path === "string"
+            ? mapWorkspacePath(path, target.localRoot, executor.remoteRoot)
+            : path,
+        );
+      return mapWorkspacePaths(argument, target.localRoot, executor.remoteRoot);
+    });
+    const request = yield* Effect.gen(function* () {
+      if (group !== "files" || method !== "writeFile")
+        return HttpClientRequest.post(executor.workerUrl + "/call").pipe(
+          HttpClientRequest.bodyJsonUnsafe({ group, method, args: remoteArgs }),
+        );
+      const input = yield* decodeWriteFile(remoteArgs[0]).pipe(
+        Effect.mapError(
+          () =>
+            new CodespacesError({
+              code: "configuration",
+              message: "Invalid workspace file write.",
+            }),
+        ),
+      );
+      // File contents bypass the bounded JSON control endpoint and its escaping overhead.
+      return HttpClientRequest.post(executor.workerUrl + "/files/write").pipe(
+        HttpClientRequest.setUrlParam("cwd", input.cwd),
+        HttpClientRequest.setUrlParam("relativePath", input.relativePath),
+        HttpClientRequest.bodyText(input.contents),
+      );
+    });
+    const response = yield* client
+      .execute(
+        request.pipe(HttpClientRequest.setHeader("authorization", `Bearer ${executor.token}`)),
+      )
+      .pipe(
+        Effect.flatMap(HttpClientResponse.filterStatusOk),
+        Effect.flatMap((response) => response.json),
+        Effect.timeout("5 minutes"),
+        Effect.mapError(
+          () =>
+            new CodespacesError({
+              code: "bootstrap",
+              message: "Codespace workspace request failed. Reconnect this project and retry.",
+            }),
+        ),
+      );
+    if (typeof response !== "object" || response === null)
+      return yield* new CodespacesError({
+        code: "bootstrap",
+        message: "Codespace returned an invalid workspace response.",
+      });
+    if ("error" in response)
+      return yield* decodeVcsError(response.error).pipe(
+        Effect.flatMap(Effect.fail),
+        Effect.catchIf(
+          (error) => error._tag === "SchemaError",
+          () =>
+            Effect.fail(
+              new CodespacesError({
+                code: "bootstrap",
+                message: "Codespace returned an invalid workspace error.",
+              }),
+            ),
+        ),
+      );
+    if (!("value" in response))
+      return yield* new CodespacesError({
+        code: "bootstrap",
+        message: "Codespace returned no workspace result.",
+      });
+    // File contents and patches are opaque. Only structured Git paths are mapped for local thread bindings.
+    if (group === "git" && method === "listWorktreePaths" && Array.isArray(response.value))
+      return response.value.map((path) =>
+        typeof path === "string"
+          ? mapWorkspacePath(path, executor.remoteRoot, target.localRoot)
+          : path,
+      );
+    return group === "files" || typeof response.value === "string"
+      ? response.value
+      : mapWorkspacePaths(response.value, executor.remoteRoot, target.localRoot);
+  });
   return CodespacesWorkspace.of({
     reserve: (input) =>
       mutex.withPermits(1)(
@@ -440,109 +541,8 @@ const make = Effect.gen(function* () {
           ),
         );
     }),
-    call: Effect.fn("CodespacesWorkspace.call")(function* <A>(
-      cwd: string,
-      group: string,
-      method: string,
-      args: ReadonlyArray<unknown>,
-    ) {
-      const target = yield* lookup(cwd);
-      if (!target?.executor)
-        return yield* new CodespacesError({
-          code: "conflict",
-          message: "Codespace is disconnected. Resume it from this project before continuing.",
-        });
-      const executor = target.executor;
-      const remoteArgs = args.map((argument, index) => {
-        if (index === 0 && typeof argument === "string")
-          return mapWorkspacePath(argument, target.localRoot, executor.remoteRoot);
-        if (
-          index === 1 &&
-          Array.isArray(argument) &&
-          ((group === "git" && method === "prepareCommitContext") ||
-            (group === "vcs" && method === "filterIgnoredPaths"))
-        )
-          return argument.map((path) =>
-            typeof path === "string"
-              ? mapWorkspacePath(path, target.localRoot, executor.remoteRoot)
-              : path,
-          );
-        return mapWorkspacePaths(argument, target.localRoot, executor.remoteRoot);
-      });
-      const request = yield* Effect.gen(function* () {
-        if (group !== "files" || method !== "writeFile")
-          return HttpClientRequest.post(executor.workerUrl + "/call").pipe(
-            HttpClientRequest.bodyJsonUnsafe({ group, method, args: remoteArgs }),
-          );
-        const input = yield* decodeWriteFile(remoteArgs[0]).pipe(
-          Effect.mapError(
-            () =>
-              new CodespacesError({
-                code: "configuration",
-                message: "Invalid workspace file write.",
-              }),
-          ),
-        );
-        // File contents bypass the bounded JSON control endpoint and its escaping overhead.
-        return HttpClientRequest.post(executor.workerUrl + "/files/write").pipe(
-          HttpClientRequest.setUrlParam("cwd", input.cwd),
-          HttpClientRequest.setUrlParam("relativePath", input.relativePath),
-          HttpClientRequest.bodyText(input.contents),
-        );
-      });
-      const response = yield* client
-        .execute(
-          request.pipe(HttpClientRequest.setHeader("authorization", `Bearer ${executor.token}`)),
-        )
-        .pipe(
-          Effect.flatMap(HttpClientResponse.filterStatusOk),
-          Effect.flatMap((response) => response.json),
-          Effect.timeout("5 minutes"),
-          Effect.mapError(
-            () =>
-              new CodespacesError({
-                code: "bootstrap",
-                message: "Codespace workspace request failed. Reconnect this project and retry.",
-              }),
-          ),
-        );
-      if (typeof response !== "object" || response === null)
-        return yield* new CodespacesError({
-          code: "bootstrap",
-          message: "Codespace returned an invalid workspace response.",
-        });
-      if ("error" in response)
-        return yield* decodeVcsError(response.error).pipe(
-          Effect.flatMap(Effect.fail),
-          Effect.catchIf(
-            (error) => error._tag === "SchemaError",
-            () =>
-              Effect.fail(
-                new CodespacesError({
-                  code: "bootstrap",
-                  message: "Codespace returned an invalid workspace error.",
-                }),
-              ),
-          ),
-        );
-      if (!("value" in response))
-        return yield* new CodespacesError({
-          code: "bootstrap",
-          message: "Codespace returned no workspace result.",
-        });
-      // File contents and patches are opaque. Only structured Git paths are mapped for local thread bindings.
-      if (group === "git" && method === "listWorktreePaths" && Array.isArray(response.value))
-        return response.value.map((path) =>
-          typeof path === "string"
-            ? mapWorkspacePath(path, executor.remoteRoot, target.localRoot)
-            : path,
-        ) as A;
-      return (
-        group === "files" || typeof response.value === "string"
-          ? response.value
-          : mapWorkspacePaths(response.value, executor.remoteRoot, target.localRoot)
-      ) as A;
-    }),
+    call: <A>(...args: Parameters<typeof call>) =>
+      call(...args).pipe(Effect.map((value) => value as A)),
   });
 });
 export const layer = Layer.effect(CodespacesWorkspace, make);

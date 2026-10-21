@@ -61,9 +61,7 @@ function ProjectCodespacesControlPanel({
   const state = useEnvironmentQuery(
     codespacesEnvironment.state({ environmentId, input: undefined }),
   );
-  const inventory = useEnvironmentQuery(
-    codespacesEnvironment.list({ environmentId, input: undefined }),
-  );
+  const inventory = useEnvironmentQuery(codespacesEnvironment.list({ environmentId, input: {} }));
   const authorize = useAtomCommand(codespacesEnvironment.authorize, { reportFailure: false });
   const run = useAtomCommand(codespacesEnvironment.run, { reportFailure: false });
   const bind = useAtomCommand(codespacesEnvironment.bind, { reportFailure: false });

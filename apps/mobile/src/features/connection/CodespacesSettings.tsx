@@ -49,9 +49,7 @@ function ProjectCodespacesControlPanel({
   const project = useEnvironmentQuery(
     codespacesEnvironment.project({ environmentId, input: { projectId } }),
   );
-  const inventory = useEnvironmentQuery(
-    codespacesEnvironment.list({ environmentId, input: undefined }),
-  );
+  const inventory = useEnvironmentQuery(codespacesEnvironment.list({ environmentId, input: {} }));
   const state = useEnvironmentQuery(
     codespacesEnvironment.state({ environmentId, input: undefined }),
   );

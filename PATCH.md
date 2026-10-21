@@ -11,15 +11,15 @@ Keep project Codespaces work available with the user's existing local provider l
 - Canonical specification: `PATCH.md`.
 - Upstream URL: https://github.com/pingdotgg/t3code.git
 - Upstream remote: `origin`. The `fork` remote is the user's fork, not the update source.
-- Target: latest upstream default branch, resolved live to an exact commit each update. Cached default branch at setup: `main`.
+- Default target: latest upstream default branch, resolved live to an exact commit each update. Cached default branch at setup: `main`. For the manual update on 2026-10-21, the user selected only changes through the latest stable release, `v0.1.1` at `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`. Later origin/main commits are excluded.
 - Manual releases: build locally for Intel macOS with publishing disabled. A request to create a release does not authorize GitHub publication or a publishing workflow dispatch. Publish only when the user explicitly requests publication. This preference was reaffirmed on 2026-10-18 and overrides the cloud-only build restriction for manual releases.
 - Integration: manual updates prepare with `--no-ff --no-commit` in a separate worktree. The user also authorizes the T3 scheduled cloud task to integrate in a disposable GitHub Codespace, preserve every patch, run focused checks, commit, push `Saikrishna1876/t3code` main without force, and dispatch `fork-macos-release.yml`. Scheduled integration and release builds must not run on the local Mac. See [cloud update operation](docs/operations/fork-cloud-updates.md).
 - Preserve original staged, unstaged, and untracked work. Carry the pending compatibility changes below and this specification into the review result.
 
 ## Baseline
 
-- Observed integrated upstream baseline: `13aa882c22d584de5388dfce3b3ca413387ba059`, committed through merge `cc5a6a321f35ec5b07df697e2c6a00a504891eb4`. The merge and review fixes landed in local main and fork/main at `b935f7dc91161cf0db1ccc8b5accd9b9bfb65667` on 2026-10-18. A normal push and live remote lookup confirmed integration.
-- Previous integrated upstream baseline: `42160f2925daa3c0d4ef2b95f68a87858972e6a3`, landed through merge `ca3e61cd48f7ac176634cf06efbab631f4bdba93` on 2026-10-13.
+- Observed integrated upstream baseline in the review branch: `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`, stable `v0.1.1`, committed through merge `146d2e6a9ad89d179088372ebea615b7acf8e0bf`. Remote fork/main update is pending final checks and local packaging.
+- Previous integrated upstream baseline: `13aa882c22d584de5388dfce3b3ca413387ba059`, landed through merge `cc5a6a321f35ec5b07df697e2c6a00a504891eb4` on 2026-10-18.
 - Compatibility patches, including PR #2, are committed. Superseded local Codespaces drafts were stashed before the 2026-10-13 integration; see Latest attempt.
 - Last behaviorally verified baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda` (release `0.0.42` built locally on 2026-09-18 with Electron `43.6.0` was extracted and interactively confirmed working by the user on the target Intel Mac macOS 15 system).
 
@@ -84,11 +84,18 @@ Keep project Codespaces work available with the user's existing local provider l
 - Verification: `vp test run apps/desktop/src/electron/ElectronProtocol.test.ts`, scoped desktop typecheck, targeted lint and formatting, then launch the packaged app with an isolated `T3CODE_HOME`. Verify the native `t3code://app/` renderer reaches the chat UI and serves its actual entry script and logo with status 200. A development browser alone does not exercise ASAR.
 - Retirement: the pinned Electron runtime and Effect metadata decoder interoperate and a packaged startup test proves it. Direct reads may remain as the simpler asset-serving path.
 
+## P008: Find text in Markdown previews
+
+- Status: landed through fork PR #5 at `630f6376cec217b3b9b4368a207d9285fb703093`.
+- Required behavior: file preview search highlights text, moves between matches, and scrolls code horizontally when needed. Searches in simultaneous previews remain independent. Search state and highlights are cleaned up when the preview closes.
+- Verification: from `apps/web`, run `../../node_modules/.bin/vp test run --project browser src/components/files/MarkdownPreview.browser.test.tsx`. Browser execution requires explicit authorization.
+- Retirement: upstream supplies equivalent file preview search and these behavior checks pass.
+
 ## Validation policy
 
 Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use requires the authorization described there. Keep runtime state away from the live install. Record manual graphics and clipboard checks as pending when unavailable.
 
-## Latest upstream integration
+## Earlier upstream integration, 2026-10-09
 
 - Date: 2026-10-09.
 - Status: landed. Integration merge `becb9df9f34c64976b939e9eb9ca756d1f53e562` was pushed to fork/main without force and verified live. Local release build and archive verification passed. The user requested updating fork/main and creating a release on the local Intel Mac. This manual release is authorized locally; the scheduled cloud policy remains unchanged.
@@ -108,6 +115,16 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Prior successful release: 2026-10-07, version `0.0.45`, source `49b07dc3cb8e105c69ed93885ba0e6e80990762b`. DMG and ZIP integrity, packaged Electron `43.6.0`, x64 architecture, and fork feed checks passed. CodeRabbit had zero findings; Greptile's merged review was unavailable because reviews were disabled for the organization.
 
 ## Latest attempt
+
+- Date: 2026-10-21. Status: committed candidate; final checks and local packaging in progress. The user authorized updating fork/main and a local Intel macOS release, with no GitHub release or publishing workflow.
+- Starting fork/main and rollback reference: `630f6376cec217b3b9b4368a207d9285fb703093`. Original checkout remains at `ce1060b54`, with its AGENTS.md, PATCH.md and cloud-operation edits preserved. Those patch-related edits were carried into the candidate. Review branch: `patch/stable-20261021`, worktree `/Users/saikrishnaambeti/Documents/opensource/t3code-stable-20261021`.
+- Previous upstream baseline: `13aa882c22d584de5388dfce3b3ca413387ba059`. Exact cutoff: stable `v0.1.1`, `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`, published 2026-10-21 at 02:29:41 UTC. The live upstream release response identified it as neither draft nor prerelease. The merge includes 1,007 upstream commits and excludes later origin/main changes.
+- Preserved Electron 43.6.0, synchronous clipboard writes, the packaged ASAR startup repair, fork updater identity and workflows, Codex and Claude Codespaces execution, and Markdown preview search. Adapted remote ignored-file enumeration, provider query policies, preview refresh focus checks, disposable browser fixtures, and named Effect functions to upstream APIs and lint rules.
+- Review profile: `personal`. CodeRabbit reviewed the full fork diff. Its schema bounds, RPC payload and browser-fixture findings were fixed; follow-up reviews had zero findings, including the generic worker boundary and web/mobile inventory payload fixes. A selected Codespace label regression received an additional fix and focused tests. The Claude string-settings finding was rejected: the production makeClaudeQueryOptions call supplies no sdkSettings, while launch settings remain in extraArgs. Greptile CLI review was attempted but the free plan permits PR reviews only. A request to remove local evidence paths was rejected because this user-specific compatibility record intentionally identifies the preserved checkout, review worktree and external logs.
+- Scoped contracts, client-runtime, desktop, server, web and mobile typechecks passed. Provider and Codespaces checks passed 713 cases across 12 files. The final RPC, worker, asset and contract rerun passed 141 cases across six files; the workspace routing rerun passed 12 cases. Scoped lint, formatting and whitespace checks passed. Four focused Chromium files passed 46 cases. Final toolbar checks and artifact verification are pending. Hardware graphics, interactive clipboard, native mobile and automatic installation acceptance remain pending. The last behaviorally verified baseline is unchanged.
+- Evidence: `/tmp/t3-stable-20261021-*.log` and `/tmp/t3-release-20261021.log`. No live T3 state or existing development servers were modified.
+
+## Previous update, 2026-10-18
 
 - Dates: 2026-10-17 to 2026-10-18.
 - Status: landed in local main and fork/main at `b935f7dc91161cf0db1ccc8b5accd9b9bfb65667`. Normal push and live remote lookup confirmed it. The user requested pulling fork/main, merging origin/main, and creating a local release without publishing it on GitHub. This manual local build does not change the scheduled cloud policy.

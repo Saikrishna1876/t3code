@@ -60,7 +60,9 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
     ...(onAutoEnvironment
       ? [{ value: AUTO_VALUE, label: autoEnvironmentLabel ?? "Auto balance" }]
       : []),
-    ...(onCodespaces ? [{ value: "action:codespace", label: codespaceLabel ?? "Codespace…" }] : []),
+    ...(onCodespaces || codespaceLabel
+      ? [{ value: "action:codespace", label: codespaceLabel ?? "Codespace…" }]
+      : []),
     ...availableEnvironments.map((env) => ({
       value: environmentValue(env.environmentId),
       label: env.label,
@@ -82,17 +84,23 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         className="inline-flex h-7 min-w-0 max-w-full items-center gap-1 border border-transparent px-1.75 font-normal text-muted-foreground/70 text-xs sm:h-6"
         data-composer-context-control
       >
-        <EnvironmentMachineIcon
-          kind={activeEnvironment?.machine ?? "server"}
-          className="size-3 shrink-0"
-        />
-        <ComposerContextLabel>{activeEnvironment?.label ?? "Run on"}</ComposerContextLabel>
+        {codespaceLabel ? (
+          <CloudIcon className="size-3 shrink-0" aria-hidden="true" />
+        ) : (
+          <EnvironmentMachineIcon
+            kind={activeEnvironment?.machine ?? "server"}
+            className="size-3 shrink-0"
+          />
+        )}
+        <ComposerContextLabel>
+          {codespaceLabel ?? activeEnvironment?.label ?? "Run on"}
+        </ComposerContextLabel>
       </span>
     );
     return (
       <Tooltip>
         <TooltipTrigger render={lockedRow} />
-        <TooltipPopup>{activeEnvironment?.label ?? "Run on"}</TooltipPopup>
+        <TooltipPopup>{codespaceLabel ?? activeEnvironment?.label ?? "Run on"}</TooltipPopup>
       </Tooltip>
     );
   }
@@ -101,7 +109,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
     <Select
       modal={false}
       value={
-        codespaceLabel && onCodespaces
+        codespaceLabel
           ? "action:codespace"
           : autoEnvironmentLabel
             ? AUTO_VALUE
@@ -183,11 +191,12 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
               </span>
             </SelectItem>
           ))}
-          {onCodespaces ? (
+          {onCodespaces || codespaceLabel ? (
             <SelectItem
               value="action:codespace"
+              disabled={!onCodespaces}
               onClick={() => {
-                if (codespaceLabel) onCodespaces();
+                if (codespaceLabel) onCodespaces?.();
               }}
             >
               <span className="inline-flex items-center gap-1.5">
