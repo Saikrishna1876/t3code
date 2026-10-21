@@ -25,7 +25,6 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Stream from "effect/Stream";
 import * as RpcTest from "effect/rpc/RpcTest";
 import * as Stream from "effect/Stream";
 

@@ -1,6 +1,5 @@
 import { useEnvironmentQuery } from "../../state/query";
 import { codespacesEnvironment } from "../../state/codespaces";
-import { Toolbar } from "../../components/ui/Toolbar";
 import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
 import { SheetHeader } from "../../components/ui/SheetHeader";
 import { Button } from "../../components/ui/Button";

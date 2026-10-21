@@ -164,7 +164,7 @@ export const PreviewSessionSnapshot = Schema.Struct({
   tabId: PreviewTabId,
   navStatus: PreviewNavStatus,
   /** Original workspace URL for reopening after temporary SSH ports change. */
-  sourceUrl: Schema.optional(Schema.String),
+  sourceUrl: Schema.optional(Url),
   canGoBack: Schema.Boolean,
   canGoForward: Schema.Boolean,
   viewport: Schema.optional(PreviewViewportSetting),

@@ -437,29 +437,30 @@ export const layerWithOptions = (
       const isMcpCredentialReserved = (threadId: ThreadId, mcpCredentialId: string) =>
         (mcpCredentialReservations.get(mcpReservationKey(threadId, mcpCredentialId)) ?? 0) > 0;
       const mcpPrepareLock = yield* KeyedLock.make<ThreadId>();
-      const threadWorkspace = (threadId: ThreadId, cwd?: string | null) =>
-        Effect.gen(function* () {
-          if (!workspaceService) return null;
-          const thread = yield* projectionStore.getThreadShell(threadId);
-          const binding = thread
-            ? (yield* workspaceService.bindings).find(
-                (entry) => entry.projectId === thread.projectId,
-              )
-            : undefined;
-          if (binding) {
-            const cwdTarget = cwd ? yield* workspaceService.lookup(cwd) : null;
-            return cwdTarget?.projectId === binding.projectId
-              ? cwdTarget
-              : yield* workspaceService.lookup(binding.localRoot);
-          }
-          return cwd ? yield* workspaceService.lookup(cwd) : null;
-        });
-      const acquireWorkspaceWork = (threadId: ThreadId) =>
-        Effect.gen(function* () {
+      const threadWorkspace = Effect.fn("ProviderSessionManager.threadWorkspace")(function* (
+        threadId: ThreadId,
+        cwd?: string | null,
+      ) {
+        if (!workspaceService) return null;
+        const thread = yield* projectionStore.getThreadShell(threadId);
+        const binding = thread
+          ? (yield* workspaceService.bindings).find((entry) => entry.projectId === thread.projectId)
+          : undefined;
+        if (binding) {
+          const cwdTarget = cwd ? yield* workspaceService.lookup(cwd) : null;
+          return cwdTarget?.projectId === binding.projectId
+            ? cwdTarget
+            : yield* workspaceService.lookup(binding.localRoot);
+        }
+        return cwd ? yield* workspaceService.lookup(cwd) : null;
+      });
+      const acquireWorkspaceWork = Effect.fn("ProviderSessionManager.acquireWorkspaceWork")(
+        function* (threadId: ThreadId) {
           if (!workspaceService) return;
           const thread = yield* projectionStore.getThreadShell(threadId);
           if (thread) yield* workspaceService.acquireWork(thread.projectId);
-        });
+        },
+      );
 
       /**
        * Serialized per thread so two concurrent prepares cannot interleave

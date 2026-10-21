@@ -8,9 +8,8 @@ import {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { act, render } from "../../test/render";
+import { expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => ({
   eligible: true,
@@ -75,8 +74,6 @@ vi.mock(import("~/state/query"), async (original) => ({
 
 import { ProjectCodespacesControl } from "./ProjectCodespacesControl";
 
-let container: HTMLDivElement;
-let root: Root;
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((complete) => {
@@ -84,17 +81,15 @@ const deferred = <T,>() => {
   });
   return { promise, resolve };
 };
-const render = () =>
-  act(async () => {
-    root.render(
-      <ProjectCodespacesControl
-        environmentId={EnvironmentId.make("local")}
-        projectId={ProjectId.make("project")}
-      />,
-    );
-  });
-const switchControl = () => container.querySelector<HTMLElement>('[role="switch"]')!;
-const openAccess = async () => {
+const view = () => (
+  <ProjectCodespacesControl
+    environmentId={EnvironmentId.make("local")}
+    projectId={ProjectId.make("project")}
+  />
+);
+const switchControl = (container: HTMLElement) =>
+  container.querySelector<HTMLElement>('[role="switch"]')!;
+const openAccess = async (container: HTMLElement) => {
   const details = [...container.querySelectorAll("details")].find((entry) =>
     entry.querySelector("summary")?.textContent?.includes("Requirements"),
   )!;
@@ -102,8 +97,7 @@ const openAccess = async () => {
   return details;
 };
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+function setup() {
   state.configure.mockReset();
   state.eligible = true;
   state.snapshot = {
@@ -118,26 +112,20 @@ beforeEach(() => {
     operations: [],
     environments: [],
   };
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
+}
 
 it("keeps the optimistic toggle through a delayed subscription update without global progress", async () => {
+  setup();
   const save = deferred<AsyncResult.AsyncResult<CodespacesSnapshot, Error>>();
   state.configure.mockReturnValue(save.promise);
-  await render();
-  const details = await openAccess();
+  await using screen = await render(view());
+  const container = screen.container;
+  const details = await openAccess(container);
   const status = details.querySelector('[role="status"]');
-  await act(async () => switchControl().click());
-  expect(switchControl().getAttribute("aria-checked")).toBe("true");
-  expect(switchControl().matches('[aria-disabled="true"]')).toBe(true);
-  await act(async () => switchControl().click());
+  await act(async () => switchControl(container).click());
+  expect(switchControl(container).getAttribute("aria-checked")).toBe("true");
+  expect(switchControl(container).matches('[aria-disabled="true"]')).toBe(true);
+  await act(async () => switchControl(container).click());
   expect(state.configure).toHaveBeenCalledTimes(1);
   expect(status?.textContent).toBe("Saving…");
   expect(container.textContent).not.toContain("Saving agent access");
@@ -147,36 +135,38 @@ it("keeps the optimistic toggle through a delayed subscription update without gl
     configuration: { ...state.snapshot!.configuration, agentAccessEnabled: true },
   };
   await act(async () => save.resolve(AsyncResult.success(saved)));
-  expect(switchControl().getAttribute("aria-checked")).toBe("true");
-  expect(switchControl().matches('[aria-disabled="true"]')).toBe(false);
+  expect(switchControl(container).getAttribute("aria-checked")).toBe("true");
+  expect(switchControl(container).matches('[aria-disabled="true"]')).toBe(false);
   expect(details.querySelector('[role="status"]')).toBe(status);
   state.snapshot = saved;
-  await render();
+  await screen.rerender(view());
   state.snapshot = {
     ...saved,
     configuration: { ...saved.configuration, agentAccessEnabled: false },
   };
-  await render();
-  expect(switchControl().getAttribute("aria-checked")).toBe("false");
+  await screen.rerender(view());
+  expect(switchControl(container).getAttribute("aria-checked")).toBe("false");
 });
 
 it("rolls back a failed save, reports it beside the switch, and allows retry", async () => {
+  setup();
   const save = deferred<AsyncResult.AsyncResult<CodespacesSnapshot, Error>>();
   state.configure.mockReturnValue(save.promise);
-  await render();
-  const details = await openAccess();
-  await act(async () => switchControl().click());
+  await using screen = await render(view());
+  const container = screen.container;
+  const details = await openAccess(container);
+  await act(async () => switchControl(container).click());
   await act(async () =>
     save.resolve(AsyncResult.failure(Cause.fail(new Error("Permission denied")))),
   );
-  expect(switchControl().getAttribute("aria-checked")).toBe("false");
-  expect(switchControl().matches('[aria-disabled="true"]')).toBe(false);
+  expect(switchControl(container).getAttribute("aria-checked")).toBe("false");
+  expect(switchControl(container).matches('[aria-disabled="true"]')).toBe(false);
   expect(details.querySelector('[role="status"]')?.textContent).toBe("Permission denied");
   expect(container.querySelector('[role="alert"]')).toBeNull();
   const retry = deferred<AsyncResult.AsyncResult<CodespacesSnapshot, Error>>();
   state.configure.mockReturnValue(retry.promise);
-  await act(async () => switchControl().click());
-  expect(switchControl().getAttribute("aria-checked")).toBe("true");
+  await act(async () => switchControl(container).click());
+  expect(switchControl(container).getAttribute("aria-checked")).toBe("true");
   expect(state.configure).toHaveBeenCalledTimes(2);
   await act(async () =>
     retry.resolve(
@@ -189,8 +179,10 @@ it("rolls back a failed save, reports it beside the switch, and allows retry", a
 });
 
 it("directs incompatible projects to setup instead of an unusable creation button", async () => {
+  setup();
   state.eligible = false;
-  await render();
+  await using screen = await render(view());
+  const container = screen.container;
   expect(container.textContent).toContain("Choose Codespace under Run on");
   expect(container.textContent).not.toContain("Create a Codespace for this project");
   expect(

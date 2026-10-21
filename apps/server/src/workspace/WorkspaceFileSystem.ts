@@ -603,24 +603,23 @@ export const make = Effect.gen(function* () {
   return WorkspaceFileSystem.of({
     getMetadata,
     writeFile: routed.writeFile,
-    readFile: (input) =>
-      Effect.gen(function* () {
-        const requestedPath = input.relativePath.trim();
-        if (!remote || !path.isAbsolute(requestedPath)) return yield* routed.readFile(input);
-        const target = yield* remote.lookup(input.cwd);
-        if (!target) return yield* readFile(input);
-        const fileTarget = yield* remote.lookup(requestedPath);
-        if (fileTarget?.projectId === target.projectId)
-          // The absolute link may use Git's canonical root rather than the project's alias.
-          return yield* routed.readFile({ ...input, cwd: fileTarget.localRoot });
-        if (
-          target.remoteRoot &&
-          CodespacesWorkspace.isWorkspacePath(requestedPath, target.remoteRoot)
-        )
-          return yield* routed.readFile(input);
-        // Host reports in earlier history keep their explicit location after binding a project.
-        return yield* readFile(input);
-      }),
+    readFile: Effect.fn("WorkspaceFileSystem.readFile")(function* (input) {
+      const requestedPath = input.relativePath.trim();
+      if (!remote || !path.isAbsolute(requestedPath)) return yield* routed.readFile(input);
+      const target = yield* remote.lookup(input.cwd);
+      if (!target) return yield* readFile(input);
+      const fileTarget = yield* remote.lookup(requestedPath);
+      if (fileTarget?.projectId === target.projectId)
+        // The absolute link may use Git's canonical root rather than the project's alias.
+        return yield* routed.readFile({ ...input, cwd: fileTarget.localRoot });
+      if (
+        target.remoteRoot &&
+        CodespacesWorkspace.isWorkspacePath(requestedPath, target.remoteRoot)
+      )
+        return yield* routed.readFile(input);
+      // Host reports in earlier history keep their explicit location after binding a project.
+      return yield* readFile(input);
+    }),
   });
 });
 

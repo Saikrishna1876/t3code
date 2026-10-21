@@ -201,22 +201,23 @@ const make = Effect.gen(function* () {
   const terminals = Option.getOrUndefined(
     yield* Effect.serviceOption(TerminalManager.TerminalManager),
   );
-  const closeProjectTerminals = (projectId: ProjectId) =>
-    Effect.gen(function* () {
-      if (!terminals) return;
-      const snapshot = yield* projections
-        .getShellSnapshot()
-        .pipe(Effect.mapError(() => error("storage", "Could not inspect project terminals.")));
-      for (const thread of snapshot.threads)
-        if (thread.projectId === projectId)
-          yield* terminals
-            .close({ threadId: thread.id })
-            .pipe(
-              Effect.mapError(() =>
-                error("conflict", "Close project terminals before switching its execution target."),
-              ),
-            );
-    });
+  const closeProjectTerminals = Effect.fn("Codespaces.closeProjectTerminals")(function* (
+    projectId: ProjectId,
+  ) {
+    if (!terminals) return;
+    const snapshot = yield* projections
+      .getShellSnapshot()
+      .pipe(Effect.mapError(() => error("storage", "Could not inspect project terminals.")));
+    for (const thread of snapshot.threads)
+      if (thread.projectId === projectId)
+        yield* terminals
+          .close({ threadId: thread.id })
+          .pipe(
+            Effect.mapError(() =>
+              error("conflict", "Close project terminals before switching its execution target."),
+            ),
+          );
+  });
   const exists = (path: string) =>
     fs
       .exists(path)
@@ -362,24 +363,22 @@ const make = Effect.gen(function* () {
   }, Effect.scoped);
   const api = yield* GitHubRest.GitHubRest;
   const credentials = yield* GitHubCredentials.GitHubCredentials;
-  const pinned = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    Effect.gen(function* () {
-      const credential = yield* credentials
-        .get("github.com")
-        .pipe(
-          Effect.mapError(() =>
-            error(
-              "authentication",
-              "Sign in to GitHub on this controller with the codespace scope.",
-            ),
-          ),
-        );
-      return yield* Effect.provideService(effect, GitHubRequestPolicy.PinnedGitHubCredential, {
-        host: "github.com",
-        token: credential.token,
-        credentialFingerprint: credential.fingerprint,
-      });
+  const pinned = Effect.fn("Codespaces.pinned")(function* <A, E, R>(
+    effect: Effect.Effect<A, E, R>,
+  ) {
+    const credential = yield* credentials
+      .get("github.com")
+      .pipe(
+        Effect.mapError(() =>
+          error("authentication", "Sign in to GitHub on this controller with the codespace scope."),
+        ),
+      );
+    return yield* Effect.provideService(effect, GitHubRequestPolicy.PinnedGitHubCredential, {
+      host: "github.com",
+      token: credential.token,
+      credentialFingerprint: credential.fingerprint,
     });
+  });
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const host = yield* CodespacesHost.CodespacesHost;
   const scope = yield* Effect.scope;
@@ -534,19 +533,20 @@ const make = Effect.gen(function* () {
       })),
     };
   });
-  const configure = (configuration: CodespacesConfiguration) =>
-    Effect.gen(function* () {
-      yield* Effect.try({
-        try: () => validateCodespacesConfiguration(configuration),
-        catch: (cause) =>
-          error(
-            "configuration",
-            cause instanceof Error ? cause.message : "Invalid Codespaces configuration.",
-          ),
-      });
-      yield* update((current) => ({ ...current, configuration }));
-      return yield* SubscriptionRef.get(state);
+  const configure = Effect.fn("Codespaces.configure")(function* (
+    configuration: CodespacesConfiguration,
+  ) {
+    yield* Effect.try({
+      try: () => validateCodespacesConfiguration(configuration),
+      catch: (cause) =>
+        error(
+          "configuration",
+          cause instanceof Error ? cause.message : "Invalid Codespaces configuration.",
+        ),
     });
+    yield* update((current) => ({ ...current, configuration }));
+    return yield* SubscriptionRef.get(state);
+  });
   const stage = (id: string, nextStage: string, message: string, name?: string) =>
     update((current) => ({
       ...current,
@@ -928,17 +928,16 @@ const make = Effect.gen(function* () {
       }),
     );
   });
-  const pair = (input: { name: string; remote: boolean }) =>
-    Effect.gen(function* () {
-      const login = yield* account;
-      const current = yield* SubscriptionRef.get(state);
-      const environment = current.environments.find(
-        (entry) => entry.name === input.name && entry.account === login,
-      );
-      if (!environment)
-        return yield* error("configuration", "Connect this Codespace before pairing it.");
-      return yield* host.pair(environment, current.configuration, input.remote);
-    });
+  const pair = Effect.fn("Codespaces.pair")(function* (input: { name: string; remote: boolean }) {
+    const login = yield* account;
+    const current = yield* SubscriptionRef.get(state);
+    const environment = current.environments.find(
+      (entry) => entry.name === input.name && entry.account === login,
+    );
+    if (!environment)
+      return yield* error("configuration", "Connect this Codespace before pairing it.");
+    return yield* host.pair(environment, current.configuration, input.remote);
+  });
   yield* host.disconnected.pipe(
     Stream.runForEach((name) =>
       update((current) => ({

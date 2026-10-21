@@ -1,8 +1,7 @@
 import { Atom } from "effect/reactivity";
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import type { ComponentProps } from "react";
-import { createRoot } from "react-dom/client";
-import { beforeEach, expect, it, vi } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
 import "~/index.css";
@@ -116,13 +115,13 @@ vi.mock(import("../state/use-atom-command"), async (original) => ({
 
 import { BranchToolbar } from "./BranchToolbar";
 
-beforeEach(() => {
+function setup() {
   state.codespacesSupported = false;
   state.canManageCodespaces = true;
   state.codespaceName = null;
   state.codespaceEligible = true;
   state.inventoryPending = false;
-});
+}
 
 function render(
   props: Partial<ComponentProps<typeof BranchToolbar>>,
@@ -152,6 +151,7 @@ function render(
 }
 
 it("keeps machine choices usable when the combined row's workspace is locked", async () => {
+  setup();
   const onEnvironmentChange = vi.fn();
   await using screen = await render({
     onEnvironmentChange,
@@ -182,6 +182,7 @@ it("keeps machine choices usable when the combined row's workspace is locked", a
 });
 
 it("shows a started thread's primary machine as a static label in the composer", async () => {
+  setup();
   await using screen = await render({
     layout: "composer",
     showGitControls: false,
@@ -205,6 +206,7 @@ it.each([
 ] as const)(
   "copies only an existing workspace path with mode %s and worktree %s",
   async (envMode, worktreePath, copiedPath) => {
+    setup();
     await using screen = await render({ envMode }, { worktreePath });
     const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
     await act(async () => {
@@ -228,134 +230,77 @@ it.each([
   { bound: false, eligible: false, inventoryPending: false },
   { bound: false, eligible: true, inventoryPending: true },
 ])("opens single-host Codespace flow for %j", async ({ bound, eligible, inventoryPending }) => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  setup();
   state.codespacesSupported = true;
   state.codespaceName = bound ? "project-space" : null;
   state.codespaceEligible = eligible;
   state.inventoryPending = inventoryPending;
   state.setPrompt.mockClear();
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
   const onEnvironmentChange = vi.fn();
-  try {
-    await act(async () =>
-      root.render(
-        <BranchToolbar
-          layout="panel"
-          panelSection="workspace"
-          environmentId={EnvironmentId.make("local")}
-          threadId={ThreadId.make("thread")}
-          projectId={ProjectId.make("project")}
-          worktreePath={state.worktreePath}
-          isServerThread
-          showGitControls
-          envMode="local"
-          envLocked={bound}
-          startFromOrigin={false}
-          onStartFromOriginChange={vi.fn()}
-          onEnvModeChange={vi.fn()}
-          onEnvironmentChange={onEnvironmentChange}
-          availableEnvironments={[
-            {
-              environmentId: EnvironmentId.make("local"),
-              projectId: ProjectId.make("project"),
-              label: "Local host",
-              isPrimary: true,
-              machine: "server",
-            },
-          ]}
-        />,
-      ),
+  await using screen = await render({
+    envLocked: bound,
+    onEnvironmentChange,
+    availableEnvironments: [
+      {
+        environmentId: EnvironmentId.make("local"),
+        projectId: ProjectId.make("project"),
+        label: "Local host",
+        isPrimary: true,
+        machine: "server",
+      },
+    ],
+  });
+  expect(screen.container.querySelectorAll("button")).toHaveLength(1);
+  await userEvent.click(screen.container.querySelector<HTMLButtonElement>("button")!);
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((entry) =>
+    entry.textContent?.includes("Codespace"),
+  );
+  expect(item).toBeDefined();
+  await userEvent.click(item!);
+  const dialog = document.querySelector('[role="dialog"]');
+  if (eligible || bound) {
+    expect(dialog?.textContent).toContain("Project Codespace");
+    expect(dialog?.textContent).toContain(
+      bound ? "Stop Codespace" : "Create a Codespace for this project",
     );
-    expect(container.querySelectorAll("button")).toHaveLength(1);
-    await userEvent.click(container.querySelector<HTMLButtonElement>("button")!);
-    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((entry) =>
-      entry.textContent?.includes("Codespace"),
-    );
-    expect(item).toBeDefined();
-    await userEvent.click(item!);
-    const dialog = document.querySelector('[role="dialog"]');
-    if (eligible || bound) {
-      expect(dialog?.textContent).toContain("Project Codespace");
-      expect(dialog?.textContent).toContain(
-        bound ? "Stop Codespace" : "Create a Codespace for this project",
+    if (inventoryPending) {
+      const create = [...dialog!.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
+        button.textContent?.includes("New Codespace"),
       );
-      if (inventoryPending) {
-        const create = [...dialog!.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
-          button.textContent?.includes("New Codespace"),
-        );
-        expect(create?.disabled).toBe(false);
-      }
-      expect(state.setPrompt).not.toHaveBeenCalled();
-    } else {
-      expect(document.querySelector('[role="dialog"]:not([data-closed])')).toBeNull();
-      expect(state.setPrompt).toHaveBeenCalledWith(
-        expect.objectContaining({ threadId: "thread" }),
-        expect.stringContaining("Existing request\n\nMake this project compatible"),
-      );
+      expect(create?.disabled).toBe(false);
     }
-    expect(onEnvironmentChange).not.toHaveBeenCalled();
-  } finally {
-    await act(async () => root.unmount());
-    container.remove();
-    state.codespacesSupported = false;
-    state.codespaceName = null;
-    state.codespaceEligible = true;
-    state.inventoryPending = false;
-    vi.unstubAllGlobals();
+    expect(state.setPrompt).not.toHaveBeenCalled();
+  } else {
+    expect(document.querySelector('[role="dialog"]:not([data-closed])')).toBeNull();
+    expect(state.setPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: "thread" }),
+      expect.stringContaining("Existing request\n\nMake this project compatible"),
+    );
   }
+  expect(onEnvironmentChange).not.toHaveBeenCalled();
 });
 
 it("shows a paired client's bound target and locks worktrees without exposing lifecycle actions", async () => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  setup();
   state.codespacesSupported = true;
   state.codespaceName = "project-space";
   state.canManageCodespaces = false;
-  state.worktreePath = null;
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
-  try {
-    await act(async () => {
-      root.render(
-        <BranchToolbar
-          layout="panel"
-          panelSection="workspace"
-          environmentId={EnvironmentId.make("local")}
-          threadId={ThreadId.make("thread")}
-          projectId={ProjectId.make("project")}
-          worktreePath={state.worktreePath}
-          isServerThread
-          showGitControls
-          envMode="local"
-          envLocked={false}
-          startFromOrigin={false}
-          onStartFromOriginChange={vi.fn()}
-          onEnvModeChange={vi.fn()}
-          availableEnvironments={[
-            {
-              environmentId: EnvironmentId.make("local"),
-              projectId: ProjectId.make("project"),
-              label: "Local host",
-              isPrimary: true,
-              machine: "server",
-            },
-          ]}
-        />,
-      );
-    });
-    expect(container.textContent).toContain("Codespace");
-    expect(container.querySelector("button")).toBeNull();
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-    expect(document.querySelector('[role="menu"]')).toBeNull();
-  } finally {
-    await act(async () => root.unmount());
-    container.remove();
-    state.codespacesSupported = false;
-    state.codespaceName = null;
-    state.canManageCodespaces = true;
-    state.worktreePath = "/tmp/worktree";
-    vi.unstubAllGlobals();
-  }
+  await using screen = await render(
+    {
+      availableEnvironments: [
+        {
+          environmentId: EnvironmentId.make("local"),
+          projectId: ProjectId.make("project"),
+          label: "Local host",
+          isPrimary: true,
+          machine: "server",
+        },
+      ],
+    },
+    { worktreePath: null },
+  );
+  expect(screen.container.textContent).toContain("Codespace");
+  expect(screen.container.querySelector("button")).toBeNull();
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(document.querySelector('[role="menu"]')).toBeNull();
 });

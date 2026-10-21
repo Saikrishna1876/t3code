@@ -8,7 +8,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { Profiler, type ComponentProps } from "react";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
 import "~/index.css";
@@ -291,8 +291,8 @@ function setup() {
 }
 
 describe("PreviewView", () => {
-  beforeEach(setup);
   it("does not resolve or navigate when the destination preview grant is missing", async () => {
+    setup();
     mocks.supportsCodespaces = true;
     mocks.canResolveUrl = false;
     await using _screen = await render(view());
@@ -302,6 +302,7 @@ describe("PreviewView", () => {
     expect(mocks.openPreviewSession).not.toHaveBeenCalled();
   });
   it("resolves workspace URLs only when the host advertises Codespaces", async () => {
+    setup();
     mocks.supportsCodespaces = true;
     await using _screen = await render(view());
     await submitAddress("localhost:3000/app");
@@ -319,6 +320,7 @@ describe("PreviewView", () => {
   it.each(["button", "desktop shortcut", "hard reload"])(
     "%s refresh uses the application address after a forwarded URL expires",
     async (trigger) => {
+      setup();
       mocks.supportsCodespaces = true;
       mocks.sourceUrl = "http://localhost:4173/page";
       mocks.resolveUrl.mockResolvedValueOnce({
@@ -349,6 +351,7 @@ describe("PreviewView", () => {
   it.each(["localhost:3000/app", "http://localhost:14528/app"])(
     "opens %s in the remote host browser, then replaces the desktop tab",
     async (requestedUrl) => {
+      setup();
       mocks.supportsCodespaces = true;
       mocks.primaryEnvironmentId = EnvironmentId.make("local-host");
       mocks.openPreviewSession.mockResolvedValue({ _tag: "Success", value: { tabId: "host-tab" } });
@@ -369,6 +372,7 @@ describe("PreviewView", () => {
     },
   );
   it("keeps an unchanged external URL in the desktop browser of a remote host", async () => {
+    setup();
     mocks.supportsCodespaces = true;
     mocks.primaryEnvironmentId = EnvironmentId.make("local-host");
     mocks.resolveUrl.mockResolvedValueOnce({ _tag: "Success", value: "https://example.com/" });
@@ -378,6 +382,7 @@ describe("PreviewView", () => {
     expect(mocks.openPreviewSession).not.toHaveBeenCalled();
   });
   it("keeps bridge navigation when a custom host returns a non-absolute URL", async () => {
+    setup();
     mocks.supportsCodespaces = true;
     mocks.primaryEnvironmentId = EnvironmentId.make("local-host");
     mocks.resolveUrl.mockResolvedValueOnce({ _tag: "Success", value: "/app" });

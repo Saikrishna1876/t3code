@@ -101,7 +101,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
     <Select
       modal={false}
       value={
-        codespaceLabel
+        codespaceLabel && onCodespaces
           ? "action:codespace"
           : autoEnvironmentLabel
             ? AUTO_VALUE

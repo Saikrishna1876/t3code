@@ -3867,30 +3867,29 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
     },
   );
 
-  const userInvocableSkills = (
+  const userInvocableSkills = Effect.fn("ClaudeAdapterV2.userInvocableSkills")(function* (
     cwd: string | null,
     workspaceService: CodespacesWorkspace.CodespacesWorkspace["Service"] | undefined,
-  ) =>
-    Effect.gen(function* () {
-      if (workspaceService && cwd && (yield* workspaceService.lookup(cwd)))
-        return new Map<string, ClaudeSkillTarget>();
-      return yield* discoverClaudeSkills(
-        adapterOptions.settings,
-        cwd ?? undefined,
-        adapterOptions.environment,
-      ).pipe(
-        Effect.map(
-          (skills) =>
-            new Map(
-              skills
-                .filter((skill) => skill.enabled && skill.userInvocable !== false)
-                .map((skill) => [skill.name, skill]),
-            ),
-        ),
-        Effect.provideService(FileSystem.FileSystem, fileSystem),
-        Effect.provideService(Path.Path, path),
-      );
-    });
+  ) {
+    if (workspaceService && cwd && (yield* workspaceService.lookup(cwd)))
+      return new Map<string, ClaudeSkillTarget>();
+    return yield* discoverClaudeSkills(
+      adapterOptions.settings,
+      cwd ?? undefined,
+      adapterOptions.environment,
+    ).pipe(
+      Effect.map(
+        (skills) =>
+          new Map(
+            skills
+              .filter((skill) => skill.enabled && skill.userInvocable !== false)
+              .map((skill) => [skill.name, skill]),
+          ),
+      ),
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+    );
+  });
 
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: adapterOptions.instanceId,

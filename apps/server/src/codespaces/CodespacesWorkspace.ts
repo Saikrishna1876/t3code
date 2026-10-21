@@ -194,20 +194,21 @@ const make = Effect.gen(function* () {
   yield* Effect.forEach(remoteRoots, rememberRoot);
   const executors = new Map<string, WorkspaceExecutor>();
   const disconnectGenerations = new Map<string, number>();
-  const saveBindings = (next: ReadonlyArray<WorkspaceBinding>) =>
-    Effect.gen(function* () {
-      const encoded = yield* encodeBindings(next).pipe(Effect.orDie);
-      yield* secrets.set("codespaces-project-bindings-v1", new TextEncoder().encode(encoded)).pipe(
-        Effect.mapError(
-          () =>
-            new CodespacesError({
-              code: "storage",
-              message: "Could not save Codespace project binding.",
-            }),
-        ),
-      );
-      bindings = [...next];
-    });
+  const saveBindings = Effect.fn("CodespacesWorkspace.saveBindings")(function* (
+    next: ReadonlyArray<WorkspaceBinding>,
+  ) {
+    const encoded = yield* encodeBindings(next).pipe(Effect.orDie);
+    yield* secrets.set("codespaces-project-bindings-v1", new TextEncoder().encode(encoded)).pipe(
+      Effect.mapError(
+        () =>
+          new CodespacesError({
+            code: "storage",
+            message: "Could not save Codespace project binding.",
+          }),
+      ),
+    );
+    bindings = [...next];
+  });
   const reservations = makeWorkspaceReservations();
   const lookup = (cwd: string) =>
     Effect.sync(() => {
@@ -330,213 +331,218 @@ const make = Effect.gen(function* () {
         executors.delete(name);
       }),
     lookup,
-    stageAttachment: ({ cwd, path: attachmentPath }) =>
-      Effect.gen(function* () {
-        const target = yield* lookup(cwd);
-        if (!target?.executor)
-          return yield* new CodespacesError({
-            code: "conflict",
-            message: "Resume the Codespace before sending attachments.",
-          });
-        const info = yield* fs.stat(attachmentPath).pipe(
+    stageAttachment: Effect.fn("CodespacesWorkspace.stageAttachment")(function* ({
+      cwd,
+      path: attachmentPath,
+    }) {
+      const target = yield* lookup(cwd);
+      if (!target?.executor)
+        return yield* new CodespacesError({
+          code: "conflict",
+          message: "Resume the Codespace before sending attachments.",
+        });
+      const info = yield* fs.stat(attachmentPath).pipe(
+        Effect.mapError(
+          () =>
+            new CodespacesError({
+              code: "configuration",
+              message: "Could not inspect the attached file.",
+            }),
+        ),
+      );
+      if (info.type !== "File" || info.size > BigInt(PROVIDER_SEND_TURN_MAX_FILE_BYTES))
+        return yield* new CodespacesError({
+          code: "configuration",
+          message: "Attachment is too large or is not a regular file.",
+        });
+      const response = yield* client
+        .execute(
+          HttpClientRequest.post(
+            target.executor.workerUrl +
+              "/attachments/" +
+              encodeURIComponent(attachmentPath.replaceAll("\\", "/").split("/").at(-1)!),
+          ).pipe(
+            HttpClientRequest.setHeader("authorization", `Bearer ${target.executor.token}`),
+            HttpClientRequest.bodyStream(fs.stream(attachmentPath), {
+              contentLength: Number(info.size),
+            }),
+          ),
+        )
+        .pipe(
+          Effect.flatMap((response) =>
+            Effect.gen(function* () {
+              if (response.status === 507)
+                return yield* new CodespacesError({
+                  code: "storage",
+                  message:
+                    "Codespace attachment storage is full. Remove unused remote attachments or choose another Codespace.",
+                });
+              return yield* HttpClientResponse.filterStatusOk(response);
+            }),
+          ),
+          Effect.flatMap((response) => response.json),
+          Effect.timeout("5 minutes"),
+          Effect.mapError((cause) =>
+            cause._tag === "CodespacesError"
+              ? cause
+              : new CodespacesError({
+                  code: "bootstrap",
+                  message: "Could not send attachment to the Codespace.",
+                }),
+          ),
+        );
+      if (
+        !response ||
+        typeof response !== "object" ||
+        !("path" in response) ||
+        typeof response.path !== "string"
+      )
+        return yield* new CodespacesError({
+          code: "bootstrap",
+          message: "Codespace returned an invalid attachment path.",
+        });
+      return response.path;
+    }),
+    openAsset: Effect.fn("CodespacesWorkspace.openAsset")(function* (input) {
+      const target = yield* lookup(input.cwd);
+      if (!target?.executor || target.name !== input.name)
+        return yield* new CodespacesError({
+          code: "conflict",
+          message: "Codespace asset is unavailable. Reopen its preview after reconnecting.",
+        });
+      return yield* client
+        .execute(
+          HttpClientRequest.post(target.executor.workerUrl + "/asset").pipe(
+            HttpClientRequest.setHeader("authorization", `Bearer ${target.executor.token}`),
+            HttpClientRequest.bodyJsonUnsafe({ ...input, cwd: target.remoteCwd }),
+          ),
+        )
+        .pipe(
+          Effect.flatMap(HttpClientResponse.filterStatusOk),
+          Effect.timeout("30 seconds"),
+          Effect.map((response) =>
+            response.stream.pipe(
+              Stream.mapError(
+                () =>
+                  new CodespacesError({
+                    code: "bootstrap",
+                    message: "Codespace asset stream failed.",
+                  }),
+              ),
+            ),
+          ),
+          Effect.mapError(
+            () =>
+              new CodespacesError({
+                code: "bootstrap",
+                message: "Could not read the Codespace asset.",
+              }),
+          ),
+        );
+    }),
+    call: Effect.fn("CodespacesWorkspace.call")(function* <A>(
+      cwd: string,
+      group: string,
+      method: string,
+      args: ReadonlyArray<unknown>,
+    ) {
+      const target = yield* lookup(cwd);
+      if (!target?.executor)
+        return yield* new CodespacesError({
+          code: "conflict",
+          message: "Codespace is disconnected. Resume it from this project before continuing.",
+        });
+      const executor = target.executor;
+      const remoteArgs = args.map((argument, index) => {
+        if (index === 0 && typeof argument === "string")
+          return mapWorkspacePath(argument, target.localRoot, executor.remoteRoot);
+        if (
+          index === 1 &&
+          Array.isArray(argument) &&
+          ((group === "git" && method === "prepareCommitContext") ||
+            (group === "vcs" && method === "filterIgnoredPaths"))
+        )
+          return argument.map((path) =>
+            typeof path === "string"
+              ? mapWorkspacePath(path, target.localRoot, executor.remoteRoot)
+              : path,
+          );
+        return mapWorkspacePaths(argument, target.localRoot, executor.remoteRoot);
+      });
+      const request = yield* Effect.gen(function* () {
+        if (group !== "files" || method !== "writeFile")
+          return HttpClientRequest.post(executor.workerUrl + "/call").pipe(
+            HttpClientRequest.bodyJsonUnsafe({ group, method, args: remoteArgs }),
+          );
+        const input = yield* decodeWriteFile(remoteArgs[0]).pipe(
           Effect.mapError(
             () =>
               new CodespacesError({
                 code: "configuration",
-                message: "Could not inspect the attached file.",
+                message: "Invalid workspace file write.",
               }),
           ),
         );
-        if (info.type !== "File" || info.size > BigInt(PROVIDER_SEND_TURN_MAX_FILE_BYTES))
-          return yield* new CodespacesError({
-            code: "configuration",
-            message: "Attachment is too large or is not a regular file.",
-          });
-        const response = yield* client
-          .execute(
-            HttpClientRequest.post(
-              target.executor.workerUrl +
-                "/attachments/" +
-                encodeURIComponent(attachmentPath.replaceAll("\\", "/").split("/").at(-1)!),
-            ).pipe(
-              HttpClientRequest.setHeader("authorization", `Bearer ${target.executor.token}`),
-              HttpClientRequest.bodyStream(fs.stream(attachmentPath), {
-                contentLength: Number(info.size),
-              }),
-            ),
-          )
-          .pipe(
-            Effect.flatMap((response) =>
-              Effect.gen(function* () {
-                if (response.status === 507)
-                  return yield* new CodespacesError({
-                    code: "storage",
-                    message:
-                      "Codespace attachment storage is full. Remove unused remote attachments or choose another Codespace.",
-                  });
-                return yield* HttpClientResponse.filterStatusOk(response);
-              }),
-            ),
-            Effect.flatMap((response) => response.json),
-            Effect.timeout("5 minutes"),
-            Effect.mapError((cause) =>
-              cause._tag === "CodespacesError"
-                ? cause
-                : new CodespacesError({
-                    code: "bootstrap",
-                    message: "Could not send attachment to the Codespace.",
-                  }),
-            ),
-          );
-        if (
-          !response ||
-          typeof response !== "object" ||
-          !("path" in response) ||
-          typeof response.path !== "string"
+        // File contents bypass the bounded JSON control endpoint and its escaping overhead.
+        return HttpClientRequest.post(executor.workerUrl + "/files/write").pipe(
+          HttpClientRequest.setUrlParam("cwd", input.cwd),
+          HttpClientRequest.setUrlParam("relativePath", input.relativePath),
+          HttpClientRequest.bodyText(input.contents),
+        );
+      });
+      const response = yield* client
+        .execute(
+          request.pipe(HttpClientRequest.setHeader("authorization", `Bearer ${executor.token}`)),
         )
-          return yield* new CodespacesError({
-            code: "bootstrap",
-            message: "Codespace returned an invalid attachment path.",
-          });
-        return response.path;
-      }),
-    openAsset: (input) =>
-      Effect.gen(function* () {
-        const target = yield* lookup(input.cwd);
-        if (!target?.executor || target.name !== input.name)
-          return yield* new CodespacesError({
-            code: "conflict",
-            message: "Codespace asset is unavailable. Reopen its preview after reconnecting.",
-          });
-        return yield* client
-          .execute(
-            HttpClientRequest.post(target.executor.workerUrl + "/asset").pipe(
-              HttpClientRequest.setHeader("authorization", `Bearer ${target.executor.token}`),
-              HttpClientRequest.bodyJsonUnsafe({ ...input, cwd: target.remoteCwd }),
-            ),
-          )
-          .pipe(
-            Effect.flatMap(HttpClientResponse.filterStatusOk),
-            Effect.timeout("30 seconds"),
-            Effect.map((response) =>
-              response.stream.pipe(
-                Stream.mapError(
-                  () =>
-                    new CodespacesError({
-                      code: "bootstrap",
-                      message: "Codespace asset stream failed.",
-                    }),
-                ),
+        .pipe(
+          Effect.flatMap(HttpClientResponse.filterStatusOk),
+          Effect.flatMap((response) => response.json),
+          Effect.timeout("5 minutes"),
+          Effect.mapError(
+            () =>
+              new CodespacesError({
+                code: "bootstrap",
+                message: "Codespace workspace request failed. Reconnect this project and retry.",
+              }),
+          ),
+        );
+      if (typeof response !== "object" || response === null)
+        return yield* new CodespacesError({
+          code: "bootstrap",
+          message: "Codespace returned an invalid workspace response.",
+        });
+      if ("error" in response)
+        return yield* decodeVcsError(response.error).pipe(
+          Effect.flatMap(Effect.fail),
+          Effect.catchIf(
+            (error) => error._tag === "SchemaError",
+            () =>
+              Effect.fail(
+                new CodespacesError({
+                  code: "bootstrap",
+                  message: "Codespace returned an invalid workspace error.",
+                }),
               ),
-            ),
-            Effect.mapError(
-              () =>
-                new CodespacesError({
-                  code: "bootstrap",
-                  message: "Could not read the Codespace asset.",
-                }),
-            ),
-          );
-      }),
-    call: <A>(cwd: string, group: string, method: string, args: ReadonlyArray<unknown>) =>
-      Effect.gen(function* () {
-        const target = yield* lookup(cwd);
-        if (!target?.executor)
-          return yield* new CodespacesError({
-            code: "conflict",
-            message: "Codespace is disconnected. Resume it from this project before continuing.",
-          });
-        const executor = target.executor;
-        const remoteArgs = args.map((argument, index) => {
-          if (index === 0 && typeof argument === "string")
-            return mapWorkspacePath(argument, target.localRoot, executor.remoteRoot);
-          if (
-            index === 1 &&
-            Array.isArray(argument) &&
-            ((group === "git" && method === "prepareCommitContext") ||
-              (group === "vcs" && method === "filterIgnoredPaths"))
-          )
-            return argument.map((path) =>
-              typeof path === "string"
-                ? mapWorkspacePath(path, target.localRoot, executor.remoteRoot)
-                : path,
-            );
-          return mapWorkspacePaths(argument, target.localRoot, executor.remoteRoot);
+          ),
+        );
+      if (!("value" in response))
+        return yield* new CodespacesError({
+          code: "bootstrap",
+          message: "Codespace returned no workspace result.",
         });
-        const request = yield* Effect.gen(function* () {
-          if (group !== "files" || method !== "writeFile")
-            return HttpClientRequest.post(executor.workerUrl + "/call").pipe(
-              HttpClientRequest.bodyJsonUnsafe({ group, method, args: remoteArgs }),
-            );
-          const input = yield* decodeWriteFile(remoteArgs[0]).pipe(
-            Effect.mapError(
-              () =>
-                new CodespacesError({
-                  code: "configuration",
-                  message: "Invalid workspace file write.",
-                }),
-            ),
-          );
-          // File contents bypass the bounded JSON control endpoint and its escaping overhead.
-          return HttpClientRequest.post(executor.workerUrl + "/files/write").pipe(
-            HttpClientRequest.setUrlParam("cwd", input.cwd),
-            HttpClientRequest.setUrlParam("relativePath", input.relativePath),
-            HttpClientRequest.bodyText(input.contents),
-          );
-        });
-        const response = yield* client
-          .execute(
-            request.pipe(HttpClientRequest.setHeader("authorization", `Bearer ${executor.token}`)),
-          )
-          .pipe(
-            Effect.flatMap(HttpClientResponse.filterStatusOk),
-            Effect.flatMap((response) => response.json),
-            Effect.timeout("5 minutes"),
-            Effect.mapError(
-              () =>
-                new CodespacesError({
-                  code: "bootstrap",
-                  message: "Codespace workspace request failed. Reconnect this project and retry.",
-                }),
-            ),
-          );
-        if (typeof response !== "object" || response === null)
-          return yield* new CodespacesError({
-            code: "bootstrap",
-            message: "Codespace returned an invalid workspace response.",
-          });
-        if ("error" in response)
-          return yield* decodeVcsError(response.error).pipe(
-            Effect.flatMap(Effect.fail),
-            Effect.catchIf(
-              (error) => error._tag === "SchemaError",
-              () =>
-                Effect.fail(
-                  new CodespacesError({
-                    code: "bootstrap",
-                    message: "Codespace returned an invalid workspace error.",
-                  }),
-                ),
-            ),
-          );
-        if (!("value" in response))
-          return yield* new CodespacesError({
-            code: "bootstrap",
-            message: "Codespace returned no workspace result.",
-          });
-        // File contents and patches are opaque. Only structured Git paths are mapped for local thread bindings.
-        if (group === "git" && method === "listWorktreePaths" && Array.isArray(response.value))
-          return response.value.map((path) =>
-            typeof path === "string"
-              ? mapWorkspacePath(path, executor.remoteRoot, target.localRoot)
-              : path,
-          ) as A;
-        return (
-          group === "files" || typeof response.value === "string"
-            ? response.value
-            : mapWorkspacePaths(response.value, executor.remoteRoot, target.localRoot)
+      // File contents and patches are opaque. Only structured Git paths are mapped for local thread bindings.
+      if (group === "git" && method === "listWorktreePaths" && Array.isArray(response.value))
+        return response.value.map((path) =>
+          typeof path === "string"
+            ? mapWorkspacePath(path, executor.remoteRoot, target.localRoot)
+            : path,
         ) as A;
-      }),
+      return (
+        group === "files" || typeof response.value === "string"
+          ? response.value
+          : mapWorkspacePaths(response.value, executor.remoteRoot, target.localRoot)
+      ) as A;
+    }),
   });
 });
 export const layer = Layer.effect(CodespacesWorkspace, make);

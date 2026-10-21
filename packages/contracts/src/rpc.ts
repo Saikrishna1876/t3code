@@ -1929,6 +1929,7 @@ const WsCodespacesBindRpc = Rpc.make(WS_METHODS.codespacesBind, {
   error: CodespacesError,
 });
 const WsCodespacesListRpc = Rpc.make(WS_METHODS.codespacesList, {
+  payload: Schema.Struct({}),
   success: CodespacesListResult,
   error: CodespacesError,
 });

@@ -97,51 +97,53 @@ const make = Effect.gen(function* () {
         }),
     ),
   );
-  const ssh = (name: string, script: string, args: ReadonlyArray<string> = []) =>
-    Effect.gen(function* () {
-      const output = yield* processRunner
-        .run({
-          operation: "Codespaces.ssh",
-          command: "gh",
-          args: [
-            "codespace",
-            "ssh",
-            "--codespace",
-            name,
-            "--",
-            "-T",
-            "sh",
-            "-l",
-            "-s",
-            "--",
-            ...args,
-          ],
-          cwd: config.cwd,
-          stdin: script,
-          env: yield* ghEnvironment,
-          timeoutMs: 900_000,
-          maxOutputBytes: 100_000,
-        })
-        .pipe(
-          Effect.mapError(
-            () =>
-              new CodespacesError({
-                code: "bootstrap",
-                message:
-                  "Codespace worker setup failed. Check its GitHub creation log and SSH server, then reconnect.",
-              }),
-          ),
-        );
-      return output.stdout.trim().split(/\r?\n/).at(-1) ?? "";
-    });
-  const disconnect = (name: string) =>
-    Effect.gen(function* () {
-      yield* workspaces.disconnect(name);
-      const entry = forwards.get(name);
-      if (!entry) return;
-      forwards.delete(name);
-      yield* Scope.close(entry.scope, Exit.void);
-    });
+  const ssh = Effect.fn("CodespacesHost.ssh")(function* (
+    name: string,
+    script: string,
+    args: ReadonlyArray<string> = [],
+  ) {
+    const output = yield* processRunner
+      .run({
+        operation: "Codespaces.ssh",
+        command: "gh",
+        args: [
+          "codespace",
+          "ssh",
+          "--codespace",
+          name,
+          "--",
+          "-T",
+          "sh",
+          "-l",
+          "-s",
+          "--",
+          ...args,
+        ],
+        cwd: config.cwd,
+        stdin: script,
+        env: yield* ghEnvironment,
+        timeoutMs: 900_000,
+        maxOutputBytes: 100_000,
+      })
+      .pipe(
+        Effect.mapError(
+          () =>
+            new CodespacesError({
+              code: "bootstrap",
+              message:
+                "Codespace worker setup failed. Check its GitHub creation log and SSH server, then reconnect.",
+            }),
+        ),
+      );
+    return output.stdout.trim().split(/\r?\n/).at(-1) ?? "";
+  });
+  const disconnect = Effect.fn("CodespacesHost.disconnect")(function* (name: string) {
+    yield* workspaces.disconnect(name);
+    const entry = forwards.get(name);
+    if (!entry) return;
+    forwards.delete(name);
+    yield* Scope.close(entry.scope, Exit.void);
+  });
   const connect: CodespacesHost["Service"]["connect"] = Effect.fn("CodespacesHost.connect")(
     function* (space, account) {
       const token =
@@ -507,27 +509,26 @@ NODE
         }),
       ),
     prepareStop: () => Effect.void,
-    rebuild: (name) =>
-      Effect.gen(function* () {
-        yield* processRunner
-          .run({
-            operation: "Codespaces.rebuild",
-            command: "gh",
-            args: ["codespace", "rebuild", "--codespace", name],
-            cwd: config.cwd,
-            env: yield* ghEnvironment,
-            timeoutMs: 900_000,
-          })
-          .pipe(
-            Effect.mapError(
-              () =>
-                new CodespacesError({
-                  code: "github",
-                  message: "GitHub could not rebuild the Codespace. Inspect its creation log.",
-                }),
-            ),
-          );
-      }),
+    rebuild: Effect.fn("CodespacesHost.rebuild")(function* (name) {
+      yield* processRunner
+        .run({
+          operation: "Codespaces.rebuild",
+          command: "gh",
+          args: ["codespace", "rebuild", "--codespace", name],
+          cwd: config.cwd,
+          env: yield* ghEnvironment,
+          timeoutMs: 900_000,
+        })
+        .pipe(
+          Effect.mapError(
+            () =>
+              new CodespacesError({
+                code: "github",
+                message: "GitHub could not rebuild the Codespace. Inspect its creation log.",
+              }),
+          ),
+        );
+    }),
     disconnected: SubscriptionRef.changes(exits).pipe(
       Stream.map((state) => state.name),
       Stream.filter((name) => name !== ""),

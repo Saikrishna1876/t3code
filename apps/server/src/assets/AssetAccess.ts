@@ -420,40 +420,35 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
 );
 
 // Issuance discovers the current location; resolution passes null to pin an existing local URL.
-const remoteWorkspaceAsset = (
+const remoteWorkspaceAsset = Effect.fn("AssetAccess.remoteWorkspaceAsset")(function* (
   workspaceRoot: string,
   relativePath: string,
   expectedName?: string | null,
-) =>
-  Effect.gen(function* () {
-    const remote = Option.getOrUndefined(
-      yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
-    );
-    const target = remote ? yield* remote.lookup(workspaceRoot) : null;
-    if (expectedName !== undefined && (target?.name ?? null) !== expectedName)
-      return yield* new CodespacesError({ code: "conflict", message: "Asset binding changed." });
-    if (!target || !remote) return null;
-    const info = yield* remote
-      .call(workspaceRoot, "files", "inspectAsset", [{ cwd: workspaceRoot, relativePath }])
-      .pipe(
-        Effect.flatMap(
-          Schema.decodeUnknownEffect(
-            Schema.Struct({
-              size: Schema.Number,
-              mtimeMs: Schema.Number,
-              headerBase64: Schema.String,
-            }),
-          ),
+) {
+  const remote = Option.getOrUndefined(
+    yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+  );
+  const target = remote ? yield* remote.lookup(workspaceRoot) : null;
+  if (expectedName !== undefined && (target?.name ?? null) !== expectedName)
+    return yield* new CodespacesError({ code: "conflict", message: "Asset binding changed." });
+  if (!target || !remote) return null;
+  const info = yield* remote
+    .call(workspaceRoot, "files", "inspectAsset", [{ cwd: workspaceRoot, relativePath }])
+    .pipe(
+      Effect.flatMap(
+        Schema.decodeUnknownEffect(
+          Schema.Struct({
+            size: Schema.Number,
+            mtimeMs: Schema.Number,
+            headerBase64: Schema.String,
+          }),
         ),
-      );
-    return { name: target.name, info, remote };
-  });
-const resolveWorkspaceAsset = (
-  workspaceRoot: string,
-  relativePath: string,
-  expectedName?: string,
-) =>
-  Effect.gen(function* () {
+      ),
+    );
+  return { name: target.name, info, remote };
+});
+const resolveWorkspaceAsset = Effect.fn("AssetAccess.resolveWorkspaceAsset")(
+  function* (workspaceRoot: string, relativePath: string, expectedName?: string) {
     const remote = yield* remoteWorkspaceAsset(workspaceRoot, relativePath, expectedName ?? null);
     if (remote) {
       return {
@@ -480,33 +475,37 @@ const resolveWorkspaceAsset = (
     }
     const file = yield* resolveCanonicalWorkspaceFileForRequest({ workspaceRoot, relativePath });
     return file ? { kind: "file" as const, path: file } : null;
-  }).pipe(Effect.orElseSucceed(() => null));
+  },
+  Effect.orElseSucceed(() => null),
+);
 
-const remoteWorkspaceResource = (workspaceRoot: string | undefined, requestedPath: string) =>
-  Effect.gen(function* () {
-    if (!workspaceRoot) return null;
-    const remote = Option.getOrUndefined(
-      yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
-    );
-    const target = remote ? yield* remote.lookup(workspaceRoot) : null;
-    if (!target) return null;
-    const path = yield* Path.Path;
-    if (!path.isAbsolute(requestedPath)) {
-      const relative = path.relative(workspaceRoot, path.resolve(workspaceRoot, requestedPath));
-      return relative === ".." || relative.startsWith(".." + path.sep)
-        ? null
-        : { workspaceRoot, requestedPath };
-    }
-    if (
-      target.remoteCwd &&
-      (requestedPath === target.remoteCwd || requestedPath.startsWith(target.remoteCwd + "/"))
-    )
-      return { workspaceRoot, requestedPath: path.relative(target.remoteCwd, requestedPath) };
-    const relative = path.relative(workspaceRoot, requestedPath);
-    return relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)
+const remoteWorkspaceResource = Effect.fn("AssetAccess.remoteWorkspaceResource")(function* (
+  workspaceRoot: string | undefined,
+  requestedPath: string,
+) {
+  if (!workspaceRoot) return null;
+  const remote = Option.getOrUndefined(
+    yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+  );
+  const target = remote ? yield* remote.lookup(workspaceRoot) : null;
+  if (!target) return null;
+  const path = yield* Path.Path;
+  if (!path.isAbsolute(requestedPath)) {
+    const relative = path.relative(workspaceRoot, path.resolve(workspaceRoot, requestedPath));
+    return relative === ".." || relative.startsWith(".." + path.sep)
       ? null
       : { workspaceRoot, requestedPath };
-  });
+  }
+  if (
+    target.remoteCwd &&
+    (requestedPath === target.remoteCwd || requestedPath.startsWith(target.remoteCwd + "/"))
+  )
+    return { workspaceRoot, requestedPath: path.relative(target.remoteCwd, requestedPath) };
+  const relative = path.relative(workspaceRoot, requestedPath);
+  return relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)
+    ? null
+    : { workspaceRoot, requestedPath };
+});
 
 const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileAsset")(
   function* (input: {

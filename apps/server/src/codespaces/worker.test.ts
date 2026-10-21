@@ -413,7 +413,7 @@ describe("Codespace workspace worker", () => {
           test.local,
           subject,
           body,
-          { stage: { filePaths: [test.local + "/proof.txt"] } },
+          { stage: { filePaths: ["proof.txt"] } },
         ]);
         const message = yield* Effect.promise(() =>
           execute("git", ["log", "-1", "--format=%B"], { cwd: test.remote }),
