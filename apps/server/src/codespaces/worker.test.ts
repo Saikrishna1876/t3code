@@ -356,6 +356,29 @@ describe("Codespace workspace worker", () => {
       { path: "node_modules/module.js", kind: "file", ignored: true },
     ]);
   });
+  it("lists ignored remote files without listing excluded directories or host files", async () => {
+    const test = await fixture();
+    await NodeFSP.writeFile(NodePath.join(test.remote, ".gitignore"), "*.txt\nnode_modules/\n");
+    await NodeFSP.writeFile(NodePath.join(test.remote, "secret.txt"), "remote");
+    await NodeFSP.writeFile(NodePath.join(test.local, "host-only.txt"), "host");
+    await NodeFSP.mkdir(NodePath.join(test.remote, "node_modules"));
+    await NodeFSP.writeFile(
+      NodePath.join(test.remote, "node_modules", "large.txt"),
+      "ignored tree",
+    );
+    await NodeFSP.symlink(
+      NodePath.join(test.local, "host-only.txt"),
+      NodePath.join(test.remote, "link.txt"),
+    );
+    const result = await test.call<{
+      files: Array<{ path: string; byteLength: number }>;
+      truncated: boolean;
+    }>("entries", "listIgnoredFiles", [{ cwd: test.remote }]);
+    expect(result.body?.value).toEqual({
+      files: [{ path: "secret.txt", byteLength: 6 }],
+      truncated: false,
+    });
+  });
   it.effect("commits remote files without translating path-shaped subject or body text", () =>
     Effect.gen(function* () {
       const test = yield* Effect.promise(fixture);

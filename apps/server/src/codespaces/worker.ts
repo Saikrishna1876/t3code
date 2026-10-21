@@ -17,6 +17,7 @@ import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   type ProjectEntry,
   type ProjectListEntriesInput,
+  type ProjectListIgnoredFilesInput,
   type ProjectSearchEntriesInput,
   type ProjectSearchContentsInput,
   type FilesystemBrowseInput,
@@ -313,6 +314,43 @@ export async function startWorker(root: string, token: string, port = 0) {
     };
   };
   const entries = {
+    listIgnoredFiles: async (input: ProjectListIgnoredFilesInput) => {
+      const cwd = await validPath(input.cwd);
+      const result = await runtime.runPromise(
+        git
+          .execute({
+            operation: "WorkspaceEntries.listIgnoredFiles",
+            cwd,
+            args: [
+              "-c",
+              "core.fsmonitor=false",
+              "ls-files",
+              "--others",
+              "--ignored",
+              "--exclude-standard",
+              "--directory",
+              "--no-empty-directory",
+              "-z",
+            ],
+            allowNonZeroExit: true,
+            timeoutMs: 10_000,
+            maxOutputBytes: 4 * 1024 * 1024,
+          })
+          .pipe(Effect.orElseSucceed(() => undefined)),
+      );
+      if (!result || result.exitCode !== 0) return { files: [], truncated: false };
+      const paths = result.stdout
+        .split("\0")
+        .filter((entry) => entry.length > 0 && !entry.endsWith("/"))
+        .toSorted();
+      const files = await Promise.all(
+        paths.slice(0, 200).map(async (relativePath) => {
+          const stat = await NodeFSP.lstat(NodePath.join(cwd, relativePath)).catch(() => null);
+          return stat?.isFile() ? { path: relativePath, byteLength: stat.size } : null;
+        }),
+      );
+      return { files: files.filter((file) => file !== null), truncated: paths.length > 200 };
+    },
     list: async (input: ProjectListEntriesInput) => {
       if (input.directoryPath === undefined) {
         const listed = await recursiveEntries(input.cwd);

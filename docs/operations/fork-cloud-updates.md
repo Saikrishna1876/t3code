@@ -1,5 +1,10 @@
 # Fork cloud updates
 
+Manual release requests build locally for Intel macOS with publishing disabled.
+Do not publish to GitHub or dispatch a publishing workflow unless the user explicitly
+requests publication. This preference was reaffirmed on 2026-10-18. The cloud-only
+build restriction below applies to scheduled cloud updates, not manual releases.
+
 The T3 scheduled task updates `Saikrishna1876/t3code` in a disposable Linux GitHub
 Codespace. The `Fork Intel Mac release` workflow packages and publishes the exact
 validated `main` commit on a GitHub-hosted `macos-15-intel` runner. The local Mac

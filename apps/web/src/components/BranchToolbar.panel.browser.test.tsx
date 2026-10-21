@@ -1,11 +1,12 @@
 import { Atom } from "effect/reactivity";
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
-import { act, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import type { ComponentProps } from "react";
+import { createRoot } from "react-dom/client";
+import { beforeEach, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
 import "~/index.css";
+import { act, render as renderUi } from "../../test/render";
 
 const state = vi.hoisted(() => ({
   worktreePath: "/tmp/worktree" as string | null,
@@ -31,12 +32,8 @@ vi.mock(import("../hooks/useCopyToClipboard"), async (original) => ({
 vi.mock(import("./BranchToolbarBranchSelector"), () => ({
   BranchToolbarBranchSelector: (() => null) as never,
 }));
-vi.mock(import("../state/entities"), () => ({
-  useQuietThreadShell: (() => ({
-    environmentId: "local",
-    projectId: "project",
-    worktreePath: state.worktreePath,
-  })) as never,
+vi.mock(import("../state/entities"), async (original) => ({
+  ...(await original()),
   useProject: (() => ({ id: "project", workspaceRoot: "/tmp/project" })) as never,
   useThreadShellsForProjectRefs: () => [],
 }));
@@ -119,53 +116,44 @@ vi.mock(import("../state/use-atom-command"), async (original) => ({
 
 import { BranchToolbar } from "./BranchToolbar";
 
-let root: Root;
-let container: HTMLDivElement;
-
 beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  state.worktreePath = "/tmp/worktree";
   state.codespacesSupported = false;
   state.canManageCodespaces = true;
   state.codespaceName = null;
   state.codespaceEligible = true;
   state.inventoryPending = false;
+});
+
+function render(
+  props: Partial<ComponentProps<typeof BranchToolbar>>,
+  { worktreePath = "/tmp/worktree" }: { worktreePath?: string | null } = {},
+) {
+  state.worktreePath = worktreePath;
   state.showContextMenu.mockReset().mockResolvedValue("copy-path");
   state.writeTextToClipboard.mockReset().mockResolvedValue(true);
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
-
-function render(props: Partial<ComponentProps<typeof BranchToolbar>>) {
-  return act(async () =>
-    root.render(
-      <BranchToolbar
-        layout="panel"
-        panelSection="workspace"
-        environmentId={EnvironmentId.make("local")}
-        threadId={ThreadId.make("thread")}
-        showGitControls
-        envMode="local"
-        envLocked={false}
-        startFromOrigin={false}
-        onStartFromOriginChange={vi.fn()}
-        onEnvModeChange={vi.fn()}
-        {...props}
-      />,
-    ),
+  return renderUi(
+    <BranchToolbar
+      layout="panel"
+      panelSection="workspace"
+      environmentId={EnvironmentId.make("local")}
+      threadId={ThreadId.make("thread")}
+      projectId={ProjectId.make("project")}
+      worktreePath={state.worktreePath}
+      isServerThread
+      showGitControls
+      envMode="local"
+      envLocked={false}
+      startFromOrigin={false}
+      onStartFromOriginChange={vi.fn()}
+      onEnvModeChange={vi.fn()}
+      {...props}
+    />,
   );
 }
 
 it("keeps machine choices usable when the combined row's workspace is locked", async () => {
   const onEnvironmentChange = vi.fn();
-  await render({
+  await using screen = await render({
     onEnvironmentChange,
     availableEnvironments: ["local", "remote"].map((id) => ({
       environmentId: EnvironmentId.make(id),
@@ -175,9 +163,9 @@ it("keeps machine choices usable when the combined row's workspace is locked", a
       machine: "server",
     })),
   });
-  const trigger = container.querySelector("button")!;
+  const trigger = screen.container.querySelector("button")!;
   expect(trigger.textContent).toBe("local");
-  expect(container.querySelectorAll("button")).toHaveLength(1);
+  expect(screen.container.querySelectorAll("button")).toHaveLength(1);
 
   // A ctrl-click is a macOS secondary click; it must not open the menu.
   await act(async () => {
@@ -193,18 +181,34 @@ it("keeps machine choices usable when the combined row's workspace is locked", a
   expect(onEnvironmentChange).toHaveBeenCalledWith("remote");
 });
 
+it("shows a started thread's primary machine as a static label in the composer", async () => {
+  await using screen = await render({
+    layout: "composer",
+    showGitControls: false,
+    availableEnvironments: ["local", "remote"].map((id) => ({
+      environmentId: EnvironmentId.make(id),
+      projectId: ProjectId.make("project"),
+      label: id,
+      isPrimary: id === "local",
+      machine: "server",
+    })),
+  });
+  expect(screen.container.textContent).toBe("local");
+  expect(screen.container.querySelector("button")).toBeNull();
+});
+
 it.each([
   ["local", null, "/tmp/project"],
   ["worktree", null, null],
   ["worktree", "/tmp/worktree", "/tmp/worktree"],
+  ["worktree", "C:/repo/worktree", String.raw`C:\repo\worktree`],
 ] as const)(
   "copies only an existing workspace path with mode %s and worktree %s",
   async (envMode, worktreePath, copiedPath) => {
-    state.worktreePath = worktreePath;
-    await render({ envMode });
+    await using screen = await render({ envMode }, { worktreePath });
     const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
     await act(async () => {
-      container.querySelector('[aria-label="Run context"]')!.dispatchEvent(event);
+      screen.container.querySelector('[aria-label="Run context"]')!.dispatchEvent(event);
     });
     expect(event.defaultPrevented).toBe(copiedPath !== null);
     if (copiedPath === null) {
@@ -242,6 +246,9 @@ it.each([
           panelSection="workspace"
           environmentId={EnvironmentId.make("local")}
           threadId={ThreadId.make("thread")}
+          projectId={ProjectId.make("project")}
+          worktreePath={state.worktreePath}
+          isServerThread
           showGitControls
           envMode="local"
           envLocked={bound}
@@ -317,6 +324,9 @@ it("shows a paired client's bound target and locks worktrees without exposing li
           panelSection="workspace"
           environmentId={EnvironmentId.make("local")}
           threadId={ThreadId.make("thread")}
+          projectId={ProjectId.make("project")}
+          worktreePath={state.worktreePath}
+          isServerThread
           showGitControls
           envMode="local"
           envLocked={false}

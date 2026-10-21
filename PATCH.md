@@ -12,6 +12,7 @@ Keep project Codespaces work available with the user's existing local provider l
 - Upstream URL: https://github.com/pingdotgg/t3code.git
 - Upstream remote: `origin`. The `fork` remote is the user's fork, not the update source.
 - Target: latest upstream default branch, resolved live to an exact commit each update. Cached default branch at setup: `main`.
+- Manual releases: build locally for Intel macOS with publishing disabled. A request to create a release does not authorize GitHub publication or a publishing workflow dispatch. Publish only when the user explicitly requests publication. This preference was reaffirmed on 2026-10-18 and overrides the cloud-only build restriction for manual releases.
 - Integration: manual updates prepare with `--no-ff --no-commit` in a separate worktree. The user also authorizes the T3 scheduled cloud task to integrate in a disposable GitHub Codespace, preserve every patch, run focused checks, commit, push `Saikrishna1876/t3code` main without force, and dispatch `fork-macos-release.yml`. Scheduled integration and release builds must not run on the local Mac. See [cloud update operation](docs/operations/fork-cloud-updates.md).
 - Preserve original staged, unstaged, and untracked work. Carry the pending compatibility changes below and this specification into the review result.
 

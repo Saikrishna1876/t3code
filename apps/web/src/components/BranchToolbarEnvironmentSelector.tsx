@@ -1,11 +1,14 @@
 import { ComposerSelectControl } from "./chat/ComposerControl";
 import { ComposerContextLabel } from "./ComposerContextLabel";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
+import { useAtomValue } from "@effect/atom-react";
+import { shortcutLabelForCommand } from "../keybindings";
+import { primaryServerKeybindingsAtom } from "../state/server";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { CloudIcon, ScaleIcon } from "lucide-react";
+import { CloudIcon, PlusIcon, ScaleIcon } from "lucide-react";
 import { memo } from "react";
 
-import type { EnvironmentOption } from "./BranchToolbar.logic";
+import { ADD_TO_MACHINE_LABEL_CLASS, type EnvironmentOption } from "./BranchToolbar.logic";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import {
@@ -26,7 +29,13 @@ interface BranchToolbarEnvironmentSelectorProps {
   environmentId: EnvironmentId;
   availableEnvironments: readonly EnvironmentOption[];
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
+  onAddToMachine?: (() => void) | undefined;
 }
+
+// Action values cannot collide with server-minted environment IDs.
+const AUTO_VALUE = "action:auto";
+const ADD_MACHINE_VALUE = "action:add-machine";
+const environmentValue = (id: EnvironmentId) => `env:${id}`;
 
 export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvironmentSelector({
   autoEnvironmentLabel,
@@ -37,20 +46,26 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   environmentId,
   availableEnvironments,
   onEnvironmentChange,
+  onAddToMachine,
 }: BranchToolbarEnvironmentSelectorProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
+  const shortcutLabel = shortcutLabelForCommand(
+    useAtomValue(primaryServerKeybindingsAtom),
+    "composer.host",
+  );
   const activeEnvironment =
     availableEnvironments.find((env) => env.environmentId === environmentId) ?? null;
 
   const environmentItems = [
     ...(onAutoEnvironment
-      ? [{ value: "auto", label: autoEnvironmentLabel ?? "Auto balance" }]
+      ? [{ value: AUTO_VALUE, label: autoEnvironmentLabel ?? "Auto balance" }]
       : []),
-    ...(onCodespaces ? [{ value: "codespace", label: codespaceLabel ?? "Codespace…" }] : []),
+    ...(onCodespaces ? [{ value: "action:codespace", label: codespaceLabel ?? "Codespace…" }] : []),
     ...availableEnvironments.map((env) => ({
-      value: env.environmentId,
+      value: environmentValue(env.environmentId),
       label: env.label,
     })),
+    ...(onAddToMachine ? [{ value: ADD_MACHINE_VALUE, label: "Add to another machine" }] : []),
   ];
 
   // The static label carries the xs control's height (h-7 sm:h-6) as well as
@@ -58,7 +73,10 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   // the glass seam joining it to the composer assumes a fixed strip height, so
   // a shorter label would drag the seam out of line whenever this label is the
   // only thing in the strip.
-  if (!onCodespaces && (envLocked || onEnvironmentChange === undefined)) {
+  if (
+    !onCodespaces &&
+    (envLocked || (onEnvironmentChange === undefined && onAddToMachine === undefined))
+  ) {
     const lockedRow = (
       <span
         className="inline-flex h-7 min-w-0 max-w-full items-center gap-1 border border-transparent px-1.75 font-normal text-muted-foreground/70 text-xs sm:h-6"
@@ -82,14 +100,24 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   return (
     <Select
       modal={false}
-      value={codespaceLabel ? "codespace" : autoEnvironmentLabel ? "auto" : environmentId}
-      onValueChange={(value) =>
-        value === "codespace"
-          ? onCodespaces?.()
-          : value === "auto"
-            ? onAutoEnvironment?.()
-            : onEnvironmentChange?.(value as EnvironmentId)
+      value={
+        codespaceLabel
+          ? "action:codespace"
+          : autoEnvironmentLabel
+            ? AUTO_VALUE
+            : environmentValue(environmentId)
       }
+      onValueChange={(value) => {
+        if (value === "action:codespace") {
+          onCodespaces?.();
+        } else if (value === ADD_MACHINE_VALUE) {
+          onAddToMachine?.();
+        } else if (value === AUTO_VALUE) {
+          onAutoEnvironment?.();
+        } else if (value?.startsWith("env:")) {
+          onEnvironmentChange?.(value.slice(4) as EnvironmentId);
+        }
+      }}
       items={environmentItems}
     >
       <Tooltip>
@@ -120,6 +148,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         </TooltipTrigger>
         <TooltipPopup>
           {codespaceLabel ?? autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}
+          {shortcutLabel ? ` · ${shortcutLabel}` : null}
         </TooltipPopup>
       </Tooltip>
       <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
@@ -127,7 +156,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           <SelectGroupLabel>Run on</SelectGroupLabel>
           {onAutoEnvironment && (
             <SelectItem
-              value="auto"
+              value={AUTO_VALUE}
               disabled={envLocked}
               onClick={() => {
                 if (autoEnvironmentLabel) onAutoEnvironment?.();
@@ -142,8 +171,11 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           {availableEnvironments.map((env) => (
             <SelectItem
               key={env.environmentId}
-              value={env.environmentId}
-              disabled={envLocked || !onEnvironmentChange}
+              value={environmentValue(env.environmentId)}
+              disabled={
+                envLocked ||
+                (onEnvironmentChange === undefined && env.environmentId !== environmentId)
+              }
             >
               <span className="inline-flex items-center gap-1.5">
                 <EnvironmentMachineIcon kind={env.machine} className="size-3" />
@@ -153,7 +185,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           ))}
           {onCodespaces ? (
             <SelectItem
-              value="codespace"
+              value="action:codespace"
               onClick={() => {
                 if (codespaceLabel) onCodespaces();
               }}
@@ -161,6 +193,14 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
               <span className="inline-flex items-center gap-1.5">
                 <CloudIcon className="size-3" aria-hidden="true" />
                 {codespaceLabel ?? "Codespace…"}
+              </span>
+            </SelectItem>
+          ) : null}
+          {onAddToMachine ? (
+            <SelectItem value={ADD_MACHINE_VALUE}>
+              <span className={ADD_TO_MACHINE_LABEL_CLASS}>
+                <PlusIcon aria-hidden="true" className="size-3" />
+                Add to another machine
               </span>
             </SelectItem>
           ) : null}
