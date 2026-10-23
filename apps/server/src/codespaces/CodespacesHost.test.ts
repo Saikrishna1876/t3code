@@ -17,6 +17,7 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 import * as Net from "@t3tools/shared/Net";
@@ -64,8 +65,13 @@ const harness = Effect.gen(function* () {
     pendingRuntimeRequest: null,
   };
   let descriptorId = environmentId;
-  const spawner = ChildProcessSpawner.make(() =>
+  let respond: (input: VcsProcess.VcsProcessInput) => string | undefined = () => undefined;
+  let healthy = (_authorization: string | undefined) => true;
+  const spawned: Array<{ command: string; args: ReadonlyArray<string> }> = [];
+  const spawner = ChildProcessSpawner.make((command) =>
     Effect.gen(function* () {
+      if (command._tag === "StandardCommand")
+        spawned.push({ command: command.command, args: command.args });
       forwards++;
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
@@ -93,6 +99,8 @@ const harness = Effect.gen(function* () {
         FileSystem.FileSystem,
         FileSystem.makeNoop({
           readFileString: () => Effect.succeed("// bundled test worker"),
+          makeTempDirectoryScoped: () => Effect.succeed("/tmp/t3cs-test"),
+          writeFileString: () => Effect.void,
         }),
       ),
     ),
@@ -133,7 +141,7 @@ const harness = Effect.gen(function* () {
           run: (input) =>
             Effect.gen(function* () {
               commands.push(input);
-              expect(activeExecutor).toBe(false);
+              if (input.stdin !== undefined) expect(activeExecutor).toBe(false);
               if (launchFailure === "ssh")
                 return yield* new VcsProcessExitError({
                   operation: input.operation,
@@ -149,7 +157,9 @@ const harness = Effect.gen(function* () {
               });
               return {
                 exitCode: ChildProcessSpawner.ExitCode(0),
-                stdout: launchFailure === "invalid-output" ? "worker-did-not-start" : stdout,
+                stdout:
+                  respond(input) ??
+                  (launchFailure === "invalid-output" ? "worker-did-not-start" : stdout),
                 stderr: "",
                 stdoutTruncated: false,
                 stderrTruncated: false,
@@ -160,25 +170,27 @@ const harness = Effect.gen(function* () {
           HttpClient.HttpClient,
           HttpClient.make((request) =>
             Effect.succeed(
-              HttpClientResponse.fromWeb(
-                request,
-                new Response(
-                  json(
-                    request.url.endsWith("/.well-known/t3/environment")
-                      ? {
-                          environmentId: descriptorId,
-                          label: "Test",
-                          platform: { os: "linux", arch: "x64" },
-                          serverVersion: "0.0.46",
-                          capabilities: { repositoryIdentity: true },
-                        }
-                      : request.url.endsWith("/oauth/token")
-                        ? { access_token: "test-token" }
-                        : { threads: [thread] },
+              request.url.endsWith("/health") && !healthy(request.headers.authorization)
+                ? HttpClientResponse.fromWeb(request, new Response(null, { status: 503 }))
+                : HttpClientResponse.fromWeb(
+                    request,
+                    new Response(
+                      json(
+                        request.url.endsWith("/.well-known/t3/environment")
+                          ? {
+                              environmentId: descriptorId,
+                              label: "Test",
+                              platform: { os: "linux", arch: "x64" },
+                              serverVersion: "0.0.46",
+                              capabilities: { repositoryIdentity: true },
+                            }
+                          : request.url.endsWith("/oauth/token")
+                            ? { access_token: "test-token" }
+                            : { threads: [thread] },
+                      ),
+                      { headers: { "content-type": "application/json" } },
+                    ),
                   ),
-                  { headers: { "content-type": "application/json" } },
-                ),
-              ),
             ),
           ),
         ),
@@ -208,6 +220,13 @@ const harness = Effect.gen(function* () {
     descriptor: (value: EnvironmentId) => {
       descriptorId = value;
     },
+    respond: (value: typeof respond) => {
+      respond = value;
+    },
+    healthy: (value: typeof healthy) => {
+      healthy = value;
+    },
+    spawned,
   };
 });
 
@@ -285,9 +304,9 @@ describe("Codespaces SSH host", () => {
         expect(first.environmentId).toBeNull();
         expect(test.forwards()).toBe(1);
         expect(test.executors[0]?.execServerUrl).toBe("ws://127.0.0.1:12346");
-        expect(test.commands[0]?.stdin).toContain("exec-server");
-        expect(test.commands[0]?.stdin).not.toContain("auth pairing create");
-        expect(test.commands[0]?.stdin).not.toContain("provider login");
+        const launch = test.commands.find((command) => command.stdin?.includes("exec-server"));
+        expect(launch?.stdin).not.toContain("auth pairing create");
+        expect(launch?.stdin).not.toContain("provider login");
         const second = yield* host.connect(space, "example", configuration, first).pipe(
           Effect.provideService(GitHubRequestPolicy.PinnedGitHubCredential, {
             host: "github.com",
@@ -371,6 +390,100 @@ describe("Codespaces SSH host", () => {
         const error = yield* host.pair(managed, configuration, false).pipe(Effect.flip);
         expect(error.code).toBe("configuration");
         expect(error.message).toContain("local project");
+      }).pipe(Effect.provide(test.layer));
+    }),
+  );
+});
+
+const attachedWorker = json({
+  launch: { workerPort: 4000, execPort: 4001, workspacePath: "/workspaces/custom-folder" },
+  token: "running-worker-token",
+});
+const isAttach = (input: VcsProcess.VcsProcessInput) => input.stdin?.includes("stale()") ?? false;
+const isLaunch = (input: VcsProcess.VcsProcessInput) =>
+  input.stdin?.includes("exec-server") ?? false;
+
+describe("Codespaces worker reattachment", () => {
+  it.effect("reuses a running worker without relaunching it", () =>
+    Effect.gen(function* () {
+      const test = yield* harness;
+      test.respond((input) => (isAttach(input) ? attachedWorker : undefined));
+      yield* Effect.gen(function* () {
+        const host = yield* CodespacesHost.CodespacesHost;
+        const managed = yield* host.connect(space, "example", configuration);
+        expect(managed.remotePort).toBe(4000);
+        expect(test.executors[0]?.token).toBe("running-worker-token");
+        expect(test.commands.some(isLaunch)).toBe(false);
+        expect(test.forwards()).toBe(1);
+      }).pipe(Effect.provide(test.layer));
+    }),
+  );
+  it.effect("relaunches a worker started by a different launcher", () =>
+    Effect.gen(function* () {
+      const test = yield* harness;
+      test.respond((input) => (isAttach(input) ? "stale" : undefined));
+      yield* Effect.gen(function* () {
+        const host = yield* CodespacesHost.CodespacesHost;
+        const managed = yield* host.connect(space, "example", configuration);
+        expect(managed.remotePort).toBe(3773);
+        const attach = test.commands.find(isAttach);
+        const launch = test.commands.find(isLaunch);
+        // Launch records the fingerprint the next attach requires.
+        expect(launch?.args.at(-1)).toBe(attach?.args.at(-1));
+        expect(test.executors[0]?.token).not.toBe("running-worker-token");
+      }).pipe(Effect.provide(test.layer));
+    }),
+  );
+  it.effect("relaunches a running worker that stops answering", () =>
+    Effect.gen(function* () {
+      const test = yield* harness;
+      test.respond((input) => (isAttach(input) ? attachedWorker : undefined));
+      test.healthy((authorization) => authorization !== "Bearer running-worker-token");
+      yield* Effect.gen(function* () {
+        const host = yield* CodespacesHost.CodespacesHost;
+        const pending = yield* host.connect(space, "example", configuration).pipe(Effect.forkChild);
+        yield* TestClock.adjust("10 seconds");
+        const managed = yield* Fiber.join(pending);
+        expect(managed.remotePort).toBe(3773);
+        expect(test.commands.some(isLaunch)).toBe(true);
+        expect(test.executors).toHaveLength(1);
+        expect(test.forwards()).toBe(1);
+      }).pipe(Effect.provide(test.layer));
+    }),
+  );
+});
+
+describe("Codespaces shared SSH connection", () => {
+  it.effect("carries setup, worker and preview forwards over one SSH connection", () =>
+    Effect.gen(function* () {
+      const test = yield* harness;
+      test.respond((input) =>
+        input.args.includes("--config")
+          ? "Host cs.test-space.main\n\tUser node\n"
+          : input.args.includes("-O")
+            ? ""
+            : undefined,
+      );
+      yield* Effect.gen(function* () {
+        const host = yield* CodespacesHost.CodespacesHost;
+        yield* host.connect(space, "example", configuration);
+        test.availability(() => Effect.succeed(false));
+        const port = yield* test.executors[0]!.forwardPort!(3000);
+        expect(test.spawned).toHaveLength(1);
+        expect(test.spawned[0]?.command).toBe("ssh");
+        expect(test.spawned[0]?.args).toContain("ControlMaster=yes");
+        expect(test.commands.find(isLaunch)?.command).toBe("ssh");
+        expect(
+          test.commands
+            .filter((input) => input.args.includes("forward"))
+            .map((input) => input.args.filter((arg) => arg.startsWith("127.0.0.1:"))),
+        ).toEqual([
+          ["127.0.0.1:12345:127.0.0.1:3773", "127.0.0.1:12346:127.0.0.1:3774"],
+          [`127.0.0.1:${port}:127.0.0.1:3000`],
+        ]);
+        expect(test.forwards()).toBe(1);
+        yield* host.disconnect(space.name);
+        expect(test.forwards()).toBe(0);
       }).pipe(Effect.provide(test.layer));
     }),
   );
