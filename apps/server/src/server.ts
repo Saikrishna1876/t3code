@@ -1,4 +1,5 @@
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
+import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as CodespacesPreview from "./codespaces/CodespacesPreview.ts";
 import * as CodespacesWorkspace from "./codespaces/CodespacesWorkspace.ts";
 import * as Codespaces from "./codespaces/Codespaces.ts";
@@ -684,7 +685,7 @@ const layerCodespaces = Codespaces.layer.pipe(
   Layer.provide(layerTerminal),
   Layer.provide(ProjectStore.layer),
   Layer.provide(ProjectionStoreV2.layer),
-  Layer.provide(CodespacesHost.layer),
+  Layer.provide(CodespacesHost.layer.pipe(Layer.provide(NodeSocket.layerWebSocketConstructor))),
   Layer.provide(layerSourceControlProviderRegistry),
   Layer.provide(ServerSecretStore.layer),
 );

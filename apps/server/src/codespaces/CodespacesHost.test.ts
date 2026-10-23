@@ -17,6 +17,7 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
+import * as Socket from "effect/socket/Socket";
 import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
@@ -67,6 +68,36 @@ const harness = Effect.gen(function* () {
   let descriptorId = environmentId;
   let respond: (input: VcsProcess.VcsProcessInput) => string | undefined = () => undefined;
   let healthy = (_authorization: string | undefined) => true;
+  let executorOpens = true;
+  const sockets: Array<{ url: string; authorization: string | undefined }> = [];
+  // Opens only when the test lets the exec-server answer its handshake.
+  const webSocket: Socket.WebSocketConstructor["Service"] = (url, options) => {
+    sockets.push({
+      url,
+      authorization:
+        typeof options === "object" && !Array.isArray(options)
+          ? options.headers?.authorization
+          : undefined,
+    });
+    let readyState = 0;
+    return {
+      get readyState() {
+        return readyState;
+      },
+      addEventListener: (type, listener) => {
+        if (type === "open" && executorOpens)
+          queueMicrotask(() => {
+            readyState = 1;
+            listener({ type: "open" } as never);
+          });
+      },
+      removeEventListener: () => undefined,
+      close: () => {
+        readyState = 3;
+      },
+      send: () => undefined,
+    };
+  };
   const spawned: Array<{ command: string; args: ReadonlyArray<string> }> = [];
   const spawner = ChildProcessSpawner.make((command) =>
     Effect.gen(function* () {
@@ -127,6 +158,7 @@ const harness = Effect.gen(function* () {
           isPortAvailableOnLoopback: () => availability(),
         }),
         Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Layer.succeed(Socket.WebSocketConstructor, webSocket),
         Layer.succeed(GitHubCredentials.GitHubCredentials, {
           get: () =>
             Effect.succeed({
@@ -227,6 +259,10 @@ const harness = Effect.gen(function* () {
       healthy = value;
     },
     spawned,
+    sockets,
+    executorOpens: (value: boolean) => {
+      executorOpens = value;
+    },
   };
 });
 
@@ -413,6 +449,9 @@ describe("Codespaces worker reattachment", () => {
         const managed = yield* host.connect(space, "example", configuration);
         expect(managed.remotePort).toBe(4000);
         expect(test.executors[0]?.token).toBe("running-worker-token");
+        expect(test.sockets).toEqual([
+          { url: test.executors[0]?.execServerUrl, authorization: "Bearer running-worker-token" },
+        ]);
         expect(test.commands.some(isLaunch)).toBe(false);
         expect(test.forwards()).toBe(1);
       }).pipe(Effect.provide(test.layer));
@@ -439,6 +478,23 @@ describe("Codespaces worker reattachment", () => {
       const test = yield* harness;
       test.respond((input) => (isAttach(input) ? attachedWorker : undefined));
       test.healthy((authorization) => authorization !== "Bearer running-worker-token");
+      yield* Effect.gen(function* () {
+        const host = yield* CodespacesHost.CodespacesHost;
+        const pending = yield* host.connect(space, "example", configuration).pipe(Effect.forkChild);
+        yield* TestClock.adjust("10 seconds");
+        const managed = yield* Fiber.join(pending);
+        expect(managed.remotePort).toBe(3773);
+        expect(test.commands.some(isLaunch)).toBe(true);
+        expect(test.executors).toHaveLength(1);
+        expect(test.forwards()).toBe(1);
+      }).pipe(Effect.provide(test.layer));
+    }),
+  );
+  it.effect("relaunches a running worker whose executor stops answering", () =>
+    Effect.gen(function* () {
+      const test = yield* harness;
+      test.respond((input) => (isAttach(input) ? attachedWorker : undefined));
+      test.executorOpens(false);
       yield* Effect.gen(function* () {
         const host = yield* CodespacesHost.CodespacesHost;
         const pending = yield* host.connect(space, "example", configuration).pipe(Effect.forkChild);
@@ -484,6 +540,30 @@ describe("Codespaces shared SSH connection", () => {
         expect(test.forwards()).toBe(1);
         yield* host.disconnect(space.name);
         expect(test.forwards()).toBe(0);
+      }).pipe(Effect.provide(test.layer));
+    }),
+  );
+  it.effect("retries connection sharing after a failed attempt", () =>
+    Effect.gen(function* () {
+      const test = yield* harness;
+      let configAvailable = false;
+      test.respond((input) =>
+        input.args.includes("--config")
+          ? configAvailable
+            ? "Host cs.test-space.main\n\tUser node\n"
+            : ""
+          : input.args.includes("-O")
+            ? ""
+            : undefined,
+      );
+      yield* Effect.gen(function* () {
+        const host = yield* CodespacesHost.CodespacesHost;
+        const first = yield* host.connect(space, "example", configuration);
+        expect(test.spawned.map((entry) => entry.command)).toEqual(["gh"]);
+        configAvailable = true;
+        yield* host.connect(space, "example", configuration, first);
+        expect(test.spawned.map((entry) => entry.command)).toEqual(["gh", "ssh"]);
+        expect(test.forwards()).toBe(1);
       }).pipe(Effect.provide(test.layer));
     }),
   );

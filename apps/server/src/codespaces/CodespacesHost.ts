@@ -21,6 +21,7 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as Socket from "effect/socket/Socket";
 import * as Schedule from "effect/Schedule";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Crypto from "effect/Crypto";
@@ -206,6 +207,19 @@ const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const client = yield* HttpClient.HttpClient;
   const crypto = yield* Crypto.Crypto;
+  const webSocket = yield* Socket.WebSocketConstructor;
+  // A live PID can hide a stalled exec-server, so a reattached executor must finish a handshake.
+  const executorReady = (port: number, token: string) =>
+    Socket.makeWebSocket(`ws://127.0.0.1:${port}`, {
+      openTimeout: "5 seconds",
+      headers: { authorization: `Bearer ${token}` },
+    }).pipe(
+      Effect.flatMap((socket) => socket.reader),
+      Effect.scoped,
+      Effect.provideService(Socket.WebSocketConstructor, webSocket),
+      Effect.as(true),
+      Effect.orElseSucceed(() => false),
+    );
   const workspaces = yield* CodespacesWorkspace.CodespacesWorkspace;
   const lifetime = yield* Effect.scope;
   const exits = yield* SubscriptionRef.make({ name: "", generation: 0 });
@@ -320,7 +334,6 @@ const make = Effect.gen(function* () {
       ),
   });
   const sshConfigs = new Map<string, { readonly file: string; readonly host: string }>();
-  const muxUnavailable = new Set<string>();
   let muxDirectory: string | undefined;
   let muxFiles = 0;
   // One GitHub tunnel per connection: an OpenSSH control master behind `gh cs ssh --stdio`
@@ -433,9 +446,7 @@ const make = Effect.gen(function* () {
   });
   const openTransport = (name: string, scope: Scope.Scope) => {
     // Windows OpenSSH has no control master support.
-    if (platform === "win32" || muxUnavailable.has(name))
-      return Effect.succeed(legacyTransport(name, scope));
-    const cached = sshConfigs.has(name);
+    if (platform === "win32") return Effect.succeed(legacyTransport(name, scope));
     return Effect.gen(function* () {
       const muxScope = yield* Scope.fork(scope);
       return yield* muxTransport(name, muxScope).pipe(
@@ -444,9 +455,8 @@ const make = Effect.gen(function* () {
     }).pipe(
       Effect.catch(() =>
         Effect.sync(() => {
-          // A cached configuration may be stale after a rebuild; fetch it again next time.
+          // Retry sharing on the next connect; a cached configuration may be stale after a rebuild.
           sshConfigs.delete(name);
-          if (!cached) muxUnavailable.add(name);
           return legacyTransport(name, scope);
         }),
       ),
@@ -548,6 +558,10 @@ const make = Effect.gen(function* () {
       if (!healthy) {
         if (Option.isNone(attached))
           return yield* bootstrapError("Codespace worker is unreachable. Reconnect this project.");
+        yield* disconnect(space.name);
+        return undefined;
+      }
+      if (Option.isSome(attached) && !(yield* executorReady(execPort, token))) {
         yield* disconnect(space.name);
         return undefined;
       }
