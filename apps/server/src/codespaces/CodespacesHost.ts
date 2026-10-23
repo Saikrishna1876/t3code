@@ -9,15 +9,19 @@ import {
   type CodespacesPairResult,
 } from "@t3tools/contracts";
 import * as Net from "@t3tools/shared/Net";
+import * as Hex from "effect/encoding/Hex";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as Socket from "effect/socket/Socket";
 import * as Schedule from "effect/Schedule";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Crypto from "effect/Crypto";
@@ -55,105 +59,60 @@ export class CodespacesHost extends Context.Service<
   }
 >()("t3/codespaces/CodespacesHost") {}
 
-const launchResult = Schema.fromJsonString(
-  Schema.Struct({ workerPort: Schema.Int, execPort: Schema.Int, workspacePath: Schema.String }),
+const launchResult = Schema.Struct({
+  workerPort: Schema.Int,
+  execPort: Schema.Int,
+  workspacePath: Schema.String,
+});
+const decodeLaunch = Schema.decodeEffect(Schema.fromJsonString(launchResult));
+const decodeAttach = Schema.decodeEffect(
+  Schema.fromJsonString(Schema.Struct({ launch: launchResult, token: Schema.String })),
 );
-const make = Effect.gen(function* () {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const getWorkerSource = workspaceWorkerSource.pipe(
-    Effect.provideService(FileSystem.FileSystem, fs),
-    Effect.provideService(Path.Path, path),
-  );
-  const credentials = yield* GitHubCredentials.GitHubCredentials;
-  const processRunner = yield* VcsProcess.VcsProcess;
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const net = yield* Net.NetService;
-  const config = yield* ServerConfig.ServerConfig;
-  const client = yield* HttpClient.HttpClient;
-  const crypto = yield* Crypto.Crypto;
-  const workspaces = yield* CodespacesWorkspace.CodespacesWorkspace;
-  const lifetime = yield* Effect.scope;
-  const exits = yield* SubscriptionRef.make({ name: "", generation: 0 });
-  const forwards = new Map<
-    string,
-    { scope: Scope.Closeable; process: ChildProcessSpawner.ChildProcessHandle }
-  >();
-  const ghEnvironment = Effect.gen(function* () {
-    const pinned = yield* GitHubRequestPolicy.PinnedGitHubCredential;
-    const token = pinned?.token ?? (yield* credentials.get("github.com")).token;
-    return {
-      GH_TOKEN: Redacted.value(token),
-      GH_HOST: "github.com",
-      GH_DEBUG: "",
-      GH_PROMPT_DISABLED: "1",
-    };
-  }).pipe(
-    Effect.mapError(
-      () =>
-        new CodespacesError({
-          code: "authentication",
-          message: "Sign in to GitHub on this machine with the codespace scope.",
-        }),
-    ),
-  );
-  const ssh = Effect.fn("CodespacesHost.ssh")(function* (
-    name: string,
+interface Forward {
+  readonly local: number;
+  readonly remote: number;
+}
+interface Transport {
+  /** Runs a remote shell script and returns the last line it printed. */
+  readonly exec: (
     script: string,
-    args: ReadonlyArray<string> = [],
-  ) {
-    const output = yield* processRunner
-      .run({
-        operation: "Codespaces.ssh",
-        command: "gh",
-        args: [
-          "codespace",
-          "ssh",
-          "--codespace",
-          name,
-          "--",
-          "-T",
-          "sh",
-          "-l",
-          "-s",
-          "--",
-          ...args,
-        ],
-        cwd: config.cwd,
-        stdin: script,
-        env: yield* ghEnvironment,
-        timeoutMs: 900_000,
-        maxOutputBytes: 100_000,
-      })
-      .pipe(
-        Effect.mapError(
-          () =>
-            new CodespacesError({
-              code: "bootstrap",
-              message:
-                "Codespace worker setup failed. Check its GitHub creation log and SSH server, then reconnect.",
-            }),
-        ),
-      );
-    return output.stdout.trim().split(/\r?\n/).at(-1) ?? "";
-  });
-  const disconnect = Effect.fn("CodespacesHost.disconnect")(function* (name: string) {
-    yield* workspaces.disconnect(name);
-    const entry = forwards.get(name);
-    if (!entry) return;
-    forwards.delete(name);
-    yield* Scope.close(entry.scope, Exit.void);
-  });
-  const connect: CodespacesHost["Service"]["connect"] = Effect.fn("CodespacesHost.connect")(
-    function* (space, account) {
-      const token =
-        (yield* crypto.randomUUIDv4().pipe(Effect.orDie)) +
-        (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
-      const worker = yield* getWorkerSource;
-      const script = `set -eu
+    args: ReadonlyArray<string>,
+  ) => Effect.Effect<string, CodespacesError>;
+  /** Opens the worker forwards and returns the process whose exit ends the connection. */
+  readonly open: (
+    forwards: ReadonlyArray<Forward>,
+  ) => Effect.Effect<ChildProcessSpawner.ChildProcessHandle, CodespacesError>;
+  /** Adds a preview forward within the scope and returns the process that carries it. */
+  readonly forward: (
+    forward: Forward,
+    scope: Scope.Scope,
+  ) => Effect.Effect<ChildProcessSpawner.ChildProcessHandle, CodespacesError>;
+}
+const bootstrapError = (message: string) => new CodespacesError({ code: "bootstrap", message });
+const setupFailed =
+  "Codespace worker setup failed. Check its GitHub creation log and SSH server, then reconnect.";
+const keepAlive = ["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"];
+const forwardArgs = (forwards: ReadonlyArray<Forward>) =>
+  forwards.flatMap(({ local, remote }) => ["-L", `127.0.0.1:${local}:127.0.0.1:${remote}`]);
+const lastLine = (output: string) => output.trim().split(/\r?\n/).at(-1) ?? "";
+// Prints the running worker's launch details only when this exact launcher started both processes.
+const attachScript = `set -u
+state="/workspaces/.t3-executors/$1"
+stale() { echo stale; exit 0; }
+[ "$(cat "$state/fingerprint" 2>/dev/null)" = "$2" ] || stale
+[ -s "$state/launch.json" ] && [ -s "$state/token" ] || stale
+for service in worker executor; do
+  pid=$(cat "$state/$service.pid" 2>/dev/null) || stale
+  case "$pid" in ''|*[!0-9]*) stale ;; esac
+  [ -r "/proc/$pid/cmdline" ] && tr '\\0' ' ' < "/proc/$pid/cmdline" | grep -F "$state/" >/dev/null || stale
+done
+printf '{"launch":%s,"token":"%s"}\\n' "$(cat "$state/launch.json")" "$(cat "$state/token")"
+`;
+const launcherScript = (token: string, worker: string) => `set -eu
 state="/workspaces/.t3-executors/$1"
 mkdir -p "$state"
 chmod 700 "$state"
+rm -f "$state/fingerprint" "$state/launch.json"
 workspace="\${CODESPACE_VSCODE_FOLDER:-}"
 if [ ! -d "$workspace/.git" ] && [ ! -f "$workspace/.git" ]; then
   workspace=""
@@ -219,7 +178,7 @@ printf '%s' "$!" > "$state/executor.pid"
 rm -f "$state/worker.log"
 nohup node "$state/worker.mjs" "$workspace" "$state/token" > "$state/worker.log" 2>&1 < /dev/null &
 printf '%s' "$!" > "$state/worker.pid"
-node - "$state/worker.log" "$exec_port" "$workspace" <<'NODE'
+launch=$(node - "$state/worker.log" "$exec_port" "$workspace" <<'NODE'
 const fs=require('fs'); const [log,execPort,workspacePath]=process.argv.slice(2);
 const deadline=Date.now()+30000;
 const timer=setInterval(()=>{
@@ -227,84 +186,345 @@ const timer=setInterval(()=>{
  catch { if(Date.now()>deadline){clearInterval(timer);process.exit(1)} }
 },100);
 NODE
+)
+printf '%s' "$launch" > "$state/launch.json"
+printf '%s' "$3" > "$state/fingerprint"
+printf '%s\n' "$launch"
 `;
-      // Relaunch can stop the remote processes even when SSH never returns their replacements.
-      yield* disconnect(space.name);
-      const result = yield* Schema.decodeEffect(launchResult)(
-        yield* ssh(space.name, script, [`${account}-${space.id}`, space.repository]),
+
+const make = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const getWorkerSource = workspaceWorkerSource.pipe(
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+  );
+  const credentials = yield* GitHubCredentials.GitHubCredentials;
+  const processRunner = yield* VcsProcess.VcsProcess;
+  const platform = yield* HostProcess.Platform;
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const net = yield* Net.NetService;
+  const config = yield* ServerConfig.ServerConfig;
+  const client = yield* HttpClient.HttpClient;
+  const crypto = yield* Crypto.Crypto;
+  const webSocket = yield* Socket.WebSocketConstructor;
+  // A live PID can hide a stalled exec-server, so a reattached executor must finish a handshake.
+  const executorReady = (port: number, token: string) =>
+    Socket.makeWebSocket(`ws://127.0.0.1:${port}`, {
+      openTimeout: "5 seconds",
+      headers: { authorization: `Bearer ${token}` },
+    }).pipe(
+      Effect.flatMap((socket) => socket.reader),
+      Effect.scoped,
+      Effect.provideService(Socket.WebSocketConstructor, webSocket),
+      Effect.as(true),
+      Effect.orElseSucceed(() => false),
+    );
+  const workspaces = yield* CodespacesWorkspace.CodespacesWorkspace;
+  const lifetime = yield* Effect.scope;
+  const exits = yield* SubscriptionRef.make({ name: "", generation: 0 });
+  const forwards = new Map<
+    string,
+    { scope: Scope.Closeable; process: ChildProcessSpawner.ChildProcessHandle }
+  >();
+  const ghEnvironment = Effect.gen(function* () {
+    const pinned = yield* GitHubRequestPolicy.PinnedGitHubCredential;
+    const token = pinned?.token ?? (yield* credentials.get("github.com")).token;
+    return {
+      GH_TOKEN: Redacted.value(token),
+      GH_HOST: "github.com",
+      GH_DEBUG: "",
+      GH_PROMPT_DISABLED: "1",
+    };
+  }).pipe(
+    Effect.mapError(
+      () =>
+        new CodespacesError({
+          code: "authentication",
+          message: "Sign in to GitHub on this machine with the codespace scope.",
+        }),
+    ),
+  );
+  const run = Effect.fn("CodespacesHost.run")(function* (
+    operation: string,
+    command: string,
+    args: ReadonlyArray<string>,
+    stdin?: string,
+  ) {
+    return yield* processRunner.run({
+      operation,
+      command,
+      args,
+      cwd: config.cwd,
+      ...(stdin === undefined ? {} : { stdin }),
+      env: yield* ghEnvironment,
+      timeoutMs: 900_000,
+      maxOutputBytes: 100_000,
+    });
+  });
+  const spawnSsh = Effect.fn("CodespacesHost.spawnSsh")(function* (
+    command: string,
+    args: ReadonlyArray<string>,
+    scope: Scope.Scope,
+    message: string,
+  ) {
+    const child = yield* spawner
+      .spawn(
+        ChildProcess.make(command, args, {
+          env: yield* ghEnvironment,
+          extendEnv: true,
+          stdin: { stream: Stream.empty, endOnDone: true },
+        }),
+      )
+      .pipe(
+        Effect.provideService(Scope.Scope, scope),
+        Effect.mapError(() => bootstrapError(message)),
+      );
+    yield* Stream.runDrain(child.stdout).pipe(Effect.ignore, Effect.forkIn(scope));
+    yield* Stream.runDrain(child.stderr).pipe(Effect.ignore, Effect.forkIn(scope));
+    return child;
+  });
+  const ghSsh = (name: string, args: ReadonlyArray<string>) => [
+    "codespace",
+    "ssh",
+    "--codespace",
+    name,
+    "--",
+    ...args,
+  ];
+  // Every channel builds its own GitHub tunnel.
+  const legacyTransport = (name: string, scope: Scope.Scope): Transport => ({
+    exec: (script, args) =>
+      run(
+        "Codespaces.ssh",
+        "gh",
+        ghSsh(name, ["-T", "sh", "-l", "-s", "--", ...args]),
+        script,
       ).pipe(
-        Effect.mapError(
-          () =>
-            new CodespacesError({
-              code: "bootstrap",
-              message:
-                "Codespace worker did not report ready. Check its worker log, then reconnect.",
-            }),
-        ),
+        Effect.map((output) => lastLine(output.stdout)),
+        Effect.mapError(() => bootstrapError(setupFailed)),
+      ),
+    open: (forwards) =>
+      spawnSsh(
+        "gh",
+        ghSsh(name, [
+          "-N",
+          "-T",
+          "-o",
+          "ExitOnForwardFailure=yes",
+          ...keepAlive,
+          ...forwardArgs(forwards),
+        ]),
+        scope,
+        "Could not open the Codespace SSH connection.",
+      ),
+    forward: (forward, previewScope) =>
+      spawnSsh(
+        "gh",
+        ghSsh(name, [
+          "-N",
+          "-T",
+          "-o",
+          "ExitOnForwardFailure=yes",
+          ...keepAlive,
+          ...forwardArgs([forward]),
+        ]),
+        previewScope,
+        "Could not forward Codespace preview.",
+      ),
+  });
+  const sshConfigs = new Map<string, { readonly file: string; readonly host: string }>();
+  let muxDirectory: string | undefined;
+  let muxFiles = 0;
+  // One GitHub tunnel per connection: an OpenSSH control master behind `gh cs ssh --stdio`
+  // carries setup, worker forwards and preview forwards.
+  const muxTransport = Effect.fn("CodespacesHost.muxTransport")(function* (
+    name: string,
+    scope: Scope.Scope,
+  ) {
+    // Short fixed root: macOS limits control socket paths to 104 bytes.
+    if (!muxDirectory)
+      muxDirectory = yield* fs
+        .makeTempDirectoryScoped({ directory: "/tmp", prefix: "t3cs-" })
+        .pipe(Effect.provideService(Scope.Scope, lifetime));
+    const directory = muxDirectory;
+    let sshConfig = sshConfigs.get(name);
+    if (!sshConfig) {
+      const output = yield* run("Codespaces.sshConfig", "gh", [
+        "codespace",
+        "ssh",
+        "--config",
+        "--codespace",
+        name,
+      ]);
+      const host = /^Host\s+(\S+)/m.exec(output.stdout)?.[1];
+      if (!host)
+        return yield* bootstrapError("GitHub returned no SSH configuration for this Codespace.");
+      const file = path.join(directory, `${++muxFiles}.config`);
+      yield* fs.writeFileString(file, output.stdout, { mode: 0o600 });
+      sshConfig = { file, host };
+      sshConfigs.set(name, sshConfig);
+    }
+    const { host } = sshConfig;
+    const base = [
+      "-F",
+      sshConfig.file,
+      "-o",
+      `ControlPath=${path.join(directory, `${++muxFiles}.sock`)}`,
+    ];
+    const master = yield* spawnSsh(
+      "ssh",
+      [
+        ...base,
+        "-o",
+        "ControlMaster=yes",
+        "-o",
+        "ControlPersist=no",
+        "-N",
+        "-T",
+        ...keepAlive,
+        host,
+      ],
+      scope,
+      "Could not open the Codespace SSH connection.",
+    );
+    yield* master.isRunning.pipe(
+      Effect.orElseSucceed(() => false),
+      Effect.flatMap((running) =>
+        running
+          ? run("Codespaces.sshCheck", "ssh", [...base, "-O", "check", host]).pipe(
+              Effect.mapError(() => "pending" as const),
+            )
+          : Effect.fail("closed" as const),
+      ),
+      Effect.retry({
+        schedule: Schedule.spaced("200 millis"),
+        while: (reason) => reason === "pending",
+      }),
+      Effect.timeout("1 minute"),
+      Effect.mapError(() => bootstrapError("Could not open the Codespace SSH connection.")),
+    );
+    const addForwards = (forwards: ReadonlyArray<Forward>, message: string) =>
+      run("Codespaces.sshForward", "ssh", [
+        ...base,
+        "-O",
+        "forward",
+        ...forwardArgs(forwards),
+        host,
+      ]).pipe(
+        Effect.as(master),
+        Effect.mapError(() => bootstrapError(message)),
       );
-      const localPort = yield* net.reserveLoopbackPort().pipe(
-        Effect.mapError(
-          () =>
-            new CodespacesError({
-              code: "bootstrap",
-              message: "Could not reserve a workspace forwarding port.",
-            }),
+    return {
+      exec: (script, args) =>
+        run(
+          "Codespaces.ssh",
+          "ssh",
+          [...base, "-o", "ControlMaster=no", "-T", host, "sh", "-l", "-s", "--", ...args],
+          script,
+        ).pipe(
+          Effect.map((output) => lastLine(output.stdout)),
+          Effect.mapError(() => bootstrapError(setupFailed)),
         ),
-      );
-      const execPort = yield* net.reserveLoopbackPort().pipe(
-        Effect.mapError(
-          () =>
-            new CodespacesError({
-              code: "bootstrap",
-              message: "Could not reserve an executor forwarding port.",
-            }),
-        ),
-      );
-      const scope = yield* Scope.make();
-      const child = yield* spawner
-        .spawn(
-          ChildProcess.make(
-            "gh",
-            [
-              "codespace",
-              "ssh",
-              "--codespace",
-              space.name,
-              "--",
-              "-N",
-              "-T",
-              "-o",
-              "ExitOnForwardFailure=yes",
-              "-o",
-              "ServerAliveInterval=15",
-              "-o",
-              "ServerAliveCountMax=3",
-              "-L",
-              `127.0.0.1:${localPort}:127.0.0.1:${result.workerPort}`,
-              "-L",
-              `127.0.0.1:${execPort}:127.0.0.1:${result.execPort}`,
-            ],
-            {
-              env: yield* ghEnvironment,
-              extendEnv: true,
-              stdin: { stream: Stream.empty, endOnDone: true },
-            },
+      open: (forwards) => addForwards(forwards, "Could not open the Codespace SSH connection."),
+      forward: (forward, previewScope) =>
+        addForwards([forward], "Could not forward Codespace preview.").pipe(
+          Effect.tap(() =>
+            Scope.addFinalizer(
+              previewScope,
+              run("Codespaces.sshCancel", "ssh", [
+                ...base,
+                "-O",
+                "cancel",
+                ...forwardArgs([forward]),
+                host,
+              ]).pipe(Effect.ignore),
+            ),
           ),
-        )
+        ),
+    } satisfies Transport;
+  });
+  const openTransport = (name: string, scope: Scope.Scope) => {
+    // Windows OpenSSH has no control master support.
+    if (platform === "win32") return Effect.succeed(legacyTransport(name, scope));
+    return Effect.gen(function* () {
+      const muxScope = yield* Scope.fork(scope);
+      return yield* muxTransport(name, muxScope).pipe(
+        Effect.onError(() => Scope.close(muxScope, Exit.void)),
+      );
+    }).pipe(
+      Effect.catch(() =>
+        Effect.sync(() => {
+          // Retry sharing on the next connect; a cached configuration may be stale after a rebuild.
+          sshConfigs.delete(name);
+          return legacyTransport(name, scope);
+        }),
+      ),
+    );
+  };
+  const disconnect = Effect.fn("CodespacesHost.disconnect")(function* (name: string) {
+    yield* workspaces.disconnect(name);
+    const entry = forwards.get(name);
+    if (!entry) return;
+    forwards.delete(name);
+    yield* Scope.close(entry.scope, Exit.void);
+  });
+  const connectOnce = Effect.fn("CodespacesHost.connectOnce")(function* (
+    space: Codespace,
+    account: string,
+    reuse: boolean,
+  ) {
+    const worker = yield* getWorkerSource;
+    const fingerprint = Hex.encode(
+      yield* crypto
+        .digest("SHA-256", new TextEncoder().encode(launcherScript("", worker)))
+        .pipe(Effect.orDie),
+    );
+    const executorId = `${account}-${space.id}`;
+    // Relaunch can stop the remote processes even when SSH never returns their replacements.
+    yield* disconnect(space.name);
+    const scope = yield* Scope.make();
+    return yield* Effect.gen(function* () {
+      const transport = yield* openTransport(space.name, scope);
+      const attached = reuse
+        ? yield* transport
+            .exec(attachScript, [executorId, fingerprint])
+            .pipe(Effect.flatMap(decodeAttach), Effect.option)
+        : Option.none();
+      const token = Option.isSome(attached)
+        ? attached.value.token
+        : (yield* crypto.randomUUIDv4().pipe(Effect.orDie)) +
+          (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+      const result = Option.isSome(attached)
+        ? attached.value.launch
+        : yield* transport
+            .exec(launcherScript(token, worker), [executorId, space.repository, fingerprint])
+            .pipe(
+              Effect.flatMap((line) =>
+                decodeLaunch(line).pipe(
+                  Effect.mapError(() =>
+                    bootstrapError(
+                      "Codespace worker did not report ready. Check its worker log, then reconnect.",
+                    ),
+                  ),
+                ),
+              ),
+            );
+      const localPort = yield* net
+        .reserveLoopbackPort()
         .pipe(
-          Effect.provideService(Scope.Scope, scope),
-          Effect.mapError(
-            () =>
-              new CodespacesError({
-                code: "bootstrap",
-                message: "Could not open the Codespace SSH connection.",
-              }),
-          ),
-          Effect.onError(() => Scope.close(scope, Exit.void)),
+          Effect.mapError(() => bootstrapError("Could not reserve a workspace forwarding port.")),
         );
+      const execPort = yield* net
+        .reserveLoopbackPort()
+        .pipe(
+          Effect.mapError(() => bootstrapError("Could not reserve an executor forwarding port.")),
+        );
+      const child = yield* transport.open([
+        { local: localPort, remote: result.workerPort },
+        { local: execPort, remote: result.execPort },
+      ]);
       forwards.set(space.name, { scope, process: child });
-      yield* Stream.runDrain(child.stdout).pipe(Effect.ignore, Effect.forkIn(scope));
-      yield* Stream.runDrain(child.stderr).pipe(Effect.ignore, Effect.forkIn(scope));
       yield* Effect.addFinalizer(() => disconnect(space.name)).pipe(
         Effect.provideService(Scope.Scope, lifetime),
       );
@@ -322,7 +542,7 @@ NODE
         Effect.ignore,
         Effect.forkIn(lifetime),
       );
-      yield* client
+      const healthy = yield* client
         .execute(
           HttpClientRequest.get(`http://127.0.0.1:${localPort}/health`).pipe(
             HttpClientRequest.setHeader("authorization", `Bearer ${token}`),
@@ -331,16 +551,20 @@ NODE
         .pipe(
           Effect.flatMap(HttpClientResponse.filterStatusOk),
           Effect.retry({ times: 40, schedule: Schedule.spaced("500 millis") }),
-          Effect.timeout("25 seconds"),
-          Effect.mapError(
-            () =>
-              new CodespacesError({
-                code: "bootstrap",
-                message: "Codespace worker is unreachable. Reconnect this project.",
-              }),
-          ),
-          Effect.onError(() => disconnect(space.name)),
+          Effect.timeout(Option.isSome(attached) ? "5 seconds" : "25 seconds"),
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
         );
+      if (!healthy) {
+        if (Option.isNone(attached))
+          return yield* bootstrapError("Codespace worker is unreachable. Reconnect this project.");
+        yield* disconnect(space.name);
+        return undefined;
+      }
+      if (Option.isSome(attached) && !(yield* executorReady(execPort, token))) {
+        yield* disconnect(space.name);
+        return undefined;
+      }
       const previewPorts = new Map<number, number>();
       const previewLocks = yield* KeyedLock.make<number>();
       const forwardPort = (remotePort: number) =>
@@ -364,51 +588,9 @@ NODE
             });
             yield* Scope.addFinalizer(previewScope, clearPort);
             return yield* Effect.gen(function* () {
-              const preview = yield* spawner
-                .spawn(
-                  ChildProcess.make(
-                    "gh",
-                    [
-                      "codespace",
-                      "ssh",
-                      "--codespace",
-                      space.name,
-                      "--",
-                      "-N",
-                      "-T",
-                      "-o",
-                      "ExitOnForwardFailure=yes",
-                      "-o",
-                      "ServerAliveInterval=15",
-                      "-o",
-                      "ServerAliveCountMax=3",
-                      "-L",
-                      `127.0.0.1:${port}:127.0.0.1:${remotePort}`,
-                    ],
-                    {
-                      env: yield* ghEnvironment,
-                      extendEnv: true,
-                      stdin: { stream: Stream.empty, endOnDone: true },
-                    },
-                  ),
-                )
-                .pipe(
-                  Effect.provideService(Scope.Scope, previewScope),
-                  Effect.mapError(
-                    () =>
-                      new CodespacesError({
-                        code: "bootstrap",
-                        message: "Could not forward Codespace preview.",
-                      }),
-                  ),
-                );
-              yield* Stream.runDrain(preview.stdout).pipe(
-                Effect.ignore,
-                Effect.forkIn(previewScope),
-              );
-              yield* Stream.runDrain(preview.stderr).pipe(
-                Effect.ignore,
-                Effect.forkIn(previewScope),
+              const preview = yield* transport.forward(
+                { local: port, remote: remotePort },
+                previewScope,
               );
               yield* preview.exitCode.pipe(
                 Effect.andThen(clearPort),
@@ -456,34 +638,21 @@ NODE
             }).pipe(Effect.onError(() => Scope.close(previewScope, Exit.void)));
           }),
         );
-      yield* workspaces
-        .register({
-          name: space.name,
-          remoteRoot: result.workspacePath,
-          workerUrl: `http://127.0.0.1:${localPort}`,
-          execServerUrl: `ws://127.0.0.1:${execPort}`,
-          token,
-          forwardPort,
-          isForwardedPort: (port) => [...previewPorts.values()].includes(port),
-        })
-        .pipe(
-          Effect.tap(() =>
-            Effect.gen(function* () {
-              if (
-                forwards.get(space.name)?.process !== child ||
-                !(yield* child.isRunning.pipe(Effect.orElseSucceed(() => false)))
-              )
-                return yield* new CodespacesError({
-                  code: "bootstrap",
-                  message: "Codespace SSH connection closed during workspace registration.",
-                });
-            }),
-          ),
-          Effect.onError(() =>
-            forwards.get(space.name)?.process === child
-              ? disconnect(space.name)
-              : Scope.close(scope, Exit.void),
-          ),
+      yield* workspaces.register({
+        name: space.name,
+        remoteRoot: result.workspacePath,
+        workerUrl: `http://127.0.0.1:${localPort}`,
+        execServerUrl: `ws://127.0.0.1:${execPort}`,
+        token,
+        forwardPort,
+        isForwardedPort: (port) => [...previewPorts.values()].includes(port),
+      });
+      if (
+        forwards.get(space.name)?.process !== child ||
+        !(yield* child.isRunning.pipe(Effect.orElseSucceed(() => false)))
+      )
+        return yield* bootstrapError(
+          "Codespace SSH connection closed during workspace registration.",
         );
       return {
         name: space.name,
@@ -494,7 +663,23 @@ NODE
         remotePort: result.workerPort,
         workspacePath: result.workspacePath,
         connected: true,
-      };
+      } satisfies CodespacesManagedEnvironment;
+    }).pipe(
+      Effect.onError(() =>
+        forwards.get(space.name)?.scope === scope
+          ? disconnect(space.name)
+          : Scope.close(scope, Exit.void),
+      ),
+    );
+  });
+  // Reattach to a healthy worker first; relaunch it when it is missing, outdated or unresponsive.
+  const connect: CodespacesHost["Service"]["connect"] = Effect.fn("CodespacesHost.connect")(
+    function* (space, account) {
+      const attached = yield* connectOnce(space, account, true);
+      if (attached) return attached;
+      const launched = yield* connectOnce(space, account, false);
+      if (launched) return launched;
+      return yield* bootstrapError("Codespace worker is unreachable. Reconnect this project.");
     },
   );
   return CodespacesHost.of({
