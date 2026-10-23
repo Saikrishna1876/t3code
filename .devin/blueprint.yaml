@@ -1,0 +1,64 @@
+initialize:
+  - name: Install Linux native build dependencies
+    run: |
+      sudo apt-get update
+      sudo apt-get install -y build-essential python3 pkg-config libsecret-1-dev
+
+  - name: Install Rust
+    uses: github.com/dtolnay/rust-toolchain@stable
+    with:
+      components: rustfmt
+
+  - name: Install Vite+
+    run: |
+      export VP_HOME="$HOME/.vite-plus"
+      installer=$(mktemp)
+      curl -fsSL https://vite.plus -o "$installer"
+      VP_VERSION="$(awk '$1 == "vite-plus:" { print $2; exit }' pnpm-workspace.yaml)" \
+        VP_NODE_MANAGER=yes bash "$installer"
+      rm -f "$installer"
+
+maintenance:
+  - name: Install workspace dependencies
+    run: |
+      # Differential builds reset ENVRC and skip initialize.
+      export VP_HOME="$HOME/.vite-plus"
+      export PATH="$VP_HOME/bin:$HOME/.cargo/bin:$PATH"
+      printf '%s\n' 'export VP_HOME="$HOME/.vite-plus"' \
+        'export PATH="$VP_HOME/bin:$HOME/.cargo/bin:$PATH"' >> "$ENVRC"
+      vp env install
+      vp i --frozen-lockfile -- --yes
+      vp run --filter @t3tools/desktop ensure:electron
+
+knowledge:
+  - name: development
+    contents: |
+      Read AGENTS.md before changing code.
+      Start server and web with vp run dev --home-dir "$PWD/.t3".
+      Use the pairing URL printed by the dev runner.
+      Leave VITE_HTTP_URL and VITE_WS_URL unset for remote connections.
+      Never run a server against ~/.t3/userdata.
+      Native mobile setup is in apps/mobile/README.md.
+
+  - name: lint
+    contents: |
+      Run scoped checks from the repository root:
+      vp lint path/to/changed-file.ts
+      vp fmt --check path/to/changed-file.ts
+
+  - name: test
+    contents: |
+      Run focused tests from the repository root:
+      vp test run path/to/changed-file.test.ts
+      Run a changed workspace's typecheck:
+      vp run --filter @t3tools/web typecheck
+      Use the affected package's name from its package.json.
+      Do not run repo-wide checks unless explicitly requested.
+      Ask permission before browser or device verification.
+
+  - name: build
+    contents: |
+      Web: vp run --filter @t3tools/web build
+      Server bundle: vp run --filter t3 build:bundle
+      Desktop and server: vp run build:desktop
+      Resource monitor: vp run build:resource-monitor
