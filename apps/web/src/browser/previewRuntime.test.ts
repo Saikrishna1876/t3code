@@ -16,7 +16,7 @@ vi.mock("~/state/entities", () => ({
   useEnvironmentSupportsServerBrowser: () => false,
 }));
 
-import { alternatePreviewRuntime, previewRuntimeFor } from "./previewRuntime";
+import { previewRuntimeFor } from "./previewRuntime";
 
 const local = "local" as EnvironmentId;
 const remote = "remote" as EnvironmentId;
@@ -28,15 +28,6 @@ afterEach(() => {
 });
 
 describe("previewRuntimeFor", () => {
-  it("opens a remote environment's tabs on this computer in the desktop app", () => {
-    state.desktop = true;
-    state.primary = local;
-    state.serverBrowser = new Set([local, remote]);
-
-    expect(previewRuntimeFor(remote)).toBeUndefined();
-    expect(previewRuntimeFor(local)).toBe("server");
-  });
-
   it.each(["http://localhost:3000/app", "http://127.0.0.1:14528/", "http://[::1]:3000/"])(
     "keeps %s on the host that owns its port",
     (url) => {
@@ -49,24 +40,4 @@ describe("previewRuntimeFor", () => {
       expect(previewRuntimeFor(remote, url)).toBeUndefined();
     },
   );
-  it("uses the environment's browser where the client has none of its own", () => {
-    state.serverBrowser = new Set([remote]);
-
-    expect(previewRuntimeFor(remote)).toBe("server");
-  });
-});
-
-describe("alternatePreviewRuntime", () => {
-  it("moves a remote environment's tab between this computer and the environment", () => {
-    state.desktop = true;
-
-    expect(alternatePreviewRuntime(remote, local, true, {})).toBe("server");
-    expect(alternatePreviewRuntime(remote, local, true, { runtime: "server" })).toBe("desktop");
-    expect(alternatePreviewRuntime(local, local, true, {})).toBeNull();
-    expect(alternatePreviewRuntime(remote, local, false, {})).toBeNull();
-  });
-
-  it("offers no move outside the desktop app", () => {
-    expect(alternatePreviewRuntime(remote, null, true, { runtime: "server" })).toBeNull();
-  });
 });

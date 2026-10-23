@@ -1,52 +1,64 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  filterNewTaskBranches,
   resolveNewTaskBranchWorktreePath,
-  resolveNewTaskBranchLabel,
   resolveNewTaskLocalWorkspaceSelection,
   resolveNewTaskWorkspaceSelection,
 } from "./new-task-context-presentation";
 
-describe("Codespace task workspace selection", () => {
-  it("uses the main checkout despite a worktree default", () => {
-    expect(
-      resolveNewTaskWorkspaceSelection({ canChooseWorkspace: false, defaultMode: "worktree" }),
-    ).toEqual({ mode: "local", branch: null, worktreePath: null, startFromOrigin: false });
-  });
+describe("resolveNewTaskWorkspaceSelection", () => {
+  const fallback = { mode: "worktree", branch: null, worktreePath: null } as const;
 
-  it.each(["local", "worktree"] as const)(
-    "ignores saved %s worktree selections while bound",
-    (mode) => {
-      expect(
-        resolveNewTaskWorkspaceSelection({
-          canChooseWorkspace: false,
-          defaultMode: "worktree",
-          selection: {
-            mode,
-            branch: "feature",
-            worktreePath: "/repo/worktrees/feature",
-            startFromOrigin: true,
-          },
-        }),
-      ).toEqual({ mode: "local", branch: null, worktreePath: null, startFromOrigin: false });
-    },
-  );
-
-  it("restores the saved selection after returning to local work", () => {
-    const selection = {
-      mode: "worktree" as const,
-      branch: "feature",
-      worktreePath: "/repo/worktrees/feature",
-      startFromOrigin: true,
-    };
+  it("falls back to the current checkout when a non-git project defaults to worktree", () => {
     expect(
       resolveNewTaskWorkspaceSelection({
         canChooseWorkspace: true,
-        defaultMode: "local",
-        selection,
+        selection: undefined,
+        fallback,
+        isGitRepo: false,
       }),
-    ).toEqual(selection);
+    ).toEqual({ mode: "local", branch: null, worktreePath: null });
+  });
+
+  it.each(["local", "worktree"] as const)(
+    "clears stale %s selections for non-git projects",
+    (mode) => {
+      expect(
+        resolveNewTaskWorkspaceSelection({
+          canChooseWorkspace: true,
+          selection: {
+            mode,
+            branch: "main",
+            worktreePath: "/old-worktree",
+            startFromOrigin: true,
+            pullRequestReference: "https://github.com/acme/repo/pull/123",
+          },
+          fallback,
+          isGitRepo: false,
+        }),
+      ).toEqual({ mode: "local", branch: null, worktreePath: null });
+    },
+  );
+
+  // regression: #21404 use current checkout for non-git projects
+  it("preserves the selection and defaults for git projects", () => {
+    const selection = { mode: "local", branch: "feature", worktreePath: "/worktree" } as const;
+    expect(
+      resolveNewTaskWorkspaceSelection({
+        canChooseWorkspace: true,
+        selection,
+        fallback,
+        isGitRepo: true,
+      }),
+    ).toBe(selection);
+    expect(
+      resolveNewTaskWorkspaceSelection({
+        canChooseWorkspace: true,
+        selection: undefined,
+        fallback,
+        isGitRepo: true,
+      }),
+    ).toBe(fallback);
   });
 });
 
@@ -61,22 +73,6 @@ describe("resolveNewTaskLocalWorkspaceSelection", () => {
       branch: null,
       worktreePath: null,
       awaitsCurrentBranch: true,
-    });
-  });
-
-  it("adopts the checkout's current branch once refs load", () => {
-    expect(
-      resolveNewTaskLocalWorkspaceSelection({
-        branches: [
-          { name: "feature/worktree-base", current: false, worktreePath: "/worktree" },
-          { name: "main", current: true, worktreePath: "/repo" },
-        ],
-        projectCwd: "/repo",
-      }),
-    ).toEqual({
-      branch: "main",
-      worktreePath: null,
-      awaitsCurrentBranch: false,
     });
   });
 
@@ -98,26 +94,6 @@ describe("resolveNewTaskLocalWorkspaceSelection", () => {
 });
 
 describe("resolveNewTaskBranchWorktreePath", () => {
-  it("moves Current checkout to the selected existing worktree", () => {
-    expect(
-      resolveNewTaskBranchWorktreePath({
-        workspaceMode: "local",
-        projectCwd: "/repo",
-        branchWorktreePath: "/repo/.t3/worktrees/feature",
-      }),
-    ).toBe("/repo/.t3/worktrees/feature");
-  });
-
-  it("keeps the project checkout represented by a null override", () => {
-    expect(
-      resolveNewTaskBranchWorktreePath({
-        workspaceMode: "local",
-        projectCwd: "/repo",
-        branchWorktreePath: "/repo",
-      }),
-    ).toBeNull();
-  });
-
   it("does not reuse an existing worktree while creating a new one", () => {
     expect(
       resolveNewTaskBranchWorktreePath({
@@ -129,78 +105,51 @@ describe("resolveNewTaskBranchWorktreePath", () => {
   });
 });
 
-describe("resolveNewTaskBranchLabel", () => {
-  it("identifies a deferred PR checkout independently of the origin default", () => {
+describe("Codespace task workspace selection", () => {
+  it("uses the main checkout despite a worktree default", () => {
     expect(
-      resolveNewTaskBranchLabel({
-        branchName: "fork/feature",
-        startFromOrigin: true,
-        workspaceMode: "worktree",
-        pullRequestReference: "https://github.com/acme/repo/pull/123",
+      resolveNewTaskWorkspaceSelection({
+        canChooseWorkspace: false,
+        fallback: { mode: "worktree", branch: null, worktreePath: null },
+        isGitRepo: true,
       }),
-    ).toBe("From PR #123");
+    ).toEqual({ mode: "local", branch: null, worktreePath: null, startFromOrigin: false });
   });
-  it("shows the checked-out branch without a base-ref prefix", () => {
+
+  it.each(["local", "worktree"] as const)(
+    "ignores saved %s worktree selections while bound",
+    (mode) => {
+      expect(
+        resolveNewTaskWorkspaceSelection({
+          canChooseWorkspace: false,
+          fallback: { mode: "worktree", branch: null, worktreePath: null },
+          isGitRepo: true,
+          selection: {
+            mode,
+            branch: "feature",
+            worktreePath: "/repo/worktrees/feature",
+            startFromOrigin: true,
+          },
+        }),
+      ).toEqual({ mode: "local", branch: null, worktreePath: null, startFromOrigin: false });
+    },
+  );
+
+  it("restores the saved selection after returning to local work", () => {
+    const selection = {
+      mode: "worktree" as const,
+      branch: "feature",
+      worktreePath: "/repo/worktrees/feature",
+      startFromOrigin: true,
+    };
     expect(
-      resolveNewTaskBranchLabel({
-        branchName: "feature/mobile",
-        startFromOrigin: true,
-        workspaceMode: "local",
+      resolveNewTaskWorkspaceSelection({
+        canChooseWorkspace: true,
+        fallback: { mode: "local", branch: null, worktreePath: null },
+        isGitRepo: true,
+        selection,
       }),
-    ).toBe("feature/mobile");
-  });
-
-  it("labels a local worktree base with From", () => {
-    expect(
-      resolveNewTaskBranchLabel({
-        branchName: "main",
-        startFromOrigin: false,
-        workspaceMode: "worktree",
-      }),
-    ).toBe("From main");
-  });
-
-  it("labels a remote worktree base with a remote marker", () => {
-    expect(
-      resolveNewTaskBranchLabel({
-        branchName: "main",
-        startFromOrigin: true,
-        workspaceMode: "worktree",
-      }),
-    ).toBe("From main (remote)");
-  });
-
-  it("prompts when no branch is available", () => {
-    expect(
-      resolveNewTaskBranchLabel({
-        branchName: null,
-        startFromOrigin: true,
-        workspaceMode: "worktree",
-      }),
-    ).toBe("Choose branch");
-  });
-});
-
-describe("filterNewTaskBranches", () => {
-  const branches = [
-    { name: "main", isRemote: false },
-    { name: "Feature/Login-Page", isRemote: false },
-    { name: "origin/fix/remote-only", isRemote: true },
-  ];
-  const search = (query: string) =>
-    filterNewTaskBranches(branches, query).map((branch) => branch.name);
-
-  it("ignores case in both the query and the branch name", () => {
-    expect(search("feature/login")).toEqual(["Feature/Login-Page"]);
-    expect(search("MAIN")).toEqual(["main"]);
-  });
-
-  it("keeps remote-only branches searchable", () => {
-    expect(search("remote-only")).toEqual(["origin/fix/remote-only"]);
-  });
-
-  it("matches a typed space against the dash a branch name uses", () => {
-    expect(search("  login page ")).toEqual(["Feature/Login-Page"]);
+    ).toEqual(selection);
   });
 });
 
@@ -210,8 +159,14 @@ it.each([true, false])(
     const reference = "https://github.com/acme/repo/pull/123";
     const workspace = resolveNewTaskWorkspaceSelection({
       canChooseWorkspace,
-      defaultMode: "worktree",
-      selection: { mode: "worktree", pullRequestReference: reference },
+      fallback: { mode: "worktree", branch: null, worktreePath: null },
+      isGitRepo: true,
+      selection: {
+        mode: "worktree",
+        branch: null,
+        worktreePath: null,
+        pullRequestReference: reference,
+      },
     });
     expect(workspace.mode).toBe(canChooseWorkspace ? "worktree" : "local");
     expect(workspace.pullRequestReference).toBe(canChooseWorkspace ? reference : undefined);

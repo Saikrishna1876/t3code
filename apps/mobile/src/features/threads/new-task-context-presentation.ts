@@ -1,31 +1,21 @@
 import { sanitizeNewRefName } from "@t3tools/shared/git";
 import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
+import { resolveSendEnvMode } from "@t3tools/shared/projectSettings";
+import type { ComposerDraftWorkspaceSelection } from "../../state/use-composer-drafts";
 
 type WorkspaceMode = "local" | "worktree";
 
-/** Bound Codespaces and projectless tasks always use their main checkout. */
 export function resolveNewTaskWorkspaceSelection(input: {
+  readonly selection?: ComposerDraftWorkspaceSelection;
+  readonly fallback: ComposerDraftWorkspaceSelection;
+  readonly isGitRepo: boolean;
   readonly canChooseWorkspace: boolean;
-  readonly defaultMode: WorkspaceMode;
-  readonly selection?: {
-    readonly mode: WorkspaceMode;
-    readonly branch?: string | null;
-    readonly worktreePath?: string | null;
-    readonly startFromOrigin?: boolean;
-    readonly pullRequestReference?: string;
-  };
-}) {
+}): ComposerDraftWorkspaceSelection {
   if (!input.canChooseWorkspace)
-    return { mode: "local" as const, branch: null, worktreePath: null, startFromOrigin: false };
-  return {
-    mode: input.selection?.mode ?? input.defaultMode,
-    branch: input.selection?.branch ?? null,
-    worktreePath: input.selection?.worktreePath ?? null,
-    startFromOrigin: input.selection?.startFromOrigin,
-    ...(input.selection?.pullRequestReference
-      ? { pullRequestReference: input.selection.pullRequestReference }
-      : {}),
-  };
+    return { mode: "local", branch: null, worktreePath: null, startFromOrigin: false };
+  const selection = input.selection ?? input.fallback;
+  const mode = resolveSendEnvMode({ requestedEnvMode: selection.mode, isGitRepo: input.isGitRepo });
+  return input.isGitRepo ? selection : { mode, branch: null, worktreePath: null };
 }
 
 export function resolveNewTaskWorkspaceLabel(input: {
