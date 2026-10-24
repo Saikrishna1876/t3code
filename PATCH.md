@@ -91,6 +91,14 @@ Keep project Codespaces work available with the user's existing local provider l
 - Verification: from `apps/web`, run `../../node_modules/.bin/vp test run --project browser src/components/files/MarkdownPreview.browser.test.tsx`. Browser execution requires explicit authorization.
 - Retirement: upstream supplies equivalent file preview search and these behavior checks pass.
 
+## P009: Keep the patched PTY in packaged builds
+
+- Status: active. Required for local packaging of stable `v0.1.2`.
+- Required behavior: staged production installs use `node-pty` `1.2.0-beta.15`, the version already resolved and patched in the repository lockfile. Keep the existing Windows console-helper fixes. Do not discard their patch to make packaging pass.
+- Implementation: `apps/server/package.json` pins the exact version instead of a caret range. Packaging installs a fresh dependency graph without the root lockfile; that range now selects `1.2.0-beta.18` and fails with `ERR_PNPM_UNUSED_PATCH` for the version-specific patch. The exact constraint preserves the tested dependency and lets the existing patch apply.
+- Verification: `vp test run apps/server/src/terminal/nodePtyConsoleList.test.ts`, lockfile and staged package inspection, then a local Intel macOS artifact build with publishing disabled. Check Electron remains `43.6.0` and source manifests are restored after packaging.
+- Retirement: upstream supplies reproducible staged dependency resolution or deliberately updates the PTY version and its patch together, with focused terminal and packaging checks passing.
+
 ## Validation policy
 
 Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use requires the authorization described there. Keep runtime state away from the live install. Record manual graphics and clipboard checks as pending when unavailable.
