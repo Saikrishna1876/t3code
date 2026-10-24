@@ -135,11 +135,16 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - No dev server, computer use, live T3 database access, GitHub release, tag, PR or publishing workflow dispatch. Hardware graphics, interactive clipboard, native mobile, packaged runtime acceptance and fork CI remain separate pending checks. The last behaviorally verified baseline is unchanged.
 - Evidence: `/tmp/t3-stable-20261023-*.log`; the scoped server config and conflict inventory are outside the worktree. The commit bypasses the staged formatter hook because it would reformat the entire upstream integration; conflict-resolution files and this specification were formatted directly.
 
-## Local stable release, 2026-10-21
+## Local stable release, 2026-10-24
 
-- The previous stable integration landed at `0283a28b5882dea765030b492c2335d347703fd7`; documentation commit `d7eeaa381` records its local unsigned Intel macOS `0.1.2` build. Publishing was disabled with `--publish never`.
-- Artifacts, blockmaps, update manifest, SHA-256 checksums, metadata and release notes remain in `/Users/saikrishnaambeti/Documents/opensource/t3code/release/20261021`. DMG and ZIP integrity, source commit, Electron `43.6.0`, x64 architecture, fork feed and manifest hashes passed. That local artifact version is independent of the newer upstream tag selected above.
-- Evidence: `/tmp/t3-stable-20261021-*.log` and `/tmp/t3-release-20261021.log`. No GitHub publication or live T3 state changes occurred.
+- Created unsigned Intel macOS fork version `0.1.3` from `cea83fbe9845a45832f70a18ade4777ed8c3b977`, on the integrated stable `v0.1.2` baseline. The app embeds source reference `cea83fbe9845`, which resolves to that exact commit.
+- Packaging initially failed because a fresh staged install resolved the PTY caret range beyond the version-specific upstream patch. P009 pins the already-locked PTY version. The regenerated lockfile retains the same PTY version and patch hash and prunes an unused theme snapshot. No application TypeScript changed. The old global Vite+ parser also required using this checkout's installed Vite+ `1.3.0`.
+- Built locally with Node `24.22.1` and publishing disabled through `--publish never`. DMG, ZIP, both blockmaps, update manifest, SHA-256 checksums, metadata and notes are in `/Users/saikrishnaambeti/Documents/opensource/t3code/release/20261024`.
+- DMG and ZIP integrity, packaged version and source commit, Electron `43.6.0`, x64 Mach-O executable, fork update feed, manifest sizes and SHA-512 hashes, startup assets and the patched PTY payload all passed. Four focused PTY console-helper tests, formatting and whitespace checks passed. Existing compatibility checks from the stable integration remain recorded above. No repo-wide checks or full server typecheck ran.
+- Personal CodeRabbit reviewed the packaging fix with zero findings. Personal Greptile review was attempted but remains unavailable because the billing plan excludes per-use CLI reviews.
+- Temporary release package versions were restored byte-for-byte. Public client configuration came from `.env.example`; the temporary copy was removed. No application, browser, dev server, live T3 state, GitHub release, tag or publishing workflow was used. Unsigned artifacts require manual installation. Hardware graphics, interactive clipboard, native mobile, packaged startup and automatic installation acceptance remain pending.
+- Evidence: `/tmp/t3-release-20261024-*.log`. The original checkout remains at `fc69cb1d3db3ec59ffd38b6a6e36b45a7abbe62d`.
+- Previous local release: unsigned Intel macOS `0.1.2` from `0283a28b5882dea765030b492c2335d347703fd7`, based on upstream stable `v0.1.1`. Its verified artifacts remain in `release/20261021`; they are superseded by this build.
 
 ## Previous update, 2026-10-18
 
