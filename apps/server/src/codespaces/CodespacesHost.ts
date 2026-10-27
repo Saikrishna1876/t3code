@@ -685,7 +685,7 @@ const make = Effect.gen(function* () {
   return CodespacesHost.of({
     connect,
     disconnect,
-    pair: () =>
+    pair: Effect.fn("CodespacesHost.pair")(() =>
       Effect.fail(
         new CodespacesError({
           code: "configuration",
@@ -693,7 +693,8 @@ const make = Effect.gen(function* () {
             "Codespaces now run from a local project. Open that project on this T3 environment; no additional environment pairing is needed.",
         }),
       ),
-    prepareStop: () => Effect.void,
+    ),
+    prepareStop: Effect.fn("CodespacesHost.prepareStop")(() => Effect.void),
     rebuild: Effect.fn("CodespacesHost.rebuild")(function* (name) {
       yield* processRunner
         .run({

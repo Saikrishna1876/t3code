@@ -439,4 +439,18 @@ describe("PreviewView", () => {
     expect(mocks.addPreviewAnnotation).toHaveBeenCalledWith(TEST_THREAD_REF, sent);
     expect(mocks.addImage).not.toHaveBeenCalled();
   });
+
+  it("focuses the address bar each time the focus-url shortcut fires", async () => {
+    setup();
+    await using _screen = await render(view());
+    const address = page.getByRole("textbox");
+
+    act(() => dispatchPreviewAction("focus-url"));
+    await expect.element(address).toHaveFocus();
+
+    (address.element() as HTMLInputElement).blur();
+    await expect.element(address).not.toHaveFocus();
+    act(() => dispatchPreviewAction("focus-url"));
+    await expect.element(address).toHaveFocus();
+  });
 });

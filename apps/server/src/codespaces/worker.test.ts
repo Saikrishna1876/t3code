@@ -8,7 +8,10 @@ import * as NodePath from "node:path";
 import * as CodespacesWorkspace from "./CodespacesWorkspace.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { resolveAttachmentPath } from "../attachmentStore.ts";
-import { resolveCodexWorkspaceAttachments } from "./CodexWorkspaceAttachments.ts";
+import {
+  resolveCodexWorkspaceAttachments,
+  resolveWorkspaceExtractedTextPath,
+} from "./CodexWorkspaceAttachments.ts";
 import { providerMessageTextWithAttachmentPaths } from "@t3tools/provider-core/server/attachmentPrompt";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -751,13 +754,38 @@ describe("Codespace workspace worker", () => {
           expect((yield* Effect.promise(() => NodeFSP.readFile(localPath))).equals(bytes)).toBe(
             true,
           );
-          const prompt = providerMessageTextWithAttachmentPaths({
+          const prompt = yield* providerMessageTextWithAttachmentPaths({
             text: "Read this report",
             attachments: [attachment],
             resolveAttachmentPath: (attachment) => paths.get(attachment.id) ?? null,
           });
           expect(prompt).toContain(remotePath);
           expect(prompt).not.toContain(localPath);
+          yield* Effect.promise(() => NodeFSP.rm(pressure));
+          const document: ChatAttachment = {
+            ...attachment,
+            id: "thread-22222222-2222-4222-8222-222222222222-docx",
+            name: "report.docx",
+            mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          };
+          const documentPath = resolveAttachmentPath({ attachmentsDir, attachment: document })!;
+          yield* Effect.promise(() => NodeFSP.writeFile(documentPath, "document"));
+          yield* Effect.promise(() => NodeFSP.writeFile(documentPath + ".txt", "extracted report"));
+          const documentPaths = yield* resolveCodexWorkspaceAttachments(workspace, {
+            ...input,
+            attachments: [document],
+          });
+          const extractedPath = yield* resolveWorkspaceExtractedTextPath(workspace, {
+            ...input,
+            attachments: [document],
+            attachmentPaths: documentPaths,
+            path: documentPaths.get(document.id)!,
+          }).pipe(Effect.provide(NodeServices.layer));
+          expect(extractedPath).toBeDefined();
+          expect(extractedPath).not.toBe(documentPath + ".txt");
+          expect(yield* Effect.promise(() => NodeFSP.readFile(extractedPath!, "utf8"))).toBe(
+            "extracted report",
+          );
           yield* workspace.disconnect("space");
           expect(
             (yield* resolveCodexWorkspaceAttachments(workspace, input).pipe(Effect.flip)).code,

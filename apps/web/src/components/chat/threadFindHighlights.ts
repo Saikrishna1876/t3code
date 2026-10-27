@@ -1,5 +1,5 @@
 import { findThreadSearchOccurrences } from "@t3tools/shared/threadSearch";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 import { THREAD_FIND_BLOCK_TAGS } from "@t3tools/shared/threadFindText";
 
 const THREAD_FIND_TEXT_SELECTOR = "[data-thread-find-text]";
@@ -127,20 +127,23 @@ export function useThreadFindHighlights(input: {
 
   const rangesRef = useRef<readonly ThreadFindRange[]>([]);
   const paintRef = useRef<ReturnType<typeof makeThreadFindHighlightPainter> | null>(null);
-  const selectionRef = useRef({ activeRowId, activeOccurrence, onActiveRange, onMatchCountChange });
-  useLayoutEffect(() => {
-    selectionRef.current = { activeRowId, activeOccurrence, onActiveRange, onMatchCountChange };
-  }, [activeRowId, activeOccurrence, onActiveRange, onMatchCountChange]);
+  // The observer repaints with whichever match is selected when text changes.
+  const readSelection = useEffectEvent(() => ({
+    activeRowId,
+    activeOccurrence,
+    onActiveRange,
+    onMatchCountChange,
+  }));
 
   useEffect(() => {
     if (typeof CSS === "undefined" || !CSS.highlights || typeof Highlight === "undefined") {
-      selectionRef.current.onActiveRange(null);
+      readSelection().onActiveRange(null);
       return;
     }
     rangesRef.current = [];
     if (!container || query.length === 0) {
-      selectionRef.current.onActiveRange(null);
-      selectionRef.current.onMatchCountChange?.(0);
+      readSelection().onActiveRange(null);
+      readSelection().onMatchCountChange?.(0);
       return;
     }
 
@@ -171,12 +174,12 @@ export function useThreadFindHighlights(input: {
       }
       for (const row of cache.keys()) if (!rows.has(row)) cache.delete(row);
       rangesRef.current = ranges;
-      selectionRef.current.onMatchCountChange?.(ranges.length);
-      paint(ranges, selectionRef.current);
+      readSelection().onMatchCountChange?.(ranges.length);
+      paint(ranges, readSelection());
     };
     let frame: number | null = null;
     const observer = new MutationObserver((mutations) => {
-      // Timers and status chrome tick every second; only searchable text and folds matter.
+      // Ignore timer and status mutations outside searchable text and folds.
       const relevant = mutations.filter(affectsSearchableText);
       if (relevant.length === 0) return;
       for (const mutation of relevant) {
@@ -231,9 +234,15 @@ export function useThreadFindHighlights(input: {
     };
   }, [container, query, highlightPrefix]);
 
+  // onActiveRange is read at paint time: its identity follows the caller's
+  // layout inputs, and repainting the active highlight for those is wasted work.
   useEffect(() => {
-    paintRef.current?.(rangesRef.current, { activeRowId, activeOccurrence, onActiveRange });
-  }, [activeOccurrence, activeRowId, onActiveRange]);
+    paintRef.current?.(rangesRef.current, {
+      activeRowId,
+      activeOccurrence,
+      onActiveRange: readSelection().onActiveRange,
+    });
+  }, [activeOccurrence, activeRowId]);
 }
 
 function makeThreadFindHighlightPainter(

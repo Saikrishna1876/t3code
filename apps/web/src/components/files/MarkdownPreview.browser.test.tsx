@@ -1,5 +1,5 @@
 import { act, render } from "../../../test/render";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import ChatMarkdown from "../ChatMarkdown";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { requestMarkdownFindOpen } from "./markdownFindActionBus";
@@ -168,14 +168,14 @@ describe("Markdown preview find", () => {
         ?.getAttribute("data-markdown-details-open"),
     ).toBe("false");
     await key("Enter", false, input(host));
-    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-    expect(
-      host
-        .querySelector("[data-markdown-details-open]")
-        ?.getAttribute("data-markdown-details-open"),
-    ).toBe("true");
-    expect(highlights()).toEqual(["needle"]);
+    await vi.waitFor(() => {
+      expect(
+        host
+          .querySelector("[data-markdown-details-open]")
+          ?.getAttribute("data-markdown-details-open"),
+      ).toBe("true");
+      expect(highlights()).toEqual(["needle"]);
+    });
     await key("Escape", false, input(host));
     expect(CSS.highlights.get("t3-thread-find")).toBe(threadHighlight);
     CSS.highlights.delete("t3-thread-find");
@@ -199,9 +199,10 @@ describe("Markdown preview find", () => {
     expect(count(host)).toBe("1/2");
     await key("Enter", false, input(host));
     await screen.rerender(view("needle"));
-    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-    expect(count(host)).toBe("1/1");
-    expect(highlights()).toEqual(["needle"]);
+    await vi.waitFor(() => {
+      expect(count(host)).toBe("1/1");
+      expect(highlights()).toEqual(["needle"]);
+    });
     await act(async () => {
       requestMarkdownFindOpen(host.querySelector("button"));
     });

@@ -982,10 +982,12 @@ const make = Effect.gen(function* () {
       })),
     ),
     list: pinned(list),
-    options: (input) => pinned(options(input)),
+    options: Effect.fn("Codespaces.options")((input) => pinned(options(input))),
     configure,
-    run: (input, callerProjectId) => pinned(run(input, callerProjectId)),
-    pair: (input) => pinned(pair(input)),
+    run: Effect.fn("Codespaces.run")((input, callerProjectId) =>
+      pinned(run(input, callerProjectId)),
+    ),
+    pair: Effect.fn("Codespaces.pair")((input) => pinned(pair(input))),
     changes: Stream.zipLatest(SubscriptionRef.changes(state), authorization.changes).pipe(
       Stream.map(([{ requests: _requests, ...snapshot }, authorization]) => ({
         ...snapshot,

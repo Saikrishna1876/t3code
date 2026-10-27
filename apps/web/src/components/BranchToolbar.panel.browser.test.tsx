@@ -343,3 +343,21 @@ it.each([false, true])(
     }
   },
 );
+
+it("shows the main checkout for an unstarted server thread bound to a Codespace", async () => {
+  setup();
+  state.codespacesSupported = true;
+  state.codespaceName = "project-space";
+  await using screen = await render(
+    { envMode: "worktree", envLocked: false },
+    { worktreePath: null },
+  );
+  await expect.element(screen.getByRole("button", { name: "Run context" })).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Run context" }));
+  expect(document.querySelector('[role="menuitemradio"][aria-checked="true"]')?.textContent).toBe(
+    "Current checkout",
+  );
+  await expect
+    .element(page.getByRole("menuitemradio", { name: "New worktree" }))
+    .toHaveAttribute("aria-disabled", "true");
+});

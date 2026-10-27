@@ -331,7 +331,7 @@ const make = Effect.gen(function* () {
       : mapWorkspacePaths(response.value, executor.remoteRoot, target.localRoot);
   });
   return CodespacesWorkspace.of({
-    reserve: (input) =>
+    reserve: Effect.fn("CodespacesWorkspace.reserve")((input) =>
       mutex.withPermits(1)(
         Effect.suspend(() => {
           const names = new Set(input.name ? [input.name] : []);
@@ -345,9 +345,10 @@ const make = Effect.gen(function* () {
             .pipe(Effect.as([...projectIds]));
         }),
       ),
+    ),
     acquireWork: reservations.acquireWork,
     bindings: Effect.sync(() => bindings),
-    wasRemote: (cwd) =>
+    wasRemote: Effect.fn("CodespacesWorkspace.wasRemote")((cwd) =>
       Effect.sync(() =>
         remoteRoots.some((root) =>
           [root, canonicalRoots.get(root) ?? root].some(
@@ -355,7 +356,8 @@ const make = Effect.gen(function* () {
           ),
         ),
       ),
-    bind: (binding, reservationId) =>
+    ),
+    bind: Effect.fn("CodespacesWorkspace.bind")((binding, reservationId) =>
       mutex.withPermits(1)(
         Effect.gen(function* () {
           yield* reservations.assertBindingAvailable(
@@ -402,7 +404,8 @@ const make = Effect.gen(function* () {
           if (binding.name !== null) yield* rememberRoot(binding.localRoot);
         }),
       ),
-    register: (executor) =>
+    ),
+    register: Effect.fn("CodespacesWorkspace.register")((executor) =>
       mutex.withPermits(1)(
         Effect.gen(function* () {
           const generation = disconnectGenerations.get(executor.name) ?? 0;
@@ -426,11 +429,13 @@ const make = Effect.gen(function* () {
           executors.set(executor.name, executor);
         }),
       ),
-    disconnect: (name) =>
+    ),
+    disconnect: Effect.fn("CodespacesWorkspace.disconnect")((name) =>
       Effect.sync(() => {
         disconnectGenerations.set(name, (disconnectGenerations.get(name) ?? 0) + 1);
         executors.delete(name);
       }),
+    ),
     lookup,
     stageAttachment: Effect.fn("CodespacesWorkspace.stageAttachment")(function* ({
       cwd,
@@ -541,8 +546,8 @@ const make = Effect.gen(function* () {
           ),
         );
     }),
-    call: <A>(...args: Parameters<typeof call>) =>
-      call(...args).pipe(Effect.map((value) => value as A)),
+    // Workspace ports supply the response type; the transport carries unknown JSON.
+    call: call as CodespacesWorkspace["Service"]["call"],
   });
 });
 export const layer = Layer.effect(CodespacesWorkspace, make);
