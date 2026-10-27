@@ -146,6 +146,14 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Evidence: `/tmp/t3-release-20261024-*.log`. The original checkout remains at `fc69cb1d3db3ec59ffd38b6a6e36b45a7abbe62d`.
 - Previous local release: unsigned Intel macOS `0.1.2` from `0283a28b5882dea765030b492c2335d347703fd7`, based on upstream stable `v0.1.1`. Its verified artifacts remain in `release/20261021`; they are superseded by this build.
 
+## Local stable release, 2026-10-27
+
+- Created unsigned Intel macOS fork version `0.1.4` from `9aec7e6aafa78f86837d87cb86935db6a987fea7`, the fork/main merge of upstream stable `v0.1.3`. The app embeds source reference `9aec7e6aafa7`, which resolves to that exact commit. The version advances one past the previous local `0.1.3` because the integrated upstream app version is still `0.1.2`.
+- Built locally on the Intel Mac with Node `26.12.1` (matching the root `engines.node` pin) and Electron `43.6.0` verified by `ensure:electron`. Publishing disabled; electron-builder ran with `--publish never`. DMG, ZIP, both blockmaps, update manifest, SHA-256 checksums, metadata and notes are in `/Users/saikrishnaambeti/Documents/opensource/t3code-release-20261027/release/20261027`, built in a detached worktree of that commit.
+- DMG `hdiutil verify` and ZIP `unzip -tq` integrity passed. Packaged version `0.1.4`, Electron framework `43.6.0`, x86_64 Mach-O executable, fork update feed `github Saikrishna1876/t3code`, manifest SHA-512 hashes for DMG and ZIP, the patched PTY `1.2.0-beta.15` darwin-x64 payload and the embedded source reference all verified. The quality checks from the stable integration remain recorded above; no repo-wide checks ran.
+- Temporary release package versions were restored byte-for-byte and the temporary `.env` was removed. No application, browser, dev server, live T3 state, GitHub release, tag or publishing workflow was used. Unsigned artifacts require manual installation. Hardware graphics, interactive clipboard, native mobile, packaged startup and automatic installation acceptance remain pending.
+- Previous local release: unsigned Intel macOS `0.1.3` from `cea83fbe9845a45832f70a18ade4777ed8c3b977`, based on upstream stable `v0.1.2`. Its verified artifacts remain in `release/20261024`; they are superseded by this build.
+
 ## Previous update, 2026-10-18
 
 - Dates: 2026-10-17 to 2026-10-18.
