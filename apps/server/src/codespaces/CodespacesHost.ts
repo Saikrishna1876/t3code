@@ -3,6 +3,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import {
   CodespacesError,
+  CodespacesProjectTransfer,
   type Codespace,
   type CodespacesConfiguration,
   type CodespacesManagedEnvironment,
@@ -37,6 +38,14 @@ import { workspaceWorkerSource } from "./workerSource.ts";
 export class CodespacesHost extends Context.Service<
   CodespacesHost,
   {
+    readonly prepareProject: (input: {
+      name: string;
+      projectId: string;
+      localRoot: string;
+      folder: string;
+      ref: string;
+      devcontainerPath?: string;
+    }) => Effect.Effect<{ remoteRoot: string; setupWarning: string | null }, CodespacesError>;
     readonly connect: (
       space: Codespace,
       account: string,
@@ -65,6 +74,13 @@ const launchResult = Schema.Struct({
   workspacePath: Schema.String,
 });
 const decodeLaunch = Schema.decodeEffect(Schema.fromJsonString(launchResult));
+const encodeProject = Schema.encodeSync(Schema.fromJsonString(CodespacesProjectTransfer));
+const decodeProject = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    remoteRoot: Schema.String,
+    setupWarning: Schema.NullOr(Schema.String),
+  }),
+);
 const decodeAttach = Schema.decodeEffect(
   Schema.fromJsonString(Schema.Struct({ launch: launchResult, token: Schema.String })),
 );
@@ -113,17 +129,7 @@ state="/workspaces/.t3-executors/$1"
 mkdir -p "$state"
 chmod 700 "$state"
 rm -f "$state/fingerprint" "$state/launch.json"
-workspace="\${CODESPACE_VSCODE_FOLDER:-}"
-if [ ! -d "$workspace/.git" ] && [ ! -f "$workspace/.git" ]; then
-  workspace=""
-  for directory in /workspaces/*; do
-    [ -d "$directory/.git" ] || [ -f "$directory/.git" ] || continue
-    remote=$(git -C "$directory" remote get-url origin 2>/dev/null || true)
-    case "$remote" in *"$2"|*"$2.git") workspace="$directory"; break ;; esac
-  done
-fi
-[ -n "$workspace" ] || { echo 'workspace-not-found' >&2; exit 1; }
-workspace=$(realpath "$workspace")
+workspace=$(realpath /workspaces)
 command -v node >/dev/null || { echo 'node-required' >&2; exit 1; }
 # Only stop PIDs recorded by this launcher, after verifying their executor directory.
 for service in worker executor; do
@@ -227,6 +233,7 @@ const make = Effect.gen(function* () {
     string,
     { scope: Scope.Closeable; process: ChildProcessSpawner.ChildProcessHandle }
   >();
+  const workers = new Map<string, { url: string; token: string }>();
   const ghEnvironment = Effect.gen(function* () {
     const pinned = yield* GitHubRequestPolicy.PinnedGitHubCredential;
     const token = pinned?.token ?? (yield* credentials.get("github.com")).token;
@@ -463,6 +470,7 @@ const make = Effect.gen(function* () {
     );
   };
   const disconnect = Effect.fn("CodespacesHost.disconnect")(function* (name: string) {
+    workers.delete(name);
     yield* workspaces.disconnect(name);
     const entry = forwards.get(name);
     if (!entry) return;
@@ -640,6 +648,7 @@ const make = Effect.gen(function* () {
         );
       yield* workspaces.register({
         name: space.name,
+        computer: true,
         remoteRoot: result.workspacePath,
         workerUrl: `http://127.0.0.1:${localPort}`,
         execServerUrl: `ws://127.0.0.1:${execPort}`,
@@ -647,6 +656,7 @@ const make = Effect.gen(function* () {
         forwardPort,
         isForwardedPort: (port) => [...previewPorts.values()].includes(port),
       });
+      workers.set(space.name, { url: `http://127.0.0.1:${localPort}`, token });
       if (
         forwards.get(space.name)?.process !== child ||
         !(yield* child.isRunning.pipe(Effect.orElseSucceed(() => false)))
@@ -685,6 +695,78 @@ const make = Effect.gen(function* () {
   return CodespacesHost.of({
     connect,
     disconnect,
+    prepareProject: Effect.fn("CodespacesHost.prepareProject")(function* (input) {
+      const worker = workers.get(input.name);
+      if (!worker) return yield* bootstrapError("Connect this Codespace before adding a project.");
+      const temporary = yield* fs
+        .makeTempDirectoryScoped({ prefix: "t3-project-bundle-" })
+        .pipe(Effect.mapError(() => bootstrapError("Could not prepare the project for transfer.")));
+      const bundle = path.join(temporary, "source.bundle");
+      yield* processRunner
+        .run({
+          operation: "Codespaces.bundleProject",
+          command: "git",
+          args: ["bundle", "create", bundle, "HEAD", ...(input.ref ? [input.ref] : [])],
+          cwd: input.localRoot,
+          timeoutMs: 120_000,
+        })
+        .pipe(
+          Effect.mapError(() =>
+            bootstrapError("Commit this project's files before adding it to a Codespace."),
+          ),
+        );
+      const info = yield* fs
+        .stat(bundle)
+        .pipe(Effect.mapError(() => bootstrapError("Could not read the project bundle.")));
+      if (info.size > BigInt(512 * 1024 * 1024))
+        return yield* bootstrapError(
+          "Project history exceeds the 512 MiB transfer limit. Add a smaller checkout.",
+        );
+      const origin = yield* processRunner
+        .run({
+          operation: "Codespaces.projectOrigin",
+          command: "git",
+          args: ["remote", "get-url", "origin"],
+          cwd: input.localRoot,
+        })
+        .pipe(
+          Effect.map((result) => result.stdout.trim()),
+          Effect.orElseSucceed(() => ""),
+        );
+      const safeOrigin =
+        /^(https?:\/\/[^\s@]+|git@[^\s]+|ssh:\/\/git@[^\s]+)$/.test(origin) &&
+        !origin.includes("?") &&
+        !origin.includes("#")
+          ? origin
+          : "";
+      const metadata = {
+        projectId: input.projectId,
+        folder: input.folder,
+        ...(input.ref ? { ref: input.ref } : {}),
+        ...(safeOrigin ? { origin: safeOrigin } : {}),
+        ...(input.devcontainerPath ? { devcontainerPath: input.devcontainerPath } : {}),
+      };
+      return yield* client
+        .execute(
+          HttpClientRequest.post(
+            worker.url + "/projects/prepare?input=" + encodeURIComponent(encodeProject(metadata)),
+          ).pipe(
+            HttpClientRequest.setHeader("authorization", `Bearer ${worker.token}`),
+            HttpClientRequest.bodyStream(fs.stream(bundle), { contentLength: Number(info.size) }),
+          ),
+        )
+        .pipe(
+          Effect.flatMap(HttpClientResponse.filterStatusOk),
+          Effect.flatMap((response) => response.json),
+          Effect.flatMap(decodeProject),
+          Effect.timeout("45 minutes"),
+          Effect.mapError(() =>
+            bootstrapError(
+              "Could not add this project. Check for an existing folder with the same name, then retry.",
+            ),
+          ),
+        );
+    }, Effect.scoped),
     pair: Effect.fn("CodespacesHost.pair")(() =>
       Effect.fail(
         new CodespacesError({

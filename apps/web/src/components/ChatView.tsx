@@ -118,6 +118,7 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveThreadReferenceCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import { resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
 import { useAtomValue } from "@effect/atom-react";
+import { CodespacesSetupWarning } from "./ProjectCodespacesControl";
 import { codespacesEnvironment } from "~/state/codespaces";
 import { codespacesProjectSendBlockReason } from "@t3tools/client-runtime/codespaces-presentation";
 import { type SetStateAction, use, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -1247,7 +1248,20 @@ export default function ChatView(props: ChatViewProps) {
         },
         ...baseSystemComposerBannerItems,
       ]
-    : baseSystemComposerBannerItems;
+    : codespace.data?.setupWarning && !codespace.data.setupWarningDismissed
+      ? [
+          {
+            id: `codespace-setup:${activeProject?.id}`,
+            variant: "info" as const,
+            icon: null,
+            title: "Project setup needs attention",
+            children: (
+              <CodespacesSetupWarning environmentId={environmentId} project={codespace.data} />
+            ),
+          },
+          ...baseSystemComposerBannerItems,
+        ]
+      : baseSystemComposerBannerItems;
   const providerInstanceEntries = sortProviderInstanceEntries(
     applyProviderInstanceSettings(
       deriveProviderInstanceEntries(providerStatuses),

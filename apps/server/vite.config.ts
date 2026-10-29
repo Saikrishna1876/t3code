@@ -27,6 +27,10 @@ await buildWorkspaceWorker({
   platform: "node",
   target: "node22",
   minify: true,
+  // Its UMD wrapper leaves factory-local require calls unresolved in a standalone bundle.
+  alias: {
+    "jsonc-parser": NodeURL.fileURLToPath(import.meta.resolve("jsonc-parser/lib/esm/main.js")),
+  },
   deps: { alwaysBundle: () => true, onlyBundle: false },
   define: { __T3CODE_BUILD_RELAY_URL__: '""', __T3CODE_BUILD_CHANNEL__: '"latest"' },
 });

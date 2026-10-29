@@ -52,6 +52,14 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
 ];
 
 describe("searchSettings", () => {
+  it("opens computer management from a Codespaces search", () => {
+    const result = searchSettings("Codespaces").find((item) => item.id === "project-codespaces");
+    expect(result).toMatchObject({
+      to: "/settings/connections",
+      targetId: "connections-codespaces",
+    });
+  });
+
   it("matches titles, sections, and remembered setting details", () => {
     expect(searchSettings("word", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     expect(searchSettings("network", ITEMS).map((item) => item.id)).toEqual(["network-access"]);

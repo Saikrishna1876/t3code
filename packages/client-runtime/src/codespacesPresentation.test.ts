@@ -85,6 +85,17 @@ describe("execution location readiness", () => {
 });
 
 describe("Codespace lifecycle feedback", () => {
+  it("links failed setup to GitHub's creation-log instructions without showing recovery on success", () => {
+    const operation = { ...stopping, action: "create" as const, stage: "bootstrapping" };
+    expect(codespacesOperationPresentation({ ...operation, status: "failed" }).logHelpUrl).toBe(
+      "https://docs.github.com/en/codespaces/troubleshooting/github-codespaces-logs#creation-logs",
+    );
+    expect(codespacesOperationPresentation(operation).logHelpUrl).toBeNull();
+    expect(
+      codespacesOperationPresentation({ ...operation, status: "succeeded" }).logHelpUrl,
+    ).toBeNull();
+  });
+
   it("keeps a stop request pending until the operation succeeds", () => {
     const waiting = codespacesOperationPresentation(stopping);
     expect(waiting.tone).toBe("info");

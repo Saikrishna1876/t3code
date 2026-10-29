@@ -5,10 +5,11 @@ import type {
   EnvironmentId,
   ProjectId,
   CodespacesRunInput,
+  CodespacesProject,
   CodespacesOptions,
 } from "@t3tools/contracts";
 import {
-  codespacesActionLabels,
+  codespacesSetupPrompt,
   codespacesOperationPresentation,
   codespaceStateLabel,
 } from "@t3tools/client-runtime/codespaces-presentation";
@@ -17,35 +18,89 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { Menu } from "../../components/ui/Menu";
 import { useEnvironments } from "../../state/environments";
+import { useProjects } from "../../state/entities";
 import { codespacesEnvironment } from "../../state/codespaces";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
+import {
+  createNewTaskDraft,
+  getComposerDraftSnapshot,
+  setComposerDraftText,
+  waitForComposerDraftsLoaded,
+} from "../../state/use-composer-drafts";
 import { uuidv4 } from "../../lib/uuid";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { Button } from "../../components/ui/Button";
 
-export function ProjectCodespacesControl(props: {
-  environmentId: EnvironmentId;
-  projectId: ProjectId;
-}) {
-  const { environments } = useEnvironments();
-  const canManage = useAtomValue(
-    codespacesEnvironment.authorize.permissionAtom(props.environmentId),
-  );
-  return canManage &&
-    environments.find((environment) => environment.environmentId === props.environmentId)
-      ?.serverConfig?.environment.capabilities.codespaces ? (
-    <ProjectCodespacesControlPanel {...props} />
-  ) : null;
-}
-
-function ProjectCodespacesControlPanel({
+export function ProjectCodespacesControl({
   environmentId,
   projectId,
 }: {
   environmentId: EnvironmentId;
   projectId: ProjectId;
 }) {
+  const { environments } = useEnvironments();
+  const projects = useProjects();
+  const selectDetail = useSelectWorkspaceDetail();
+  const [preparing, setPreparing] = useState(false);
+  const supported = environments.find((entry) => entry.environmentId === environmentId)
+    ?.serverConfig?.environment.capabilities.codespaces;
+  return supported ? (
+    <SettingsSection title="Cloud computer">
+      <CodespacesPickerRows environmentId={environmentId} projectId={projectId} />
+      <View className="px-4 pb-4">
+        <Button
+          fullWidth
+          label="Prepare cloud setup"
+          disabled={preparing}
+          onPress={() => {
+            setPreparing(true);
+            void waitForComposerDraftsLoaded()
+              .then(() => {
+                const draftId = createNewTaskDraft({ environmentId, projectId });
+                setComposerDraftText(
+                  draftId,
+                  codespacesSetupPrompt(getComposerDraftSnapshot(draftId).text),
+                );
+                selectDetail({
+                  name: "Thread",
+                  params: {
+                    draft: {
+                      environmentId,
+                      projectId,
+                      draftId,
+                      title:
+                        projects.find(
+                          (entry) =>
+                            entry.id === projectId && entry.environmentId === environmentId,
+                        )?.title ?? "Cloud setup",
+                    },
+                  },
+                });
+              })
+              .catch(() =>
+                Alert.alert(
+                  "Could not open setup draft",
+                  "Open a new thread for this project and retry.",
+                ),
+              )
+              .finally(() => setPreparing(false));
+          }}
+        />
+      </View>
+    </SettingsSection>
+  ) : null;
+}
+
+export function CodespacesPickerRows({
+  environmentId,
+  projectId,
+}: {
+  environmentId: EnvironmentId;
+  projectId: ProjectId;
+}) {
+  const canManage = useAtomValue(codespacesEnvironment.run.permissionAtom(environmentId));
   const project = useEnvironmentQuery(
     codespacesEnvironment.project({ environmentId, input: { projectId } }),
   );
@@ -53,547 +108,455 @@ function ProjectCodespacesControlPanel({
   const state = useEnvironmentQuery(
     codespacesEnvironment.state({ environmentId, input: undefined }),
   );
-  const authorize = useAtomCommand(codespacesEnvironment.authorize, { reportFailure: false });
-  const configure = useAtomCommand(codespacesEnvironment.configure, { reportFailure: false });
   const run = useAtomCommand(codespacesEnvironment.run, { reportFailure: false });
   const bind = useAtomCommand(codespacesEnvironment.bind, { reportFailure: false });
-  const loadOptions = useAtomCommand(codespacesEnvironment.options, { reportFailure: false });
   const [pending, setPending] = useState(false);
-  const [pendingLabel, setPendingLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [options, setOptions] = useState<CodespacesOptions | null>(null);
-  const [showSetup, setShowSetup] = useState(false);
-  const [showWorkspaceOptions, setShowWorkspaceOptions] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
-  const [machine, setMachine] = useState("");
-  const [container, setContainer] = useState("");
-  const authorization = state.data?.authorization;
-  const authorizing = authorization?.phase === "starting" || authorization?.phase === "waiting";
-  const [authorizationPending, setAuthorizationPending] = useState(false);
-  const updatePermissions = async (cancel: boolean) => {
-    setAuthorizationPending(true);
-    setError(null);
-    try {
-      const result = await authorize({ environmentId, input: { cancel } });
-      if (result._tag === "Failure") {
-        const cause = squashAtomCommandFailure(result);
-        setError(cause instanceof Error ? cause.message : "Could not update GitHub permissions.");
-      }
-      state.refresh();
-    } finally {
-      setAuthorizationPending(false);
-    }
-  };
-  const info = project.data;
-  const operation = state.data?.operations.findLast((item) => item.projectId === projectId);
+  const operation = state.data?.operations.findLast(
+    (entry) =>
+      entry.projectId === projectId || (project.data?.name && entry.name === project.data.name),
+  );
   const feedback = operation ? codespacesOperationPresentation(operation) : null;
   const busy = pending || operation?.status === "running";
+  const managed = new Set(state.data?.environments.map((entry) => entry.name));
   const spaces =
     inventory.data?.codespaces.filter(
-      (space) =>
-        space.repository.toLowerCase() === info?.repository.toLowerCase() &&
-        space.branch === info?.ref,
+      (entry) => managed.has(entry.name) || entry.name === project.data?.name,
     ) ?? [];
-  const bound = inventory.data?.codespaces.find((space) => space.name === info?.name);
-  const containers =
-    options?.devcontainers.filter((entry) => info?.devcontainerPaths.includes(entry.path)) ?? [];
-  const workspaceLabel = pending
-    ? pendingLabel
-    : operation?.status === "running"
-      ? feedback?.label
-      : info?.connected
-        ? "Connected"
-        : codespaceStateLabel(bound?.state);
-  const execute = async (input: CodespacesRunInput) => {
-    setPendingLabel(codespacesActionLabels[input.action]);
+  const info = project.data;
+  const save = async (name: string | null, dismissSetupWarning?: boolean) => {
     setPending(true);
     setError(null);
-    try {
-      const result = await run({ environmentId, input });
-      if (result._tag === "Failure") {
-        const cause = squashAtomCommandFailure(result);
-        setError(cause instanceof Error ? cause.message : "Codespace request failed.");
-      } else if (input.action === "create") {
-        setShowSetup(false);
-      }
-      project.refresh();
-      inventory.refresh();
-    } finally {
-      setPending(false);
+    const result = await bind({
+      environmentId,
+      input: {
+        projectId,
+        name,
+        ...(dismissSetupWarning !== undefined ? { dismissSetupWarning } : {}),
+      },
+    });
+    if (result._tag === "Failure") {
+      const cause = squashAtomCommandFailure(result);
+      setError(cause instanceof Error ? cause.message : "Could not update project.");
     }
+    setPending(false);
+    project.refresh();
   };
-  const setup = async () => {
-    if (!info) return;
-    setShowSetup(true);
-    setPendingLabel("Loading configuration");
+  const select = async (name: string, stopped: boolean) => {
     setPending(true);
     setError(null);
-    try {
-      const result = await loadOptions({
-        environmentId,
-        input: { repository: info.repository, ref: info.ref },
-      });
-      if (result._tag === "Failure") {
-        const cause = squashAtomCommandFailure(result);
-        setError(cause instanceof Error ? cause.message : "Could not load Codespace options.");
-        return;
-      }
-      setOptions(result.value);
-      setShowSetup(true);
-      setMachine((current) =>
-        result.value.machines.some((entry) => entry.name === current)
-          ? current
-          : (result.value.machines[0]?.name ?? ""),
-      );
-      setContainer((current) =>
-        result.value.devcontainers.some(
-          (entry) => entry.path === current && info.devcontainerPaths.includes(entry.path),
-        )
-          ? current
-          : (result.value.devcontainers.find((entry) => info.devcontainerPaths.includes(entry.path))
-              ?.path ?? ""),
-      );
-    } finally {
-      setPending(false);
+    const result = await run({
+      environmentId,
+      input: { action: stopped ? "start" : "connect", projectId, name, clientRequestId: uuidv4() },
+    });
+    if (result._tag === "Failure") {
+      const cause = squashAtomCommandFailure(result);
+      setError(cause instanceof Error ? cause.message : "Could not connect project.");
     }
+    setPending(false);
+    project.refresh();
+    inventory.refresh();
   };
-  const openSetup = () => (options ? setShowSetup(true) : void setup());
-  const lifecycle = (action: "start" | "connect" | "stop" | "delete", name: string) =>
-    void execute({ action, projectId, name, clientRequestId: uuidv4() });
   return (
-    <SettingsSection title="Codespace">
-      <View className="gap-5 p-4">
-        {info ? (
-          <View className="gap-1">
-            <Text className="text-sm font-t3-medium text-foreground">
-              {info.repository || "This project"}
-            </Text>
-            {info.ref ? (
-              <Text className="text-xs text-foreground-muted">Branch: {info.ref}</Text>
-            ) : null}
-          </View>
-        ) : !project.error ? (
+    <View className="gap-3 p-4">
+      <Text className="text-sm text-foreground-muted">
+        Add computers in Settings, Environments, Codespaces. Projects share a computer in separate
+        /workspaces folders.
+      </Text>
+      {error || project.error || inventory.error || state.error ? (
+        <Text accessibilityRole="alert" className="text-sm text-destructive">
+          {error ?? project.error ?? inventory.error ?? state.error}
+        </Text>
+      ) : null}
+      {info?.reason ? <Text className="text-sm text-foreground-muted">{info.reason}</Text> : null}
+      {info?.workspacePath ? (
+        <Text selectable className="text-xs text-foreground-muted">
+          {info.workspacePath}
+        </Text>
+      ) : null}
+      {info?.setupWarning && !info.setupWarningDismissed ? (
+        <View className="gap-2">
           <Text accessibilityLiveRegion="polite" className="text-sm text-foreground-muted">
-            Checking project…
+            {info.setupWarning}
           </Text>
-        ) : null}
-        {error || project.error || inventory.error || state.error ? (
-          <View className="gap-1">
-            <Text accessibilityRole="alert" className="text-sm text-destructive">
-              {error ?? project.error ?? inventory.error ?? state.error}
+          <Button
+            label="Don't warn again for this project"
+            disabled={busy || !canManage}
+            onPress={() => void save(info.name, true)}
+          />
+        </View>
+      ) : info?.setupWarningDismissed ? (
+        <Button
+          label="Show setup warnings"
+          disabled={busy || !canManage}
+          onPress={() => void save(info.name, false)}
+        />
+      ) : null}
+      {spaces.map((space) => (
+        <View key={space.name} className="flex-row items-center gap-3">
+          <View className="flex-1 gap-1">
+            <Text className="text-sm text-foreground">
+              {space.displayName || space.name}
+              {space.name === info?.name ? " (selected)" : ""}
             </Text>
             <Text className="text-xs text-foreground-muted">
-              Refresh status before trying again.
+              {codespaceStateLabel(space.state)}
             </Text>
           </View>
+          <Button
+            label={space.state === "Shutdown" ? "Start" : "Use computer"}
+            disabled={busy || !canManage || (!info?.eligible && !info?.name)}
+            onPress={() => void select(space.name, space.state === "Shutdown")}
+          />
+        </View>
+      ))}
+      {!spaces.length ? (
+        <Text className="text-sm text-foreground-muted">No computers added yet.</Text>
+      ) : null}
+      {info?.name ? (
+        <Button
+          fullWidth
+          label="Work locally"
+          disabled={busy || !canManage}
+          onPress={() => void save(null)}
+        />
+      ) : null}
+      {feedback ? (
+        <View className="gap-1">
+          <Text accessibilityLiveRegion="polite" className="text-sm text-foreground">
+            {feedback.label}
+          </Text>
+          <Text className="text-xs text-foreground-muted">{feedback.description}</Text>
+          <CodespacesLogHelp url={feedback.logHelpUrl} />
+        </View>
+      ) : null}
+      <Button
+        fullWidth
+        label="Refresh status"
+        disabled={pending}
+        onPress={() => {
+          project.refresh();
+          inventory.refresh();
+          state.refresh();
+        }}
+      />
+      <Text className="text-xs text-foreground-muted">
+        First connection copies your current committed branch. Commit local changes first. Codex and
+        Claude Code run here; other providers require local work.
+      </Text>
+    </View>
+  );
+}
+
+export function CodespacesSettings() {
+  const { environments } = useEnvironments();
+  return (
+    <>
+      {environments
+        .filter((environment) => environment.serverConfig?.environment.capabilities.codespaces)
+        .map((environment) => (
+          <ComputerSettings
+            key={environment.environmentId}
+            environmentId={environment.environmentId}
+            label={environment.label}
+          />
+        ))}
+    </>
+  );
+}
+
+function ComputerSettings({
+  environmentId,
+  label,
+}: {
+  environmentId: EnvironmentId;
+  label: string;
+}) {
+  const canManage = useAtomValue(codespacesEnvironment.run.permissionAtom(environmentId));
+  const state = useEnvironmentQuery(
+    codespacesEnvironment.state({ environmentId, input: undefined }),
+  );
+  const inventory = useEnvironmentQuery(codespacesEnvironment.list({ environmentId, input: {} }));
+  const run = useAtomCommand(codespacesEnvironment.run, { reportFailure: false });
+  const authorize = useAtomCommand(codespacesEnvironment.authorize, { reportFailure: false });
+  const configure = useAtomCommand(codespacesEnvironment.configure, { reportFailure: false });
+  const loadOptions = useAtomCommand(codespacesEnvironment.options, { reportFailure: false });
+  const projects = useProjects().filter((project) => project.environmentId === environmentId);
+  const [projectId, setProjectId] = useState("");
+  const [options, setOptions] = useState<CodespacesOptions | null>(null);
+  const [machine, setMachine] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const busy =
+    pending || state.data?.operations.some((operation) => operation.status === "running");
+  const operation = state.data?.operations.at(-1);
+  const feedback = operation ? codespacesOperationPresentation(operation) : null;
+  const authorizing =
+    state.data?.authorization?.phase === "starting" ||
+    state.data?.authorization?.phase === "waiting";
+  const failure = (result: Parameters<typeof squashAtomCommandFailure>[0]) => {
+    const cause = squashAtomCommandFailure(result);
+    setError(cause instanceof Error ? cause.message : "Codespace request failed.");
+  };
+  const execute = async (input: CodespacesRunInput) => {
+    setPending(true);
+    setError(null);
+    const result = await run({ environmentId, input });
+    if (result._tag === "Failure") failure(result);
+    else if (input.action === "create") setOptions(null);
+    setPending(false);
+    state.refresh();
+    inventory.refresh();
+  };
+  return (
+    <SettingsSection title={`Codespaces · ${label}`}>
+      <View className="gap-4 p-4">
+        <Text className="text-sm text-foreground-muted">
+          Create a blank cloud computer, then add several projects. Provider login and history stay
+          on your T3 host.
+        </Text>
+        {error || state.error || inventory.error ? (
+          <Text accessibilityRole="alert" className="text-sm text-destructive">
+            {error ?? state.error ?? inventory.error}
+          </Text>
         ) : null}
-        {state.data ? (
+        <Button
+          fullWidth
+          label={authorizing ? "Cancel GitHub sign-in" : "Sign in for Codespaces access"}
+          disabled={pending || !canManage}
+          onPress={async () => {
+            setPending(true);
+            setError(null);
+            const result = await authorize({
+              environmentId,
+              input: { cancel: Boolean(authorizing) },
+            });
+            if (result._tag === "Failure") failure(result);
+            setPending(false);
+            state.refresh();
+          }}
+        />
+        {state.data?.authorization?.code ? (
           <View className="gap-2">
+            <Text selectable className="text-sm text-foreground">
+              GitHub code: {state.data.authorization.code}
+            </Text>
+            <Button
+              label="Open GitHub"
+              onPress={() =>
+                void Linking.openURL("https://github.com/login/device").catch(() =>
+                  setError("Open https://github.com/login/device and enter the code above."),
+                )
+              }
+            />
+          </View>
+        ) : null}
+        {state.data?.authorization?.message ? (
+          <Text className="text-xs text-foreground-muted">{state.data.authorization.message}</Text>
+        ) : null}
+        <Button
+          fullWidth
+          label="New Codespace"
+          disabled={busy || !canManage}
+          onPress={async () => {
+            setPending(true);
+            setError(null);
+            const result = await loadOptions({ environmentId, input: {} });
+            if (result._tag === "Failure") failure(result);
+            else {
+              setOptions(result.value);
+              setMachine(result.value.machines[0]?.name ?? "");
+            }
+            setPending(false);
+          }}
+        />
+        {options ? (
+          <View className="gap-3">
+            <CodespaceOptionPicker
+              label="Machine"
+              value={machine}
+              placeholder="No machines available"
+              disabled={busy || !options.machines.length}
+              options={options.machines.map((entry) => ({
+                value: entry.name,
+                label: entry.displayName,
+              }))}
+              onSelect={setMachine}
+            />
+            <Text className="text-xs text-foreground-muted">
+              Stops after 30 idle minutes. Files are retained for one day after stopping. GitHub
+              compute and storage charges may apply.
+            </Text>
             <Button
               fullWidth
-              tone="secondary"
-              label={authorizing ? "Cancel GitHub sign-in" : "Sign in for Codespaces access"}
-              disabled={authorizationPending || (busy && !authorizing)}
-              onPress={() => void updatePermissions(Boolean(authorizing))}
+              label="Create blank computer"
+              disabled={busy || !machine || !canManage}
+              onPress={() =>
+                Alert.alert(
+                  "Create blank computer?",
+                  "Uses github/codespaces-blank. GitHub compute and storage charges may apply.",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                      text: "Create",
+                      onPress: () =>
+                        void execute({
+                          action: "create",
+                          clientRequestId: uuidv4(),
+                          machine,
+                          idleTimeoutMinutes: 30,
+                          retentionDays: 1,
+                        }),
+                    },
+                  ],
+                )
+              }
             />
-            {authorization?.code ? (
-              <>
-                <Text selectable className="text-sm text-foreground">
-                  GitHub code: {authorization.code}
-                </Text>
-                <Button
-                  fullWidth
-                  label="Open GitHub"
-                  onPress={() => {
-                    void Linking.openURL("https://github.com/login/device").catch(() =>
-                      setError(
-                        "Could not open GitHub. Visit https://github.com/login/device and enter the code shown here.",
-                      ),
-                    );
-                  }}
-                />
-              </>
-            ) : null}
-            <Text
-              accessibilityRole={authorization?.phase === "failed" ? "alert" : undefined}
-              accessibilityLiveRegion="polite"
-              className={
-                authorization?.phase === "failed"
-                  ? "text-xs text-destructive"
-                  : "text-xs text-foreground-muted"
-              }
-            >
-              {authorization?.message ||
-                "Add Codespaces permission while keeping your existing GitHub permissions."}
-            </Text>
+            <Button label="Cancel" onPress={() => setOptions(null)} />
           </View>
         ) : null}
-        {pending || feedback ? (
-          <View className="gap-1">
-            <Text
-              accessibilityRole={feedback?.tone === "error" && !pending ? "alert" : undefined}
-              accessibilityLiveRegion="polite"
-              className={
-                feedback?.tone === "error" && !pending
-                  ? "text-sm font-t3-medium text-destructive"
-                  : "text-sm font-t3-medium text-foreground"
-              }
-            >
-              {pending ? pendingLabel : feedback?.label}
-            </Text>
-            {!pending && feedback?.description ? (
-              <Text className="text-sm text-foreground-muted">{feedback.description}</Text>
-            ) : null}
-            {busy ? (
-              <Text className="text-xs text-foreground-muted">
-                You can leave this screen. Work continues on your T3 host.
+        {inventory.data?.codespaces.map((space) => {
+          const managed = state.data?.environments.find((entry) => entry.name === space.name);
+          return (
+            <View key={space.name} className="gap-2 border-t border-border-subtle pt-3">
+              <Text className="text-sm font-t3-medium text-foreground">
+                {space.displayName || space.name}
               </Text>
-            ) : null}
-          </View>
-        ) : null}
-        {info ? (
-          <>
-            {!info.eligible ? (
-              <Text className="text-sm text-foreground-muted">{info.reason}</Text>
-            ) : null}
-            {info.name ? (
-              <View className="gap-3">
-                <View className="gap-1">
-                  <Text className="text-sm font-t3-medium text-foreground">
-                    {bound?.displayName || info.name}
-                  </Text>
-                  <Text className="text-xs text-foreground-muted">{workspaceLabel}</Text>
-                </View>
+              <Text className="text-xs text-foreground-muted">
+                {codespaceStateLabel(space.state)} · {space.machine}
+                {managed?.connected ? " · Connected" : ""}
+              </Text>
+              <View className="flex-row flex-wrap gap-2">
                 <Button
-                  fullWidth
                   label={
-                    info.connected
-                      ? "Stop Codespace"
-                      : bound?.state === "Shutdown"
-                        ? "Resume Codespace"
-                        : "Connect Codespace"
+                    space.state === "Shutdown" ? "Start" : managed ? "Reconnect" : "Add computer"
                   }
-                  tone={info.connected ? "secondary" : "primary"}
-                  disabled={busy || (!info.connected && (!info.eligible || !bound))}
+                  disabled={busy || !canManage}
                   onPress={() =>
-                    lifecycle(
-                      info.connected ? "stop" : bound?.state === "Shutdown" ? "start" : "connect",
-                      info.name!,
-                    )
+                    void execute({
+                      action: space.state === "Shutdown" ? "start" : "connect",
+                      name: space.name,
+                      clientRequestId: uuidv4(),
+                    })
                   }
                 />
+                {space.state === "Available" && managed ? (
+                  <Button
+                    label="Stop"
+                    disabled={busy || !canManage}
+                    onPress={() =>
+                      void execute({ action: "stop", name: space.name, clientRequestId: uuidv4() })
+                    }
+                  />
+                ) : null}
                 <Button
-                  fullWidth
-                  label="Work locally"
-                  disabled={busy}
-                  onPress={() => {
-                    setPendingLabel("Switching to local workspace");
-                    setPending(true);
-                    setError(null);
-                    void bind({ environmentId, input: { projectId, name: null } })
-                      .then((result) => {
-                        if (result._tag === "Failure") {
-                          const cause = squashAtomCommandFailure(result);
-                          setError(
-                            cause instanceof Error
-                              ? cause.message
-                              : "Could not switch to local work.",
-                          );
-                        }
-                        project.refresh();
-                      })
-                      .finally(() => setPending(false));
-                  }}
-                />
-                <Text className="text-xs text-foreground-muted">
-                  {bound?.state === "Shutdown"
-                    ? "Resume to keep working with your existing files. Storage usage continues while stopped."
-                    : "Stopping ends compute usage and keeps your remote files."}
-                </Text>
-                {!bound && !inventory.isPending ? (
-                  <Text className="text-xs text-foreground-muted">
-                    Workspace unavailable in GitHub's inventory. Refresh status or switch to local
-                    work.
-                  </Text>
-                ) : null}
-              </View>
-            ) : !showSetup || spaces.length ? (
-              <View className="gap-3">
-                <View className="gap-1">
-                  <Text className="text-sm font-t3-medium text-foreground">
-                    {spaces.length ? "Reuse a Codespace" : "Work in a Codespace"}
-                  </Text>
-                  <Text className="text-sm text-foreground-muted">
-                    {spaces.length
-                      ? "Keep your files and skip container creation."
-                      : "Run files and commands remotely. Your agent, login and thread history stay on your T3 host."}
-                  </Text>
-                </View>
-                {inventory.isPending && !inventory.data ? (
-                  <Text accessibilityLiveRegion="polite" className="text-sm text-foreground-muted">
-                    Looking for existing Codespaces…
-                  </Text>
-                ) : null}
-                {spaces.map((space) => (
-                  <View key={space.name} className="gap-2">
-                    <Text className="text-sm text-foreground">
-                      {space.displayName || space.name}
-                    </Text>
-                    <Text className="text-xs text-foreground-muted">
-                      {codespaceStateLabel(space.state)}
-                    </Text>
-                    <Button
-                      fullWidth
-                      label={space.state === "Shutdown" ? "Resume Codespace" : "Use Codespace"}
-                      tone="primary"
-                      disabled={busy || !info.eligible}
-                      onPress={() =>
-                        lifecycle(space.state === "Shutdown" ? "start" : "connect", space.name)
-                      }
-                    />
-                  </View>
-                ))}
-              </View>
-            ) : null}
-            {showSetup && options ? (
-              <View className="gap-4 border-t border-border-subtle pt-4">
-                <View className="gap-1">
-                  <Text className="text-sm font-t3-medium text-foreground">New Codespace</Text>
-                  <Text className="text-xs text-foreground-muted">
-                    GitHub builds the container from this branch. Creation can take a few minutes.
-                  </Text>
-                </View>
-                <CodespaceOptionPicker
-                  label="Machine"
-                  value={machine}
-                  placeholder="No machines available"
-                  disabled={busy || !options.machines.length}
-                  options={options.machines.map((entry) => ({
-                    value: entry.name,
-                    label: entry.displayName,
-                  }))}
-                  onSelect={setMachine}
-                />
-                {!options.machines.length ? (
-                  <Text className="text-xs text-foreground-muted">
-                    No machines available for this repository. Check GitHub access, then refresh
-                    configuration.
-                  </Text>
-                ) : null}
-                <CodespaceOptionPicker
-                  label="Dev-container configuration"
-                  value={container}
-                  placeholder="Configuration not on GitHub yet"
-                  disabled={busy || !containers.length}
-                  options={containers.map((entry) => ({ value: entry.path, label: entry.name }))}
-                  onSelect={setContainer}
-                />
-                {!containers.length ? (
-                  <Text className="text-xs text-foreground-muted">
-                    Push this project's .devcontainer configuration to {info.ref}, then refresh
-                    configuration.
-                  </Text>
-                ) : null}
-                <Text className="text-xs text-foreground-muted">
-                  Stops after 30 idle minutes. GitHub retains files for one day after stopping.
-                  Compute and storage charges may apply.
-                </Text>
-                <Button
-                  fullWidth
-                  label="Create Codespace"
-                  tone="primary"
-                  disabled={busy || !machine || !container || !info.eligible}
+                  label="Delete"
+                  tone="danger"
+                  disabled={busy || !canManage}
                   onPress={() =>
                     Alert.alert(
-                      "Create Codespace?",
-                      `${info.repository} · ${info.ref}\nGitHub compute and storage charges may apply. Uses your existing local provider login.`,
+                      "Delete computer?",
+                      "GitHub permanently deletes every project and unpushed change on this computer. Local history remains.",
                       [
                         { text: "Cancel", style: "cancel" },
                         {
-                          text: "Create",
+                          text: "Delete",
+                          style: "destructive",
                           onPress: () =>
                             void execute({
-                              action: "create",
-                              projectId,
+                              action: "delete",
+                              name: space.name,
                               clientRequestId: uuidv4(),
-                              repository: info.repository,
-                              ref: info.ref,
-                              machine,
-                              devcontainerPath: container,
-                              idleTimeoutMinutes: 30,
-                              retentionDays: 1,
                             }),
                         },
                       ],
                     )
                   }
                 />
-                <Button
-                  fullWidth
-                  label="Cancel setup"
-                  disabled={busy}
-                  onPress={() => setShowSetup(false)}
-                />
-                {!containers.length || !options.machines.length ? (
-                  <Button
-                    fullWidth
-                    label="Refresh configuration"
-                    disabled={busy}
-                    onPress={() => void setup()}
-                  />
-                ) : null}
               </View>
-            ) : !info.name ? (
-              <View className="gap-2">
-                <Button
-                  fullWidth
-                  label="New Codespace"
-                  tone={spaces.length ? "secondary" : "primary"}
-                  disabled={busy || !info.eligible}
-                  onPress={openSetup}
-                />
-                <Text className="text-xs text-foreground-muted">
-                  GitHub compute and storage charges may apply.
-                </Text>
-              </View>
-            ) : null}
-            {info.name ? (
-              <View className="border-t border-border-subtle pt-2">
-                <CodespaceDisclosure
-                  label="Workspace options"
-                  expanded={showWorkspaceOptions}
-                  onPress={() => setShowWorkspaceOptions((value) => !value)}
-                />
-                {showWorkspaceOptions ? (
-                  <View className="gap-3 pt-2">
-                    <Text className="text-xs text-foreground-muted">{info.name}</Text>
-                    {!showSetup ? (
-                      <Button
-                        fullWidth
-                        label="New Codespace"
-                        disabled={busy || !info.eligible}
-                        onPress={openSetup}
-                      />
-                    ) : null}
-                    <Text className="text-xs text-foreground-muted">
-                      Deletion permanently removes remote files, including unpushed changes.
-                    </Text>
-                    <Button
-                      fullWidth
-                      label="Delete Codespace"
-                      tone="danger"
-                      disabled={busy}
-                      onPress={() =>
-                        Alert.alert(
-                          "Delete Codespace?",
-                          `${bound?.displayName || info.name}\nGitHub permanently deletes its files, including unpushed changes. Local thread history remains.`,
-                          [
-                            { text: "Cancel", style: "cancel" },
-                            {
-                              text: "Delete",
-                              style: "destructive",
-                              onPress: () => lifecycle("delete", info.name!),
-                            },
-                          ],
-                        )
-                      }
-                    />
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
-          </>
-        ) : null}
-        <View className="gap-3 border-t border-border-subtle pt-2">
-          <CodespaceDisclosure
-            label="Requirements & agent access"
-            expanded={showDetails}
-            onPress={() => setShowDetails((value) => !value)}
-          />
-          {showDetails ? (
-            <View className="gap-4">
-              <Text className="text-xs text-foreground-muted">
-                Use Claude Code or Codex from the main checkout. Codex requires version 0.160.1 or
-                later. Existing project terminals close when switching workspaces. Provider login
-                stays on your T3 host.
-              </Text>
-              {state.data ? (
-                <View className="flex-row items-start justify-between gap-3">
-                  <View className="flex-1 gap-1">
-                    <Text className="text-sm text-foreground">
-                      Allow agents to manage Codespaces
-                    </Text>
-                    <Text className="text-xs text-foreground-muted">
-                      Applies to all projects on this T3 host. Full-access agents can create
-                      billable workspaces and delete remote files.
-                    </Text>
-                  </View>
-                  <Switch
-                    accessibilityLabel="Allow agents to manage Codespaces on this T3 host"
-                    value={state.data.configuration.agentAccessEnabled}
-                    disabled={busy}
-                    onValueChange={(enabled) => {
-                      setPendingLabel("Saving agent access");
-                      setPending(true);
-                      setError(null);
-                      void configure({
-                        environmentId,
-                        input: { ...state.data!.configuration, agentAccessEnabled: enabled },
-                      })
-                        .then((result) => {
-                          if (result._tag === "Failure") {
-                            const cause = squashAtomCommandFailure(result);
-                            setError(
-                              cause instanceof Error
-                                ? cause.message
-                                : "Could not update agent access.",
-                            );
-                          }
-                        })
-                        .finally(() => setPending(false));
-                    }}
-                  />
-                </View>
-              ) : null}
             </View>
-          ) : null}
-          <Button
-            fullWidth
-            label={project.isPending || inventory.isPending ? "Refreshing…" : "Refresh status"}
-            disabled={pending || project.isPending || inventory.isPending}
-            onPress={() => {
-              setError(null);
-              project.refresh();
-              inventory.refresh();
-              state.refresh();
-            }}
+          );
+        })}
+        {feedback ? (
+          <View className="gap-1">
+            <Text accessibilityLiveRegion="polite" className="text-sm text-foreground">
+              {feedback.label}
+            </Text>
+            <Text className="text-xs text-foreground-muted">{feedback.description}</Text>
+            <CodespacesLogHelp url={feedback.logHelpUrl} />
+          </View>
+        ) : null}
+        {projects.length ? (
+          <CodespaceOptionPicker
+            label="Add or manage a project"
+            value={projectId}
+            placeholder="Choose a project"
+            disabled={!canManage}
+            options={projects.map((project) => ({ value: project.id, label: project.title }))}
+            onSelect={setProjectId}
           />
-        </View>
+        ) : (
+          <Text className="text-xs text-foreground-muted">
+            Add a project to this T3 host, then assign it to a computer here.
+          </Text>
+        )}
+        {projectId ? (
+          <CodespacesPickerRows
+            key={projectId}
+            environmentId={environmentId}
+            projectId={projectId as ProjectId}
+          />
+        ) : null}
+        {state.data ? (
+          <View className="flex-row items-center justify-between gap-3">
+            <Text className="flex-1 text-sm text-foreground">
+              Allow agents to manage billable Codespaces
+            </Text>
+            <Switch
+              accessibilityLabel="Allow agents to manage Codespaces"
+              value={state.data.configuration.agentAccessEnabled}
+              disabled={busy || !canManage}
+              onValueChange={async (enabled) => {
+                if (!state.data) return;
+                setPending(true);
+                setError(null);
+                const result = await configure({
+                  environmentId,
+                  input: { ...state.data.configuration, agentAccessEnabled: enabled },
+                });
+                if (result._tag === "Failure") failure(result);
+                setPending(false);
+              }}
+            />
+          </View>
+        ) : null}
+        <Button
+          fullWidth
+          label="Refresh status"
+          disabled={pending}
+          onPress={() => {
+            inventory.refresh();
+            state.refresh();
+          }}
+        />
       </View>
     </SettingsSection>
   );
 }
 
-function CodespaceDisclosure(props: { label: string; expanded: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={props.label}
-      accessibilityState={{ expanded: props.expanded }}
-      onPress={props.onPress}
-      className="min-h-11 flex-row items-center justify-between gap-3 py-2 active:opacity-70"
-    >
-      <Text className="flex-1 text-sm text-foreground-muted">{props.label}</Text>
-      <SymbolView
-        name={props.expanded ? "chevron.up" : "chevron.down"}
-        size={14}
-        tintColorClassName="accent-chevron"
-        type="monochrome"
-      />
-    </Pressable>
-  );
+function CodespacesLogHelp({ url }: { url: string | null }) {
+  return url ? (
+    <Button
+      label="How to view creation logs"
+      tone="text"
+      onPress={() =>
+        void Linking.openURL(url).catch(() =>
+          Alert.alert("Could not open log instructions", `Open ${url} in your browser.`),
+        )
+      }
+    />
+  ) : null;
 }
-
 function CodespaceOptionPicker(props: {
   label: string;
   value: string;
@@ -641,13 +604,32 @@ function CodespaceOptionPicker(props: {
   );
 }
 
-export function CodespacesSettings() {
+export function CodespacesSetupWarning({
+  environmentId,
+  project,
+}: {
+  environmentId: EnvironmentId;
+  project: CodespacesProject;
+}) {
+  const bind = useAtomCommand(codespacesEnvironment.bind);
+  const canManage = useAtomValue(codespacesEnvironment.bind.permissionAtom(environmentId));
+  const [pending, setPending] = useState(false);
+  if (!project.setupWarning || project.setupWarningDismissed) return null;
   return (
-    <SettingsSection title="Codespaces">
-      <Text className="p-4 text-sm text-foreground-muted">
-        Open a project's overview to create or resume a Codespace. Add a .devcontainer configuration
-        first. Agent, provider login and history stay on your T3 host.
-      </Text>
-    </SettingsSection>
+    <View className="gap-2">
+      <Text className="text-sm text-foreground-muted">{project.setupWarning}</Text>
+      <Button
+        label="Don't warn again for this project"
+        disabled={pending || !canManage}
+        onPress={async () => {
+          setPending(true);
+          await bind({
+            environmentId,
+            input: { projectId: project.projectId, name: project.name, dismissSetupWarning: true },
+          });
+          setPending(false);
+        }}
+      />
+    </View>
   );
 }

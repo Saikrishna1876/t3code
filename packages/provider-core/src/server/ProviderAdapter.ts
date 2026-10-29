@@ -505,6 +505,8 @@ export interface ProviderAdapterV2HistoricalContext {
 
 export interface ProviderAdapterV2McpTool {
   readonly name: string;
+  readonly description?: string | undefined;
+  readonly inputSchema?: unknown;
   readonly _meta?: unknown;
   readonly annotations?: unknown;
 }
@@ -517,6 +519,9 @@ export interface ProviderAdapterV2McpCallToolResult {
 }
 
 export interface ProviderAdapterV2McpApps {
+  readonly listServers?: (input: {
+    readonly providerThread: OrchestrationV2ProviderThread;
+  }) => Effect.Effect<ReadonlyArray<string>, ProviderAdapterV2Error>;
   readonly listTools: (input: {
     readonly providerThread: OrchestrationV2ProviderThread;
     readonly server: string;

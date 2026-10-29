@@ -1001,9 +1001,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "project-codespaces",
     title: "GitHub Codespaces",
-    to: "/settings/projects",
+    to: "/settings/connections",
+    targetId: "connections-codespaces",
     searchTerms: [
-      "cloud workspace create connect start stop rebuild delete machine repository github",
+      "cloud computer workspace create connect start stop rebuild delete machine repository github multiple projects",
     ],
   },
   {

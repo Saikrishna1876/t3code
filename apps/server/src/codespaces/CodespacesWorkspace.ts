@@ -21,6 +21,7 @@ import * as NodePath from "node:path";
 
 export interface WorkspaceExecutor {
   readonly name: string;
+  readonly computer?: boolean;
   readonly remoteRoot: string;
   readonly workerUrl: string;
   readonly execServerUrl: string;
@@ -33,6 +34,8 @@ const Binding = Schema.Struct({
   localRoot: Schema.String,
   name: Schema.String,
   remoteRoot: Schema.optionalKey(Schema.String),
+  setupWarning: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  setupWarningDismissed: Schema.optionalKey(Schema.Boolean),
 });
 export type WorkspaceBinding = typeof Binding.Type;
 
@@ -220,7 +223,11 @@ const make = Effect.gen(function* () {
         )
         .sort((a, b) => b.root.length - a.root.length)[0];
       if (!match) return null;
-      const executor = executors.get(match.binding.name) ?? null;
+      const computer = executors.get(match.binding.name);
+      const executor =
+        computer && (!computer.computer || match.binding.remoteRoot)
+          ? { ...computer, remoteRoot: match.binding.remoteRoot ?? computer.remoteRoot }
+          : null;
       return {
         ...match.binding,
         localRoot: match.root,
@@ -303,16 +310,15 @@ const make = Effect.gen(function* () {
     if ("error" in response)
       return yield* decodeVcsError(response.error).pipe(
         Effect.flatMap(Effect.fail),
-        Effect.catchIf(
-          (error) => error._tag === "SchemaError",
-          () =>
+        Effect.catchTags({
+          SchemaError: () =>
             Effect.fail(
               new CodespacesError({
                 code: "bootstrap",
                 message: "Codespace returned an invalid workspace error.",
               }),
             ),
-        ),
+        }),
       );
     if (!("value" in response))
       return yield* new CodespacesError({
@@ -384,11 +390,13 @@ const make = Effect.gen(function* () {
           const remoteRoot =
             binding.name === null
               ? undefined
-              : (executors.get(binding.name)?.remoteRoot ??
-                binding.remoteRoot ??
+              : (binding.remoteRoot ??
                 bindings.find(
                   (item) => item.projectId === binding.projectId && item.name === binding.name,
-                )?.remoteRoot);
+                )?.remoteRoot ??
+                (executors.get(binding.name)?.computer
+                  ? undefined
+                  : executors.get(binding.name)?.remoteRoot));
           const next = [
             ...bindings.filter((item) => item.projectId !== binding.projectId),
             ...(binding.name === null
@@ -410,14 +418,14 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const generation = disconnectGenerations.get(executor.name) ?? 0;
           const next = bindings.map((binding) =>
-            binding.name === executor.name
+            binding.name === executor.name && !binding.remoteRoot && !executor.computer
               ? { ...binding, remoteRoot: executor.remoteRoot }
               : binding,
           );
           if (
             bindings.some(
               (binding) =>
-                binding.name === executor.name && binding.remoteRoot !== executor.remoteRoot,
+                binding.name === executor.name && !binding.remoteRoot && !executor.computer,
             )
           )
             yield* saveBindings(next);

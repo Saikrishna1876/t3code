@@ -913,6 +913,9 @@ importers:
       jose:
         specifier: 'catalog:'
         version: 6.2.2
+      jsonc-parser:
+        specifier: 3.3.1
+        version: 3.3.1
       node-pty:
         specifier: 1.2.0-beta.15
         version: 1.2.0-beta.15(patch_hash=f1e680afec85f650699ea756f91f469844ec4c976f4f168492a45c6b3f67d651)
@@ -5789,10 +5792,6 @@ packages:
 
   '@pierre/highlights@0.2.0':
     resolution: {integrity: sha512-hTpcOU1EzDAP4bYtEhxmMu2jwMvtkUydRUBUpWMSHTs3dw0IaC3Ld5ansMy18L0GE3b6Vfl2OGkLK+pWWpnBmw==}
-
-  '@pierre/theme@1.1.0':
-    resolution: {integrity: sha512-GC2OWTAfTIIWWYhPCygwG8t2EtePQkRfON4MI2rwIkJylmiyqIttJID2dCL8sUD8cNdEvYkEyfEHHKMeCiDLoQ==}
-    engines: {vscode: ^1.0.0}
 
   '@pierre/theme@2.0.0':
     resolution: {integrity: sha512-yNDd9GYLQl1mEUJR8AneJ5e4ohLIHQd/wZLWr4fagt78vS2RwwZNW530vVgHqXFAyFVcFlRmGUD5ramXH46OXw==}
@@ -15668,8 +15667,6 @@ snapshots:
       - '@shikijs/themes'
 
   '@pierre/highlights@0.2.0': {}
-
-  '@pierre/theme@1.1.0': {}
 
   '@pierre/theme@2.0.0': {}
 

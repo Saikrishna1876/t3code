@@ -14,6 +14,7 @@ import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Schema from "effect/Schema";
 import {
   VcsError,
+  CodespacesProjectTransfer,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   type ProjectEntry,
   type ProjectListEntriesInput,
@@ -36,6 +37,9 @@ import {
 import { fileHeaderMimeType } from "../workspace/fileHeaderMimeType.ts";
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import { handleClaudeWorkspaceMcp } from "./ClaudeWorkspaceMcp.ts";
+import { prepareProject } from "./prepareProject.ts";
+
+const decodeProject = Schema.decodeUnknownSync(CodespacesProjectTransfer);
 
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 const encodeVcsError = Schema.encodeSync(Schema.toCodecJson(VcsError));
@@ -483,6 +487,12 @@ export async function startWorker(root: string, token: string, port = 0) {
     }
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
+      if (request.method === "POST" && url.pathname === "/projects/prepare") {
+        const input = decodeProject(JSON.parse(url.searchParams.get("input") ?? "null"));
+        const value = await prepareProject(workspaceRoot, input, request);
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(value));
+        return;
+      }
       if (url.pathname.startsWith("/claude/mcp") && request.method !== "POST") {
         response.writeHead(405, { Allow: "POST" }).end();
         return;
@@ -520,15 +530,16 @@ export async function startWorker(root: string, token: string, port = 0) {
         request.method === "POST" &&
         (url.pathname === "/claude/mcp" || url.pathname === "/claude/mcp/read-only")
       ) {
+        const claudeRoot = await validPath(url.searchParams.get("cwd") ?? workspaceRoot);
         await handleClaudeWorkspaceMcp({
           request,
           response,
           payload,
-          root: workspaceRoot,
+          root: claudeRoot,
           readOnly: url.pathname.endsWith("/read-only"),
-          validPath,
+          validPath: (path, writing) => validPath(NodePath.resolve(claudeRoot, path), writing),
           readPath: async (path) => {
-            const resolved = NodePath.resolve(workspaceRoot, path);
+            const resolved = NodePath.resolve(claudeRoot, path);
             // Attachments are staged outside Git so checkpoints never capture them.
             if (
               NodePath.dirname(resolved) === attachmentDirectory &&
@@ -538,7 +549,7 @@ export async function startWorker(root: string, token: string, port = 0) {
                 throw new Error("Attachment path changed.");
               return resolved;
             }
-            return validPath(path);
+            return validPath(resolved);
           },
           searchContents: entries.searchContents,
         });

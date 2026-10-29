@@ -1,3 +1,4 @@
+import { CodespacesSetupWarning } from "../connection/CodespacesSettings";
 import { useEnvironmentQuery } from "../../state/query";
 import { codespacesEnvironment } from "../../state/codespaces";
 import { DraftEnvironmentControl } from "./DraftEnvironmentControl";
@@ -964,8 +965,8 @@ export function NewTaskDraftScreen(props: {
 
   const executionLocation = codespace.data?.name
     ? codespace.data.connected
-      ? "Codespace"
-      : "Codespace unavailable"
+      ? codespace.data.name
+      : `${codespace.data.name} unavailable`
     : selectedEnvironmentLabel;
   const environmentControl = (
     <DraftEnvironmentControl
@@ -1171,6 +1172,16 @@ export function NewTaskDraftScreen(props: {
                       )
                     }
                     onRemove={() => void removeClonedProject()}
+                  />
+                </View>
+              ) : null}
+              {selectedProject &&
+              codespace.data?.setupWarning &&
+              !codespace.data.setupWarningDismissed ? (
+                <View className="px-3 py-2">
+                  <CodespacesSetupWarning
+                    environmentId={selectedProject.environmentId}
+                    project={codespace.data}
                   />
                 </View>
               ) : null}

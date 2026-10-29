@@ -5,6 +5,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeUtil from "node:util";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 import * as CodespacesWorkspace from "./CodespacesWorkspace.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { resolveAttachmentPath } from "../attachmentStore.ts";
@@ -58,14 +59,16 @@ async function fixture() {
     await new Promise<void>((resolve) => worker.server.close(() => resolve()));
     await worker.runtime.dispose();
   });
+  const request = (path: string, init: RequestInit) =>
+    // @effect-diagnostics-next-line globalFetch:off -- exercises the real standalone HTTP boundary.
+    fetch(`http://127.0.0.1:${worker.port}${path}`, init);
   async function call<A = unknown>(
     group: string,
     method: string,
     args: unknown[],
     token = "executor-token",
   ) {
-    // @effect-diagnostics-next-line globalFetch:off -- exercises the real standalone HTTP boundary.
-    const response = await fetch(`http://127.0.0.1:${worker.port}/call`, {
+    const response = await request("/call", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ group, method, args }),
@@ -75,9 +78,162 @@ async function fixture() {
       body: response.status === 200 ? ((await response.json()) as { value: A }) : null,
     };
   }
-  return { local, remote, call, worker };
+  return { local, remote, call, request, worker };
 }
 describe("Codespace workspace worker", () => {
+  it("loads the deployed bundle with only its provisioned native search dependency", async () => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-worker-bundle-"));
+    cleanups.push(() => NodeFSP.rm(root, { recursive: true, force: true }));
+    const bundle = NodePath.join(root, "worker.mjs");
+    const nativeModules = NodePath.join(root, "node_modules", "@ff-labs");
+    await NodeFSP.mkdir(nativeModules, { recursive: true });
+    await NodeFSP.symlink(
+      await NodeFSP.realpath(new URL("../../node_modules/@ff-labs/fff-node", import.meta.url)),
+      NodePath.join(nativeModules, "fff-node"),
+      "junction",
+    );
+    await NodeFSP.copyFile(new URL("../../dist-workspace/worker.mjs", import.meta.url), bundle);
+    await expect(
+      execute(
+        process.execPath,
+        [
+          "--input-type=module",
+          "--eval",
+          "await import(process.argv[1])",
+          NodeURL.pathToFileURL(bundle).href,
+        ],
+        { cwd: root },
+      ),
+    ).resolves.toMatchObject({ stdout: "", stderr: "" });
+  });
+
+  it("adds independent projects from local Git history without a devcontainer and preserves edits on reconnect", async () => {
+    const test = await fixture();
+    const bundle = NodePath.join(test.local, "source.bundle");
+    const branch = (
+      await execute("git", ["symbolic-ref", "--short", "HEAD"], { cwd: test.local })
+    ).stdout.trim();
+    await execute("git", ["bundle", "create", bundle, "HEAD", branch], { cwd: test.local });
+    const add = async (projectId: string, folder: string) =>
+      test.request(
+        `/projects/prepare?input=${encodeURIComponent(JSON.stringify({ projectId, folder, ref: branch }))}`,
+        {
+          method: "POST",
+          headers: { authorization: "Bearer executor-token" },
+          body: await NodeFSP.readFile(bundle),
+        },
+      );
+    const first = await add("first-project", "first");
+    expect(first.status).toBe(200);
+    expect(await first.json()).toMatchObject({
+      remoteRoot: NodePath.join(test.remote, "first"),
+      setupWarning: null,
+    });
+    const second = await add("second-project", "second");
+    expect(second.status).toBe(200);
+    const edited = NodePath.join(test.remote, "first/proof.txt");
+    await NodeFSP.writeFile(edited, "remote edits");
+    expect((await add("first-project", "first")).status).toBe(200);
+    expect(await NodeFSP.readFile(edited, "utf8")).toBe("remote edits");
+    expect(await NodeFSP.readFile(NodePath.join(test.remote, "second/proof.txt"), "utf8")).toBe(
+      "baseline\n",
+    );
+    const duplicate = await add("different-project", "first");
+    expect(duplicate.status).toBe(200);
+    const duplicateBinding = (await duplicate.json()) as { remoteRoot: string };
+    expect(duplicateBinding.remoteRoot).not.toBe(NodePath.join(test.remote, "first"));
+    expect(NodePath.basename(duplicateBinding.remoteRoot)).toMatch(/^first-/);
+    await NodeFSP.writeFile(
+      NodePath.join(duplicateBinding.remoteRoot, "proof.txt"),
+      "second project edits",
+    );
+    const reconnectedDuplicate = await add("different-project", "first");
+    expect(reconnectedDuplicate.status).toBe(200);
+    expect(await reconnectedDuplicate.json()).toMatchObject(duplicateBinding);
+    expect(
+      await NodeFSP.readFile(NodePath.join(duplicateBinding.remoteRoot, "proof.txt"), "utf8"),
+    ).toBe("second project edits");
+    expect(await NodeFSP.readFile(edited, "utf8")).toBe("remote edits");
+    expect((await add("different-project", "../escape")).status).toBe(400);
+    expect(
+      (
+        await test.request("/health", {
+          headers: { authorization: "Bearer executor-token" },
+        })
+      ).status,
+    ).toBe(200);
+  });
+
+  it("keeps imported files usable when devcontainer setup cannot run safely", async () => {
+    const test = await fixture();
+    await NodeFSP.mkdir(NodePath.join(test.local, ".devcontainer"));
+    await NodeFSP.writeFile(
+      NodePath.join(test.local, ".devcontainer/devcontainer.json"),
+      '// JSONC configuration\n{"remoteEnv":{"HOST":"${localEnv:HOME}"}, "onCreateCommand":"touch setup-ran",}',
+    );
+    await execute("git", ["add", ".devcontainer"], { cwd: test.local });
+    await execute(
+      "git",
+      ["-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-qm", "setup"],
+      { cwd: test.local },
+    );
+    const bundle = NodePath.join(test.local, "source.bundle");
+    await execute("git", ["bundle", "create", bundle, "HEAD"], { cwd: test.local });
+    const input = {
+      projectId: "guarded-project",
+      folder: "guarded",
+      devcontainerPath: ".devcontainer/devcontainer.json",
+    };
+    const response = await test.request(
+      `/projects/prepare?input=${encodeURIComponent(JSON.stringify(input))}`,
+      {
+        method: "POST",
+        headers: { authorization: "Bearer executor-token" },
+        body: await NodeFSP.readFile(bundle),
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      remoteRoot: NodePath.join(test.remote, "guarded"),
+      setupWarning: expect.stringContaining("Project added."),
+    });
+    expect(await NodeFSP.readFile(NodePath.join(test.remote, "guarded/proof.txt"), "utf8")).toBe(
+      "baseline\n",
+    );
+    await expect(
+      NodeFSP.stat(NodePath.join(test.remote, "guarded/setup-ran")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(
+      (
+        await test.call("files", "readFile", [
+          { cwd: NodePath.join(test.remote, "guarded"), relativePath: "proof.txt" },
+        ])
+      ).response.status,
+    ).toBe(200);
+  });
+
+  it("scopes Claude relative file and shell operations to each project on a shared computer", async () => {
+    const test = await fixture();
+    await NodeFSP.mkdir(NodePath.join(test.remote, "nested"));
+    await NodeFSP.writeFile(NodePath.join(test.remote, "nested/proof.txt"), "project only");
+    const client = new Client({ name: "shared-computer-test", version: "1.0.0" });
+    await client.connect(
+      new StreamableHTTPClientTransport(
+        new URL(
+          `http://127.0.0.1:${test.worker.port}/claude/mcp?cwd=${encodeURIComponent(NodePath.join(test.remote, "nested"))}`,
+        ),
+        { requestInit: { headers: { Authorization: "Bearer executor-token" } } },
+      ) as Transport,
+    );
+    cleanups.push(() => client.close());
+    expect(
+      await client.callTool({ name: "Read", arguments: { file_path: "proof.txt" } }),
+    ).toMatchObject({ content: [{ text: expect.stringContaining("project only") }] });
+    expect(await client.callTool({ name: "Bash", arguments: { command: "pwd" } })).toMatchObject({
+      content: [{ text: expect.stringContaining(NodePath.join(test.remote, "nested")) }],
+    });
+  });
+
   async function claudeClient(readOnly = false) {
     const test = await fixture();
     const client = new Client({ name: "claude-workspace-test", version: "1.0.0" });

@@ -87,6 +87,8 @@ function harness(
     prepareStop?: CodespacesHost.CodespacesHost["Service"]["prepareStop"];
     saved?: Uint8Array;
     devcontainerEntries?: string[];
+    hasDevcontainer?: boolean;
+    origin?: string;
     bindings?: ReadonlyArray<CodespacesWorkspace.WorkspaceBinding>;
     threads?: ReadonlyArray<
       Pick<
@@ -97,9 +99,9 @@ function harness(
   } = {},
 ) {
   const reservations = makeWorkspaceReservations();
-  const bindings = overrides.bindings ?? [
-    { projectId: "project-test", localRoot: "/workspace/fork", name: "test-space-1" },
-  ];
+  let bindings = overrides.bindings
+    ? [...overrides.bindings]
+    : [{ projectId: "project-test", localRoot: "/workspace/fork", name: "test-space-1" }];
   const requests: GitHubRest.GitHubRestInput[] = [];
   const targetEvents: string[] = [];
   const pinnedTokens: string[] = [];
@@ -150,7 +152,7 @@ function harness(
           ? { login: account }
           : input.path.startsWith("user/codespaces?")
             ? { codespaces: [raw(1, state)] }
-            : input.path === "repos/example/fork"
+            : input.path === "repos/github/codespaces-blank"
               ? { id: 42 }
               : raw(1, state);
       return { status: 200, headers: {}, body: json(body), truncated: false, invalidUtf8: false };
@@ -166,9 +168,10 @@ function harness(
               path.includes(".sh/devcontainer.json")
                 ? Effect.die("Tried to inspect a configuration inside a file")
                 : Effect.succeed(
-                    path === "/workspace/fork/.devcontainer" ||
-                      path === "/workspace/fork/.devcontainer/devcontainer.json" ||
-                      path === "/workspace/fork/.devcontainer/fork-update/devcontainer.json",
+                    overrides.hasDevcontainer !== false &&
+                      (path === "/workspace/fork/.devcontainer" ||
+                        path === "/workspace/fork/.devcontainer/devcontainer.json" ||
+                        path === "/workspace/fork/.devcontainer/fork-update/devcontainer.json"),
                   ),
             readDirectory: () => Effect.succeed(overrides.devcontainerEntries ?? []),
             stat: (path) =>
@@ -178,7 +181,7 @@ function harness(
           }),
         ),
         Layer.succeed(ProjectStore.ProjectStoreV2, {
-          get: () => Effect.succeed(Option.some({ workspaceRoot: "/workspace/fork" })),
+          get: () => Effect.succeedSome({ workspaceRoot: "/workspace/fork" }),
         } as unknown as ProjectStore.ProjectStoreV2["Service"]),
         Layer.succeed(ProjectionStore.ProjectionStoreV2, {
           getShellSnapshot: () => Effect.sync(() => ({ threads })),
@@ -188,7 +191,7 @@ function harness(
             Effect.succeed({
               exitCode: ChildProcessSpawner.ExitCode(0),
               stdout: input.args.includes("origin")
-                ? "https://github.com/example/fork.git"
+                ? (overrides.origin ?? "https://github.com/example/fork.git")
                 : "main",
               stderr: "",
               stdoutTruncated: false,
@@ -197,7 +200,7 @@ function harness(
         }),
         Layer.succeed(CodespacesWorkspace.CodespacesWorkspace, {
           wasRemote: () => Effect.succeed(false),
-          bindings: Effect.succeed(bindings),
+          bindings: Effect.sync(() => bindings),
           acquireWork: reservations.acquireWork,
           reserve: ({ id, projectId, name, extend }) => {
             const names = new Set(name ? [name] : []);
@@ -213,8 +216,16 @@ function harness(
           bind: (binding) =>
             Effect.sync(() => {
               targetEvents.push("bind:" + binding.name);
+              bindings = [
+                ...bindings.filter((entry) => entry.projectId !== binding.projectId),
+                ...(binding.name === null ? [] : [binding]),
+              ];
             }),
-          lookup: () => Effect.succeed(null),
+          lookup: (cwd) =>
+            Effect.sync(() => {
+              const binding = bindings.find((entry) => entry.localRoot === cwd);
+              return binding ? { ...binding, executor: null, remoteCwd: null } : null;
+            }),
           disconnect: () => Effect.void,
           register: () => Effect.void,
           stageAttachment: () => Effect.die("Unexpected attachment staging"),
@@ -263,6 +274,8 @@ function harness(
                 overrides.connect ? overrides.connect(...args) : Effect.succeed(managed),
               ),
             ),
+          prepareProject: () =>
+            Effect.succeed({ remoteRoot: "/workspaces/fork", setupWarning: null }),
           prepareStop: overrides.prepareStop ?? (() => Effect.void),
           disconnect: () =>
             Effect.sync(() => {
@@ -555,7 +568,7 @@ describe("Codespaces controller", () => {
             body: json(
               input.path === "user"
                 ? { login: "example" }
-                : input.path === "repos/example/fork"
+                : input.path === "repos/github/codespaces-blank"
                   ? { id: 42 }
                   : raw(),
             ),
@@ -592,6 +605,12 @@ describe("Codespaces controller", () => {
       });
       return Effect.gen(function* () {
         const service = yield* Codespaces.Codespaces;
+        yield* service.run({
+          action: "connect",
+          name: managed.name,
+          clientRequestId: "computer-connect-test",
+        });
+        yield* completed(service, "computer-connect-test");
         yield* service.bind({ projectId, name: managed.name });
         expect((yield* service.snapshot).bindingRevision).toBe(1);
         yield* service.bind({ projectId, name: null });
@@ -720,14 +739,19 @@ describe("Codespaces controller", () => {
       });
     }).pipe(Effect.provide(test.layer));
   });
-  it.effect("rejects creation without a project before billable creation", () => {
-    const test = harness();
+  it.effect("creates the blank template instead of the project's devcontainer", () => {
+    const test = harness({ hasDevcontainer: false });
     return Effect.gen(function* () {
       const service = yield* Codespaces.Codespaces;
-      const { projectId: _projectId, ...withoutProject } = create;
-      const result = yield* service.run(withoutProject).pipe(Effect.flip);
-      expect(result.code).toBe("configuration");
-      expect(test.requests.some((request) => request.method === "POST")).toBe(false);
+      expect((yield* service.project({ projectId: testProjectId })).eligible).toBe(true);
+      yield* service.run(create);
+      expect((yield* completed(service, create.clientRequestId)).status).toBe("succeeded");
+      const body = test.requests.find(
+        (request) => request.path === "user/codespaces" && request.method === "POST",
+      )?.body;
+      expect(body).toMatchObject({ repository_id: 42 });
+      expect(body).not.toHaveProperty("devcontainer_path");
+      expect(body).not.toHaveProperty("ref");
     }).pipe(Effect.provide(test.layer));
   });
   it.effect(
@@ -1016,5 +1040,78 @@ it.effect("ignores scripts beside devcontainer configurations", () => {
       ".devcontainer/devcontainer.json",
       ".devcontainer/fork-update/devcontainer.json",
     ]);
+  }).pipe(Effect.provide(test.layer));
+});
+
+it.effect("creates a blank computer without a project", () => {
+  const test = harness();
+  return Effect.gen(function* () {
+    const service = yield* Codespaces.Codespaces;
+    const operation = yield* service.run({
+      action: "create",
+      clientRequestId: "blank-create-request",
+      machine: "basicLinux32gb",
+      idleTimeoutMinutes: 30,
+      retentionDays: 1,
+    });
+    expect((yield* completed(service, operation.clientRequestId)).status).toBe("succeeded");
+    expect(test.requests.some((request) => request.path === "repos/github/codespaces-blank")).toBe(
+      true,
+    );
+    expect(
+      test.requests.find(
+        (request) => request.path === "user/codespaces" && request.method === "POST",
+      )?.body,
+    ).toMatchObject({ repository_id: 42 });
+    expect(test.targetEvents).toEqual([]);
+  }).pipe(Effect.provide(test.layer));
+});
+
+it.effect("adds a project without a GitHub remote or devcontainer to an unrelated computer", () => {
+  const test = harness({ bindings: [], hasDevcontainer: false, origin: "" });
+  return Effect.gen(function* () {
+    const service = yield* Codespaces.Codespaces;
+    const info = yield* service.project({ projectId: testProjectId });
+    expect(info.eligible).toBe(true);
+    expect(info.repository).toBe("");
+    expect(info.devcontainerPaths).toEqual([]);
+    yield* service.run({
+      action: "connect",
+      projectId: testProjectId,
+      name: managed.name,
+      clientRequestId: "unrelated-computer",
+    });
+    expect((yield* completed(service, "unrelated-computer")).status).toBe("succeeded");
+    expect((yield* service.project({ projectId: testProjectId })).workspacePath).toBe(
+      "/workspaces/fork",
+    );
+  }).pipe(Effect.provide(test.layer));
+});
+
+it.effect("persists setup notification dismissal and lets the user restore it", () => {
+  const binding = {
+    projectId: testProjectId,
+    localRoot: "/workspace/fork",
+    name: managed.name,
+    remoteRoot: "/workspaces/fork",
+    setupWarning: "Setup exceeded its memory limit.",
+  };
+  const test = harness({ bindings: [binding] });
+  return Effect.gen(function* () {
+    const service = yield* Codespaces.Codespaces;
+    const dismissed = yield* service.bind({
+      projectId: testProjectId,
+      name: managed.name,
+      dismissSetupWarning: true,
+    });
+    expect(dismissed.setupWarningDismissed).toBe(true);
+    expect(dismissed.setupWarning).toBe(binding.setupWarning);
+    const restored = yield* service.bind({
+      projectId: testProjectId,
+      name: managed.name,
+      dismissSetupWarning: false,
+    });
+    expect(restored.setupWarningDismissed).toBe(false);
+    expect(test.requests.filter((request) => request.method === "POST")).toEqual([]);
   }).pipe(Effect.provide(test.layer));
 });

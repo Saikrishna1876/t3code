@@ -2733,6 +2733,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     });
 
   const makeWakeHarnessWithOptions = (options?: {
+    readonly mcpApps?: ProviderAdapter.ProviderAdapterV2McpApps;
     readonly close?: (sdkMessages: Queue.Queue<SDKMessage>) => Effect.Effect<void>;
     readonly interrupt?: Effect.Effect<void>;
     readonly setPermissionMode?: ClaudeAdapterV2.ClaudeAgentSdkQuerySession["setPermissionMode"];
@@ -2851,6 +2852,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                 processQueues.push(processMessages);
                 return {
                   messages,
+                  ...(options?.mcpApps ? { mcpApps: options.mcpApps } : {}),
                   offer: (message: SDKUserMessage) =>
                     Effect.sync(() => {
                       offeredMessages.push(message);
@@ -2872,6 +2874,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               processQueues.push(sdkMessages);
               return {
                 messages,
+                ...(options?.mcpApps ? { mcpApps: options.mcpApps } : {}),
                 offer: (message) =>
                   Effect.sync(() => {
                     offeredMessages.push(message);
@@ -2984,6 +2987,73 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           changes.until(() => continuationRequests.length >= count),
       };
     });
+  it.effect("routes host MCP only through the owning live Claude query", () =>
+    Effect.gen(function* () {
+      const calls: unknown[] = [];
+      const harness = yield* makeWakeHarnessWithOptions({
+        mcpApps: {
+          listServers: () => Effect.succeed(["host-notes"]),
+          listTools: () => Effect.succeed([{ name: "lookup" }]),
+          callTool: (input) =>
+            Effect.sync(() => {
+              calls.push(input);
+              return { content: [{ type: "text", text: "Friday" }] };
+            }),
+          readResource: () => Effect.succeed({ contents: [] }),
+        },
+      });
+      const bridge = harness.runtime.mcpApps;
+      assert.isDefined(bridge);
+      if (!bridge?.listServers) return yield* Effect.die("Missing Claude host bridge");
+      assert.equal(
+        (yield* bridge.listServers({ providerThread: harness.providerThread }).pipe(Effect.result))
+          ._tag,
+        "Failure",
+      );
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("host-mcp"),
+          text: "Use host notes",
+          attachments: [],
+        }),
+      );
+      assert.deepEqual(yield* bridge.listServers({ providerThread: harness.providerThread }), [
+        "host-notes",
+      ]);
+      const input = {
+        providerThread: harness.providerThread,
+        server: "host-notes",
+        tool: "lookup",
+        arguments: { title: "Release" },
+      };
+      assert.deepEqual(yield* bridge.callTool(input), {
+        content: [{ type: "text", text: "Friday" }],
+      });
+      assert.equal(harness.offeredMessages.length, 1);
+      assert.equal(
+        (yield* bridge
+          .callTool({
+            ...input,
+            providerThread: {
+              ...harness.providerThread,
+              nativeThreadRef: { driver: "claude", nativeId: "another-thread", strength: "strong" },
+            },
+          })
+          .pipe(Effect.result))._tag,
+        "Failure",
+      );
+      assert.deepEqual(calls, [input]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
+
   const makeWakeHarness = makeWakeHarnessWithOptions();
 
   it.effect.each(["release-after", "cancel-after", "release-before", "resume-pending"] as const)(

@@ -1039,6 +1039,70 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       };
     });
 
+  it.effect.each(["complete", "repeated-cursor"] as const)(
+    "discovers host MCP servers with %s pagination",
+    (pagination) =>
+      Effect.gen(function* () {
+        const nativeThreadId = `host-mcp-${pagination}`;
+        const server = (name: string) => ({
+          name,
+          authStatus: "unsupported",
+          tools: {},
+          resources: [],
+          resourceTemplates: [],
+        });
+        const entries: Array<CodexReplay.CodexAppServerReplayEntry> = codexReplayPreamble({
+          nativeThreadId,
+          nativeTurnId: "unused",
+          prompt: "unused",
+        }).slice(0, 5);
+        for (const [index, data, cursor, nextCursor] of [
+          [0, [server("zeta"), server("alpha")], undefined, "page-two"],
+          [
+            1,
+            [server("alpha"), server("beta")],
+            "page-two",
+            pagination === "complete" ? null : "page-two",
+          ],
+        ] as const) {
+          entries.push(
+            {
+              type: "expect_outbound",
+              label: `host-mcp-page-${index}`,
+              frame: {
+                id: index + 3,
+                method: "mcpServerStatus/list",
+                params: {
+                  threadId: nativeThreadId,
+                  detail: "toolsAndAuthOnly",
+                  limit: 100,
+                  ...(cursor === undefined ? {} : { cursor }),
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              label: `host-mcp-page-${index}`,
+              frame: { id: index + 3, result: { data, nextCursor } },
+            },
+          );
+        }
+        const harness = yield* makeCodexReplayHarness(
+          makeCodexReplayTranscript({ scenario: nativeThreadId, entries }),
+        );
+        const listServers = harness.runtime.mcpApps?.listServers;
+        if (!listServers) return yield* Effect.die("Missing Codex host MCP discovery");
+        const result = listServers({ providerThread: harness.providerThread });
+        if (pagination === "complete") assert.deepEqual(yield* result, ["alpha", "beta", "zeta"]);
+        else assert.equal((yield* Effect.flip(result))._tag, "ProviderAdapterProtocolError");
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+  );
+
   it.effect.each(["supported", "unsupported", "invalid"] as const)(
     "delivers native history with %s app-server protocol",
     (response) =>

@@ -20,6 +20,10 @@ Ordinary coding tasks need no T3 tools.
 
 - Show trends, comparisons, and flows as a chart or diagram, even unasked, and any visual the user asks for here: pass its HTML to \`html_preview\`, then \`html_render\`. If the visual is a file, pass that file's HTML. A screenshot on disk or a text description does not show it. Never start a server for it. Tools a web page exposes give data only. Never use them to show results. Asked for an image to post, send, or use elsewhere: a \`.png\` file and its path, never \`html_render\`.
 - Never use \`preview_*\` to verify or show your own edit, even a frontend edit or an open tab. Do not repeat preview calls from an earlier turn. Use them only when the current request asks for browser work or names a page or tab. Public pages: web fetch or search unless browser work was asked; then preview tools only, no web fetch. Close a tab you opened before you reply, unless the user asked for it or uses it.`,
+  `### Host skills and MCP
+
+Read all skills and their reference files from the T3 host with \`host_skills_list\` and \`host_skills_read\`, including skills named in the native catalog or global instructions. When commands run in a Codespace, laptop skill paths are not remote filesystem paths. Do not search for or install another copy remotely. Reading a skill does not make its host-only binaries or accounts available to remote commands.
+MCP host execution is selective. Use \`host_mcp_list\` and \`host_mcp_call\` only for a named server the user selected for host execution or a tool that needs host resources. Keep other MCP tools at their existing execution location. Never automatically reroute all MCP calls. Host calls retain the host server's credentials and side effects; remote workspace paths are not translated. If the provider has no host bridge, report that and use its native MCP tools.`,
 ];
 
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `

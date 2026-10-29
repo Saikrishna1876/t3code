@@ -193,66 +193,81 @@ For Antigravity's Google callback on a remote host, see
 
 ## GitHub Codespaces
 
-Open your project's **Run on** selector and choose **Codespace**. If it has
-no Codespace, T3 prompts you to create one or reuse an existing one for the
-same repository and branch. Manage it from the same selector or the project's
-settings. If the project is not ready, choosing Codespace adds setup instructions
-to your prompt without sending them. Existing prompt text stays intact. Review
-and send the instructions to have your local agent prepare the project.
+Open **Settings, Environments, Codespaces** to create a cloud computer or add an
+existing Codespace. New computers use GitHub's blank template. Choose a machine,
+review the compute and storage charges, then create it. A computer can hold
+several projects, each in `/workspaces/{project_name}`. Creation does not require
+a project, GitHub repository, or devcontainer configuration.
+In browser VS Code, open `/workspaces` to see every project's folder.
 
-Creating a Codespace requires a GitHub origin and a `.devcontainer/devcontainer.json`
-configuration, or a configuration below `.devcontainer/`. Push the selected
-configuration to the branch before creating a Codespace. Containers need
-Node.js and SSH, usually supplied by the Node and `sshd` devcontainer features.
+Choose a project in the same settings section, then choose **Use computer**.
+The first connection copies the project's current committed branch and Git
+history from your T3 host. Commit local changes first. A GitHub origin is optional.
+Reconnecting preserves the remote checkout and any uncommitted remote changes.
+Projects with the same folder name need distinct local folder names.
 
-Your connected T3 host keeps the project, thread history, agent and provider
-login. It must remain online with GitHub CLI signed in:
+The **Run on** picker lists computers added in settings. Stopped computers stay
+visible with a **Start** button. Start resumes the existing computer and its
+files. **Work locally** returns a project to its local checkout.
+
+A devcontainer is optional. When present, T3 attempts its lifecycle setup commands
+with memory, process and CPU limits. If the computer cannot enforce those limits,
+or setup fails, your project files remain available and T3 reports what needs
+manual setup. Container images and features do not rebuild the shared computer.
+Choose **Don't warn again for this project** to hide setup notices. Restore them
+with **Show setup warnings** in the project's settings.
+
+Use **Prepare cloud setup** in project settings to open instructions for your
+agent. Review and send the draft when ready. It preserves existing draft text
+and asks the agent to prepare setup without rebuilding the shared computer or
+running an unrestricted dependency installation.
+
+Your T3 host keeps thread history, the agent and provider login. It must stay
+online with GitHub CLI signed in:
 
 ```sh
 gh auth refresh -h github.com -s codespace
 ```
 
-You can also choose **Sign in for Codespaces access** in the project's Codespace
-settings, then enter the displayed code on GitHub. This adds Codespaces permission
-while keeping existing GitHub permissions. If you use a token from Settings or the
-server environment, add Codespaces permission to that token instead.
+You can also choose **Sign in for Codespaces access** in Codespaces settings,
+then enter the displayed code on GitHub. Existing GitHub permissions are retained.
+If your host uses a token from Settings or its environment, add Codespaces
+permission to that token instead.
 
-Use an existing Codespace for this repository and branch when available.
-Resume a stopped one to avoid creating a fresh container. Creating a new one
-lets you choose its machine and pushed container configuration. T3 shows
-creation and connection progress while you keep browsing your local threads.
-GitHub controls container startup time. Prebuilds and smaller container setup
-commands can reduce it.
-
-The container needs Node.js 22.13 or later, npm, and an SSH server. T3 installs
-its search engine once and reuses it when reconnecting.
-
-Remote execution supports local Claude Code or Codex 0.160.1 or later and
-uses the project's main checkout. No provider sign-in is required inside the
-Codespace. Agent commands, file browsing, terminals, Git and checkpoints
-operate on its filesystem. Loopback preview URLs are forwarded privately
-through the T3 host. Other providers and additional worktrees are not yet
-supported for this execution target.
+Remote execution supports Claude Code and Codex 0.160.1 or later, using each
+project's main checkout. No provider sign-in is required in the Codespace.
+Commands, file browsing, terminals, Git and checkpoints use its filesystem.
+Preview URLs are forwarded privately through your T3 host. Other providers and
+additional worktrees are not supported for this execution target.
 
 Claude uses remote tools for reading, searching, editing and shell commands.
-Native Claude skills, subagents and background shell commands are unavailable
-on this target. Use T3 delegation for agents and the project terminal for
-persistent commands such as development servers.
+The agent reads skills and their text references from your T3 host through
+`host_skills_list` and `host_skills_read`. Host skill paths do not exist in the
+Codespace. A skill's scripts still need the runtime and accounts they use.
+Native Claude subagents and background shell commands are unavailable.
+Use the project terminal for persistent commands such as development servers.
 
-Stop compute when finished. Finish or stop active turns before stopping or
-switching targets. Resume reconnects the same Codespace and files. Work locally
-returns the project to its local checkout; it does not copy remote edits back.
-Commit and push remote changes before switching if you need them locally.
-Checkpoint refs belong to the checkout where they were captured.
+For an MCP tool that needs your host, ask the agent to use `host_mcp_list` and
+`host_mcp_call` with that server and tool. Each call uses the host connection;
+other MCP tools keep their existing execution location. This bridge currently
+requires an active Codex or Claude session. Claude may omit tool descriptions and input schemas; provide known arguments
+when requesting a call. Other providers keep their native MCP tools.
+Host MCP calls require a full-access thread in Default mode.
 
-GitHub may charge for compute and retained storage. Deleting a Codespace
-permanently removes unpushed remote files. Local thread history remains.
-Creation defaults to a 30-minute idle timeout and one-day retention.
+Finish or stop active turns before stopping a computer or switching targets.
+Stopping affects every project on that computer. Local and remote edits are not
+copied back automatically. Commit and push changes before switching if you need
+them elsewhere. Checkpoint refs belong to the checkout where they were captured.
+Private repository pushes may require granting that Codespace access to the
+repository through GitHub.
 
-Web, desktop and mobile control the Codespace through your T3 environment's
-normal connection. You do not need to pair the Codespace separately. Agent
-management must be turned on in Codespace settings and is available only to
-full-access agents.
+GitHub may charge for compute and retained storage. Deleting a computer removes
+all its projects and unpushed files. Local thread history remains. Creation uses
+a 30-minute idle timeout and one-day retention.
+
+Web, desktop and mobile control computers through your T3 host's normal
+connection. No separate pairing is needed. Agent management must be enabled in
+Codespaces settings and is available only to full-access agents.
 
 ## Browser on a remote environment
 

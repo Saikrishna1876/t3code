@@ -6501,6 +6501,36 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             payload: cause,
           });
         const mcpApps: ProviderAdapter.ProviderAdapterV2McpApps = {
+          listServers: Effect.fn("CodexAdapterV2.listMcpServers")(
+            function* (toolsInput) {
+              const threadId = yield* getNativeThreadId(toolsInput.providerThread);
+              const names = new Set<string>();
+              const seen = new Set<string>();
+              let cursor: string | undefined;
+              for (let page = 0; page < 100; page++) {
+                const response = yield* ensureInitialized.pipe(
+                  Effect.andThen(
+                    client.request("mcpServerStatus/list", {
+                      threadId,
+                      detail: "toolsAndAuthOnly",
+                      limit: 100,
+                      ...(cursor === undefined ? {} : { cursor }),
+                    }),
+                  ),
+                );
+                for (const server of response.data) names.add(server.name);
+                if (!response.nextCursor) return [...names].sort();
+                if (seen.has(response.nextCursor)) break;
+                seen.add(response.nextCursor);
+                cursor = response.nextCursor;
+              }
+              return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                driver: CODEX_PROVIDER,
+                detail: "Host MCP inventory did not finish.",
+              });
+            },
+            Effect.mapError(mcpAppsError("Failed to list host MCP servers.")),
+          ),
           listTools: Effect.fn("CodexAdapterV2.listTools")(
             function* (toolsInput) {
               const threadId = yield* getNativeThreadId(toolsInput.providerThread);
@@ -6514,7 +6544,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 ),
               );
               const server = response.data.find((entry) => entry.name === toolsInput.server);
-              return Object.values(server?.tools ?? {});
+              return Object.values(server?.tools ?? {}).map((tool) => ({
+                ...tool,
+                description: tool.description ?? undefined,
+              }));
             },
             Effect.mapError(mcpAppsError("Failed to list Codex MCP tools.")),
           ),

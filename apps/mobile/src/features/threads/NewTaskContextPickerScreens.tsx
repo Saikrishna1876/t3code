@@ -1,9 +1,5 @@
 import { useServerConfigs } from "../../state/entities";
-import { useAtomValue } from "@effect/atom-react";
-import { codespacesSetupPrompt } from "@t3tools/client-runtime/codespaces-presentation";
-import { ProjectCodespacesControl } from "../connection/CodespacesSettings";
-import { codespacesEnvironment } from "../../state/codespaces";
-import { useEnvironmentQuery } from "../../state/query";
+import { CodespacesPickerRows } from "../connection/CodespacesSettings";
 import { NativeScrollView } from "../../native/NativeScrollViewMarker";
 import { SearchField } from "../../components/ui/SearchField";
 import { Button } from "../../components/ui/Button";
@@ -26,7 +22,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import * as Haptics from "expo-haptics";
 import { useNavigation } from "@react-navigation/native";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { sanitizeNewRefName } from "@t3tools/shared/git";
 import { Platform, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -193,32 +189,10 @@ export function NewTaskEnvironmentPickerRouteScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const serverConfigs = useServerConfigs();
-  const [showCodespaces, setShowCodespaces] = useState(false);
   const project = flow.selectedProject;
-  const canRunCodespaces = useAtomValue(
-    codespacesEnvironment.run.permissionAtom(project?.environmentId ?? flow.selectedEnvironmentId),
+  const codespacesSupported = Boolean(
+    project && serverConfigs.get(project.environmentId)?.environment.capabilities.codespaces,
   );
-  const codespace = useEnvironmentQuery(
-    project && serverConfigs.get(project.environmentId)?.environment.capabilities.codespaces
-      ? codespacesEnvironment.project({
-          environmentId: project.environmentId,
-          input: { projectId: project.id },
-        })
-      : null,
-  );
-  const canManageCodespaces = Boolean(
-    canRunCodespaces &&
-    project &&
-    serverConfigs.get(project.environmentId)?.environment.capabilities.codespaces,
-  );
-  useEffect(() => {
-    if (!showCodespaces || !codespace.data || codespace.data.eligible || codespace.data.name)
-      return;
-    flow.setPrompt(codespacesSetupPrompt(flow.prompt));
-    // oxlint-disable-next-line react/set-state-in-effect -- Server eligibility completes the redirect and closes its disclosure.
-    setShowCodespaces(false);
-    navigation.goBack();
-  }, [showCodespaces, codespace.data, flow, navigation]);
   return (
     <View className="flex-1 bg-sheet" collapsable={false}>
       <NativeStackScreenOptions
@@ -249,7 +223,7 @@ export function NewTaskEnvironmentPickerRouteScreen() {
               <EnvironmentPickerRow
                 key={String(environment.environmentId)}
                 environmentId={environment.environmentId}
-                isLast={index === flow.environments.length - 1 && !canManageCodespaces}
+                isLast={index === flow.environments.length - 1}
                 disabled={flow.switchingToEnvironmentId !== null}
                 onPress={() => {
                   void Haptics.selectionAsync();
@@ -261,27 +235,10 @@ export function NewTaskEnvironmentPickerRouteScreen() {
                 title={environment.environmentLabel}
               />
             ))}
-            {canManageCodespaces ? (
-              <SelectionRow
-                icon="cloud"
-                isLast
-                onPress={() => {
-                  if (codespace.data && !codespace.data.eligible && !codespace.data.name) {
-                    flow.setPrompt(codespacesSetupPrompt(flow.prompt));
-                    navigation.goBack();
-                  } else {
-                    setShowCodespaces((value) => !value);
-                  }
-                }}
-                selected={false}
-                subtitle={showCodespaces ? "Hide Codespace options" : "Show Codespace options"}
-                title={codespace.data?.name ? "Manage Codespace" : "Codespace…"}
-              />
-            ) : null}
           </PickerSurface>
-          {showCodespaces && project ? (
+          {codespacesSupported && project ? (
             <View className="pt-5">
-              <ProjectCodespacesControl
+              <CodespacesPickerRows
                 key={`${project.environmentId}:${project.id}`}
                 environmentId={project.environmentId}
                 projectId={project.id}

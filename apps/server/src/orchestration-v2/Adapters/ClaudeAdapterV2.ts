@@ -1,3 +1,4 @@
+import { claudeHostMcp } from "./ClaudeHostMcp.ts";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
 import * as CodespacesWorkspace from "../../codespaces/CodespacesWorkspace.ts";
 import { claudeWorkspaceExecution } from "../../codespaces/ClaudeWorkspaceExecution.ts";
@@ -505,6 +506,7 @@ export interface ClaudeAgentSdkQueryOpenInput {
 }
 
 export interface ClaudeAgentSdkQuerySession {
+  readonly mcpApps?: ProviderAdapter.ProviderAdapterV2McpApps;
   readonly messages: Stream.Stream<SDKMessage, ClaudeAgentSdkQueryRunnerError>;
   readonly offer: (
     message: SDKUserMessage,
@@ -1114,6 +1116,7 @@ export const layerQueryRunner: Layer.Layer<
                   }),
                 ),
               ),
+            mcpApps: claudeHostMcp(queryRuntime),
             setModel: (model) =>
               Effect.tryPromise({
                 try: () => queryRuntime.setModel(model),
@@ -10631,11 +10634,44 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           },
         );
 
+        const hostMcpQuery = Effect.fn("ClaudeAdapterV2.hostMcpQuery")(function* (
+          providerThread: OrchestrationV2ProviderThread,
+        ) {
+          const existing = yield* Ref.get(queryContext);
+          if (
+            existing === null ||
+            existing.stopping ||
+            existing.nativeThreadId !== providerThread.nativeThreadRef?.nativeId ||
+            existing.query.mcpApps === undefined
+          )
+            return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+              driver: CLAUDE_PROVIDER,
+              detail: "Claude host MCP requires this thread's live query.",
+            });
+          return existing.query.mcpApps;
+        });
+        const mcpApps: ProviderAdapter.ProviderAdapterV2McpApps = {
+          listServers: Effect.fn("ClaudeAdapterV2.listMcpServers")(function* (input) {
+            const bridge = yield* hostMcpQuery(input.providerThread);
+            return bridge.listServers ? yield* bridge.listServers(input) : [];
+          }),
+          listTools: Effect.fn("ClaudeAdapterV2.listMcpTools")(function* (input) {
+            return yield* (yield* hostMcpQuery(input.providerThread)).listTools(input);
+          }),
+          callTool: Effect.fn("ClaudeAdapterV2.callMcpTool")(function* (input) {
+            return yield* (yield* hostMcpQuery(input.providerThread)).callTool(input);
+          }),
+          readResource: Effect.fn("ClaudeAdapterV2.readMcpResource")(function* (input) {
+            return yield* (yield* hostMcpQuery(input.providerThread)).readResource(input);
+          }),
+        };
+
         const runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
           instanceId: adapterOptions.instanceId,
           driver: CLAUDE_PROVIDER,
           providerSessionId: input.providerSessionId,
           providerSession: session,
+          mcpApps,
           getModelContextWindow: (selection) =>
             resolveClaudeCatalogContextWindowTokens(BUNDLED_CLAUDE_MODEL_CATALOG, selection),
           events: Stream.fromEffectRepeat(Queue.take(events)),

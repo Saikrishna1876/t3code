@@ -70,3 +70,4 @@ export * from "./secretRequest.ts";
 export * from "./clientRpcPermissions.ts";
 
 export * from "./codespaces.ts";
+export * from "./hostToolsMcp.ts";

@@ -1994,7 +1994,7 @@ const WsCodespacesSubscribeRpc = Rpc.make(WS_METHODS.codespacesSubscribe, {
   error: CodespacesError,
   stream: true,
 });
-export const CodespacesRpcGroup = RpcGroup.make(
+const CodespacesRpcGroup = RpcGroup.make(
   WsCodespacesAuthorizeRpc,
   WsCodespacesProjectRpc,
   WsCodespacesBindRpc,

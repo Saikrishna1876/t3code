@@ -1,14 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { codespacesSetupPrompt } from "@t3tools/client-runtime/codespaces-presentation";
-import { ProjectCodespacesControl } from "./ProjectCodespacesControl";
-import {
-  Dialog,
-  DialogPopup,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogPanel,
-} from "./ui/dialog";
+import { CodespacesMenuItems } from "./ProjectCodespacesControl";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { formatFilePathForClipboard } from "@t3tools/client-runtime/media-actions";
 import { readLocalApi } from "../localApi";
@@ -35,8 +26,6 @@ import {
   useImperativeHandle,
   useRef,
   useState,
-  useEffect,
-  useEffectEvent,
 } from "react";
 import { flushSync } from "react-dom";
 
@@ -176,7 +165,7 @@ interface RunContextSelectorProps {
   availableEnvironments: readonly EnvironmentOption[] | undefined;
   showEnvironmentPicker: boolean;
   showEnvironmentIndicator: boolean;
-  onCodespaces?: (() => void) | undefined;
+  codespacesProjectId?: ProjectId | undefined;
   codespaceLabel?: string | undefined;
   onEnvironmentChange: ((environmentId: EnvironmentId) => void) | undefined;
   effectiveEnvMode: EnvMode;
@@ -201,7 +190,7 @@ const RunContextSelector = memo(function RunContextSelector({
   availableEnvironments,
   showEnvironmentPicker,
   showEnvironmentIndicator,
-  onCodespaces,
+  codespacesProjectId,
   codespaceLabel,
   onEnvironmentChange,
   effectiveEnvMode,
@@ -231,7 +220,7 @@ const RunContextSelector = memo(function RunContextSelector({
         : resolveCurrentWorkspaceLabel(activeWorktreePath);
   const isPanel = displayMode === "panel";
   const isLocked =
-    !onCodespaces && (envLocked || (envModeLocked && (!isPanel || !showEnvironmentPicker)));
+    !codespacesProjectId && (envLocked || (envModeLocked && (!isPanel || !showEnvironmentPicker)));
   const workspacePath =
     forceNewWorktree || (effectiveEnvMode === "worktree" && !activeWorktreePath)
       ? null
@@ -344,7 +333,7 @@ const RunContextSelector = memo(function RunContextSelector({
         aria-label={isPanel ? "Run context" : undefined}
         data-composer-context-control
         data-composer-shortcut={[
-          onCodespaces || (showEnvironmentPicker && !envLocked) ? "composer.host" : "",
+          codespacesProjectId || (showEnvironmentPicker && !envLocked) ? "composer.host" : "",
           !envModeLocked ? "composer.workspace" : "",
         ].join(" ")}
       >
@@ -436,15 +425,8 @@ const RunContextSelector = memo(function RunContextSelector({
             <MenuSeparator />
           </>
         ) : null}
-        {onCodespaces ? (
-          <MenuGroup>
-            {!showEnvironmentPicker ? <MenuGroupLabel>Run on</MenuGroupLabel> : null}
-            <MenuItem onClick={onCodespaces}>
-              <CloudIcon className="size-3" aria-hidden="true" />
-              {codespaceLabel ?? "Codespace…"}
-            </MenuItem>
-            <MenuSeparator />
-          </MenuGroup>
+        {codespacesProjectId ? (
+          <CodespacesMenuItems environmentId={environmentId} projectId={codespacesProjectId} />
         ) : null}
         <MenuGroup>
           <MenuGroupLabel>Workspace</MenuGroupLabel>
@@ -702,44 +684,16 @@ export const BranchToolbar = memo(function BranchToolbar({
       : null,
   );
   const codespaceBound = Boolean(codespace.data?.name);
-  const projectKey = `${environmentId}:${activeProjectRef?.projectId ?? ""}`;
-  const [codespacesProjectKey, setCodespacesProjectKey] = useState<string | null>(null);
-  if (codespacesProjectKey !== null && codespacesProjectKey !== projectKey) {
-    setCodespacesProjectKey(null);
-  }
-  const codespacesOpen = codespacesProjectKey === projectKey;
   const canManageCodespaces = Boolean(
     canRunCodespaces &&
     activeProjectRef &&
     environment?.serverConfig?.environment.capabilities.codespaces,
   );
-  const codespaceLabel = codespaceBound
-    ? codespace.data?.connected
-      ? "Codespace"
-      : "Codespace unavailable"
+  const codespaceLabel = codespace.data?.name
+    ? codespace.data.connected
+      ? codespace.data.name
+      : `${codespace.data.name} unavailable`
     : undefined;
-  const prepareCodespaces = () => {
-    const store = useComposerDraftStore.getState();
-    const target = draftId ?? threadRef;
-    store.setPrompt(target, codespacesSetupPrompt(store.getComposerDraft(target)?.prompt ?? ""));
-    onComposerFocusRequest?.();
-  };
-  const openCodespaces = () => {
-    if (codespace.data && !codespace.data.eligible && !codespace.data.name) {
-      prepareCodespaces();
-    } else {
-      setCodespacesProjectKey(projectKey);
-    }
-  };
-  const closeIncompatibleCodespace = useEffectEvent(() => {
-    prepareCodespaces();
-    setCodespacesProjectKey(null);
-  });
-  useEffect(() => {
-    if (codespacesOpen && codespace.data && !codespace.data.eligible && !codespace.data.name)
-      // oxlint-disable-next-line react/set-state-in-effect -- Async eligibility can arrive after opening; redirect that dialog to the setup draft.
-      closeIncompatibleCodespace();
-  }, [codespacesOpen, codespace.data]);
 
   const codespaceDraft =
     codespaceBound && (!isServerThread || (worktreePath === null && !envLocked));
@@ -807,33 +761,9 @@ export const BranchToolbar = memo(function BranchToolbar({
 
   if (!activeProject) return null;
 
-  const codespacesDialog = (
-    <Dialog
-      open={codespacesOpen}
-      onOpenChange={(open) => setCodespacesProjectKey(open ? projectKey : null)}
-    >
-      <DialogPopup>
-        <DialogHeader>
-          <DialogTitle>Project Codespace</DialogTitle>
-          <DialogDescription>Choose where this project's files and commands run.</DialogDescription>
-        </DialogHeader>
-        <DialogPanel>
-          {codespacesOpen ? (
-            <ProjectCodespacesControl
-              key={`${environmentId}:${activeProject.id}`}
-              environmentId={environmentId}
-              projectId={activeProject.id}
-            />
-          ) : null}
-        </DialogPanel>
-      </DialogPopup>
-    </Dialog>
-  );
-
   if (layout === "panel") {
     return (
       <div className="flex w-full flex-col" data-thread-panel-run-context>
-        {codespacesDialog}
         {panelSection !== "branch" ? (
           <RunContextSelector
             displayMode="panel"
@@ -845,7 +775,7 @@ export const BranchToolbar = memo(function BranchToolbar({
             envModeLocked={envModeLocked}
             environmentId={environmentId}
             availableEnvironments={availableEnvironments}
-            onCodespaces={canManageCodespaces ? openCodespaces : undefined}
+            codespacesProjectId={canManageCodespaces ? projectId : undefined}
             codespaceLabel={codespaceLabel}
             showEnvironmentPicker={showEnvironmentPicker}
             showEnvironmentIndicator={activeEnvironmentOption !== null}
@@ -883,7 +813,6 @@ export const BranchToolbar = memo(function BranchToolbar({
 
   return (
     <>
-      {codespacesDialog}
       <ComposerSurface.ContextStrip
         ref={attachStrip}
         data-compact={labelsOverflow ? "" : undefined}
@@ -905,7 +834,7 @@ export const BranchToolbar = memo(function BranchToolbar({
               envModeLocked={envModeLocked}
               environmentId={environmentId}
               availableEnvironments={availableEnvironments}
-              onCodespaces={canManageCodespaces ? openCodespaces : undefined}
+              codespacesProjectId={canManageCodespaces ? projectId : undefined}
               codespaceLabel={codespaceLabel}
               showEnvironmentPicker={showEnvironmentPicker}
               showEnvironmentIndicator={showEnvironmentIndicator}
@@ -935,7 +864,7 @@ export const BranchToolbar = memo(function BranchToolbar({
                   autoEnvironmentLabel={autoEnvironmentLabel}
                   onAutoEnvironment={onAutoEnvironment}
                   envLocked={envLocked}
-                  onCodespaces={canManageCodespaces ? openCodespaces : undefined}
+                  codespacesProjectId={canManageCodespaces ? projectId : undefined}
                   codespaceLabel={codespaceLabel}
                   environmentId={environmentId}
                   availableEnvironments={availableEnvironments}

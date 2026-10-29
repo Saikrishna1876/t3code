@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
   writeTextToClipboard: vi.fn(),
 }));
 
+vi.mock(import("../hooks/useHandleNewThread"), () => ({ useNewThreadHandler: () => vi.fn() }));
 vi.mock(import("../localApi"), async (original) => ({
   ...(await original()),
   readLocalApi: (() => ({ contextMenu: { show: state.showContextMenu } })) as never,
@@ -71,6 +72,7 @@ vi.mock(import("../state/codespaces"), async () => {
   return {
     codespacesEnvironment: {
       authorize: { permissionAtom: () => (state.canManageCodespaces ? allowed : denied) },
+      bind: { permissionAtom: () => (state.canManageCodespaces ? allowed : denied) },
       run: { permissionAtom: () => (state.canManageCodespaces ? allowed : denied) },
       project: () => "project",
       state: () => "state",
@@ -107,6 +109,7 @@ vi.mock(import("../state/query"), async (original) => ({
           : kind === "state"
             ? {
                 operations: [],
+                environments: [],
                 configuration: { agentAccessEnabled: false },
               }
             : null,
@@ -231,22 +234,10 @@ it.each([
   },
 );
 
-it.each([
-  { bound: false, eligible: true, inventoryPending: false },
-  { bound: true, eligible: true, inventoryPending: false },
-  { bound: false, eligible: false, inventoryPending: false },
-  { bound: false, eligible: true, inventoryPending: true },
-])("opens single-host Codespace flow for %j", async ({ bound, eligible, inventoryPending }) => {
+it("does not offer generic Codespace creation in a single-host picker", async () => {
   setup();
   state.codespacesSupported = true;
-  state.codespaceName = bound ? "project-space" : null;
-  state.codespaceEligible = eligible;
-  state.inventoryPending = inventoryPending;
-  state.setPrompt.mockClear();
-  const onEnvironmentChange = vi.fn();
   await using screen = await render({
-    envLocked: bound,
-    onEnvironmentChange,
     availableEnvironments: [
       {
         environmentId: EnvironmentId.make("local"),
@@ -257,34 +248,14 @@ it.each([
       },
     ],
   });
-  expect(screen.container.querySelectorAll("button")).toHaveLength(1);
-  await userEvent.click(screen.container.querySelector<HTMLButtonElement>("button")!);
-  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((entry) =>
-    entry.textContent?.includes("Codespace"),
-  );
-  expect(item).toBeDefined();
-  await userEvent.click(item!);
-  const dialog = document.querySelector('[role="dialog"]');
-  if (eligible || bound) {
-    expect(dialog?.textContent).toContain("Project Codespace");
-    expect(dialog?.textContent).toContain(
-      bound ? "Stop Codespace" : "Create a Codespace for this project",
-    );
-    if (inventoryPending) {
-      const create = [...dialog!.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
-        button.textContent?.includes("New Codespace"),
-      );
-      expect(create?.disabled).toBe(false);
-    }
-    expect(state.setPrompt).not.toHaveBeenCalled();
-  } else {
-    expect(document.querySelector('[role="dialog"]:not([data-closed])')).toBeNull();
-    expect(state.setPrompt).toHaveBeenCalledWith(
-      expect.objectContaining({ threadId: "thread" }),
-      expect.stringContaining("Existing request\n\nMake this project compatible"),
-    );
-  }
-  expect(onEnvironmentChange).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "Run context" }));
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(
+    [...document.querySelectorAll('[role="menuitem"]')].some((entry) =>
+      entry.textContent?.includes("Codespace…"),
+    ),
+  ).toBe(false);
+  expect(state.setPrompt).not.toHaveBeenCalled();
 });
 
 it("shows a paired client's bound target and locks worktrees without exposing lifecycle actions", async () => {
@@ -306,7 +277,7 @@ it("shows a paired client's bound target and locks worktrees without exposing li
     },
     { worktreePath: null },
   );
-  expect(screen.container.textContent).toContain("Codespace");
+  expect(screen.container.textContent).toContain("project-space");
   expect(screen.container.querySelector("button")).toBeNull();
   expect(document.querySelector('[role="dialog"]')).toBeNull();
   expect(document.querySelector('[role="menu"]')).toBeNull();
@@ -334,12 +305,14 @@ it.each([false, true])(
       },
       { worktreePath: null },
     );
-    expect(screen.container.textContent).toContain("Codespace");
+    expect(screen.container.textContent).toContain("project-space");
     if (interactive) {
-      await userEvent.click(page.getByRole("combobox", { name: "Run on" }));
-      await expect
-        .element(page.getByRole("option", { name: "Codespace", exact: true }))
-        .toHaveAttribute("aria-disabled", "true");
+      await userEvent.click(page.getByRole("button", { name: "Run on" }));
+      expect(
+        [...document.querySelectorAll('[role="menuitem"]')].some((entry) =>
+          entry.textContent?.includes("Codespace…"),
+        ),
+      ).toBe(false);
     }
   },
 );
