@@ -20,7 +20,8 @@ const failure = (cause: unknown) =>
 const prefix = (server: string) => `mcp__${server.replace(/[^a-zA-Z0-9_-]/g, "_")}__`;
 
 export function claudeHostMcp(
-  query: Pick<Query, "mcpServerStatus"> & Partial<Pick<Query, "reconnectMcpServer">>,
+  query: Pick<Query, "mcpServerStatus"> &
+    Partial<Pick<Query, "reconnectMcpServer">> & { readonly request?: unknown },
 ): ProviderAdapter.ProviderAdapterV2McpApps {
   const inventory = Effect.tryPromise({
     try: () => query.mcpServerStatus(),

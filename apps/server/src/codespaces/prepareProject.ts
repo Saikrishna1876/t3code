@@ -179,12 +179,19 @@ export async function prepareProject(
     };
     if (previous) {
       if (previous.projectId !== input.projectId) return await useUniqueFolder();
-      if ((await NodeFSP.realpath(root)) !== root) throw new Error("Project folder changed.");
-      bundle.resume();
-      return {
-        remoteRoot: root,
-        setupWarning: typeof previous.setupWarning === "string" ? previous.setupWarning : null,
-      };
+      const existing = await NodeFSP.lstat(root).catch((error: unknown) => {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (existing) {
+        if ((await NodeFSP.realpath(root)) !== root) throw new Error("Project folder changed.");
+        bundle.resume();
+        return {
+          remoteRoot: root,
+          setupWarning: typeof previous.setupWarning === "string" ? previous.setupWarning : null,
+        };
+      }
+      await NodeFSP.rm(record);
     }
     try {
       await NodeFSP.lstat(root);

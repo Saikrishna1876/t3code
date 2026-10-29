@@ -154,6 +154,13 @@ describe("Codespace workspace worker", () => {
       await NodeFSP.readFile(NodePath.join(duplicateBinding.remoteRoot, "proof.txt"), "utf8"),
     ).toBe("second project edits");
     expect(await NodeFSP.readFile(edited, "utf8")).toBe("remote edits");
+    await NodeFSP.rm(duplicateBinding.remoteRoot, { recursive: true });
+    const restored = await add("different-project", "first");
+    expect(restored.status).toBe(200);
+    expect(await restored.json()).toMatchObject(duplicateBinding);
+    expect(
+      await NodeFSP.readFile(NodePath.join(duplicateBinding.remoteRoot, "proof.txt"), "utf8"),
+    ).toBe("baseline\n");
     expect((await add("different-project", "../escape")).status).toBe(400);
     expect(
       (
