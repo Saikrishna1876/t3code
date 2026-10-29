@@ -29,8 +29,9 @@ export function codespacesOperationPresentation(operation: CodespacesOperation) 
       label: "Codespace needs attention",
       description: operation.message,
       tone: "error" as const,
-      logHelpUrl:
-        "https://docs.github.com/en/codespaces/troubleshooting/github-codespaces-logs#creation-logs",
+      logHelpUrl: ["create", "start", "connect", "rebuild"].includes(operation.action)
+        ? "https://docs.github.com/en/codespaces/troubleshooting/github-codespaces-logs#creation-logs"
+        : null,
     };
   if (operation.status === "succeeded") {
     const labels = {
