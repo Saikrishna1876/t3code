@@ -22,6 +22,7 @@ export function MarkdownPreview({ children }: { children: ReactNode }) {
     setIndex(0);
     preview?.focus({ preventScroll: true });
   };
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Listen for native find events on the mounted preview element.
   useEffect(() => {
     if (!preview) return;
     const openFind = (event: Event) => {

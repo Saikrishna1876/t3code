@@ -62,7 +62,10 @@ const makeInstance = Effect.all({
 });
 
 // Codespaces and source control must share the same credential cache and quota reserve.
-export const makeWithSharedServices = makeInstance.pipe(Effect.provide(GitHubPullRequestApi.layer));
+export const makeWithSharedServices = makeInstance.pipe(
+  Effect.provide(GitHubPullRequestApi.layer),
+  Effect.provide(GitHubAppAccess.layer),
+);
 
 export const driver = defineSourceControlDriver({
   kind: definition.kind,

@@ -23,7 +23,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
-import { isLiveCallerShell } from "./OrchestratorMcpService.ts";
+import { isLiveCallerShell } from "./threadAccess.ts";
 
 interface HostToolsCaller {
   readonly threadId: ThreadId;
