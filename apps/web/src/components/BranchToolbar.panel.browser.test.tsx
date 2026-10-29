@@ -220,7 +220,7 @@ it.each([
     await using screen = await render({ envMode }, { worktreePath });
     const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
     await act(async () => {
-      screen.container.querySelector('[aria-label="Run context"]')!.dispatchEvent(event);
+      screen.container.querySelector('[aria-label^="Run context:"]')!.dispatchEvent(event);
     });
     expect(event.defaultPrevented).toBe(copiedPath !== null);
     if (copiedPath === null) {
@@ -248,7 +248,7 @@ it("does not offer generic Codespace creation in a single-host picker", async ()
       },
     ],
   });
-  await userEvent.click(screen.getByRole("button", { name: "Run context" }));
+  await userEvent.click(screen.getByRole("button", { name: /^Run context:/ }));
   expect(document.querySelector('[role="dialog"]')).toBeNull();
   expect(
     [...document.querySelectorAll('[role="menuitem"]')].some((entry) =>
@@ -325,8 +325,8 @@ it("shows the main checkout for an unstarted server thread bound to a Codespace"
     { envMode: "worktree", envLocked: false },
     { worktreePath: null },
   );
-  await expect.element(screen.getByRole("button", { name: "Run context" })).toBeVisible();
-  await userEvent.click(screen.getByRole("button", { name: "Run context" }));
+  await expect.element(screen.getByRole("button", { name: /^Run context:/ })).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: /^Run context:/ }));
   expect(document.querySelector('[role="menuitemradio"][aria-checked="true"]')?.textContent).toBe(
     "Current checkout",
   );

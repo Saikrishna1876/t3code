@@ -240,9 +240,10 @@ function harness(
         }),
         Layer.succeed(GitHubRest.GitHubRest, {
           rest,
+          appCredential: () => Effect.succeedNone,
           credential: () => Effect.succeed({ token: Redacted.make(token), fingerprint: token }),
         }),
-        Layer.succeed(GitHubCredentials.GitHubCredentials, {
+        Layer.mock(GitHubCredentials.GitHubCredentials)({
           get: () =>
             Effect.sync(() => ({
               host: "github.com",

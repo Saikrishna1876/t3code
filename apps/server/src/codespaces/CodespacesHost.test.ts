@@ -159,7 +159,7 @@ const harness = Effect.gen(function* () {
         }),
         Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Layer.succeed(Socket.WebSocketConstructor, webSocket),
-        Layer.succeed(GitHubCredentials.GitHubCredentials, {
+        Layer.mock(GitHubCredentials.GitHubCredentials)({
           get: () =>
             Effect.succeed({
               host: "github.com",
