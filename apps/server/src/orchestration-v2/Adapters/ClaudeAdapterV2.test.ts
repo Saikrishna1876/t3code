@@ -817,7 +817,7 @@ describe("ClaudeAdapterV2 Codespaces", () => {
         assert.include(openedOptions?.disallowedTools ?? [], "Bash");
         assert.include(openedOptions?.disallowedTools ?? [], "Agent");
         assert.notInclude(openedOptions?.tools as string[], "Read");
-        assert.deepEqual(openedOptions?.settingSources, []);
+        assert.deepEqual(openedOptions?.settingSources, ["user"]);
         assert.include(JSON.stringify(prompts), "/tmp/remote-notes.txt");
         assert.notInclude(JSON.stringify(prompts), attachmentsDir);
       }),
@@ -3039,7 +3039,11 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             ...input,
             providerThread: {
               ...harness.providerThread,
-              nativeThreadRef: { driver: "claude", nativeId: "another-thread", strength: "strong" },
+              nativeThreadRef: {
+                driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+                nativeId: "another-thread",
+                strength: "strong",
+              },
             },
           })
           .pipe(Effect.result))._tag,
