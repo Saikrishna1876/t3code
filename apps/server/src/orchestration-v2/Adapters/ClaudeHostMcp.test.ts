@@ -103,6 +103,7 @@ describe("Claude host MCP", () => {
           .callTool({ providerThread, server: "notes.host", tool: "lookup", arguments: {} })
           .pipe(Effect.result);
         assert.equal(result._tag, "Failure");
+        if (result._tag === "Failure") assert.equal(result.failure.driver, "claudeAgent");
       }
     }),
   );
