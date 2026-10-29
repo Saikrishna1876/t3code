@@ -204,7 +204,7 @@ Choose a project in the same settings section, then choose **Use computer**.
 The first connection copies the project's current committed branch and Git
 history from your T3 host. Commit local changes first. A GitHub origin is optional.
 Reconnecting preserves the remote checkout and any uncommitted remote changes.
-Projects with the same folder name need distinct local folder names.
+Projects with the same folder name receive separate folders automatically.
 
 The **Run on** picker lists computers added in settings. Stopped computers stay
 visible with a **Start** button. Start resumes the existing computer and its
@@ -255,7 +255,9 @@ when requesting a call. Other providers keep their native MCP tools.
 Host MCP calls require a full-access thread in Default mode.
 
 Finish or stop active turns before stopping a computer or switching targets.
-Stopping affects every project on that computer. Local and remote edits are not
+Stopping affects every project on that computer. Agents cannot stop, rebuild or
+delete a computer shared with other projects; use Settings for those actions.
+Local and remote edits are not
 copied back automatically. Commit and push changes before switching if you need
 them elsewhere. Checkpoint refs belong to the checkout where they were captured.
 Private repository pushes may require granting that Codespace access to the

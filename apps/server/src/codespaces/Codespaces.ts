@@ -809,6 +809,16 @@ const make = Effect.gen(function* () {
           "permission",
           "Thread callers can manage only their project’s bound Codespace.",
         );
+      if (
+        ["delete", "stop", "rebuild"].includes(input.action) &&
+        bindings.some(
+          (binding) => binding.name === input.name && binding.projectId !== callerProjectId,
+        )
+      )
+        return yield* error(
+          "permission",
+          "This Codespace also hosts other projects. Manage it from Settings.",
+        );
     }
     const login = yield* account;
     const requestKey = yield* encodeRequestKey({ account: login, input }).pipe(Effect.orDie);

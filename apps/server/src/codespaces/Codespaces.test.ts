@@ -547,6 +547,36 @@ describe("Codespaces controller", () => {
     },
   );
 
+  it.effect("rejects thread destruction of a computer shared with another project", () => {
+    const test = harness({
+      bindings: [
+        { projectId: "project-test", localRoot: "/workspace/fork", name: "test-space-1" },
+        { projectId: "project-other", localRoot: "/workspace/other", name: "test-space-1" },
+      ],
+    });
+    return Effect.gen(function* () {
+      const service = yield* Codespaces.Codespaces;
+      for (const action of ["stop", "delete", "rebuild"] as const) {
+        const result = yield* service
+          .run(
+            {
+              action,
+              name: "test-space-1",
+              projectId: testProjectId,
+              clientRequestId: "shared-scope-" + action,
+            },
+            testProjectId,
+          )
+          .pipe(Effect.result);
+        expect(result._tag).toBe("Failure");
+        if (result._tag === "Failure") expect(result.failure.code).toBe("permission");
+      }
+      expect(test.requests).toEqual([]);
+      expect(test.disconnects()).toBe(0);
+      expect(test.rebuilds()).toBe(0);
+    }).pipe(Effect.provide(test.layer));
+  });
+
   it.effect("keeps the local target when work starts during GitHub creation", () => {
     const threads: Array<
       Pick<OrchestrationV2ThreadShell, "id" | "projectId" | "status" | "pendingRuntimeRequest">

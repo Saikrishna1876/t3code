@@ -13,7 +13,7 @@ const Result = Schema.Struct({
 const decodeResult = Schema.decodeUnknownEffect(Schema.Struct({ response: Result }));
 const failure = (cause: unknown) =>
   new ProviderAdapter.ProviderAdapterProtocolError({
-    driver: ProviderDriverKind.make("claude"),
+    driver: ProviderDriverKind.make("claudeAgent"),
     detail: "Claude host MCP request failed. Check the host connection and retry.",
     payload: cause,
   });
