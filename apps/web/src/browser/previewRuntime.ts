@@ -12,14 +12,7 @@ import {
   useEnvironmentSupportsServerBrowser,
 } from "~/state/entities";
 
-/**
- * Where a tab the user opens should run. The desktop app draws its own
- * server's tabs natively, so those stay agent-drivable at no cost. A remote
- * environment's tabs would stream, so the desktop opens them in its own
- * browser instead: no latency, and it reaches what this computer reaches. The
- * user can move a tab to the environment when only it can reach the page.
- * Workspace loopback URLs always run on the environment that owns the port.
- */
+// Keep workspace loopback URLs on the environment that owns the port.
 export function previewRuntimeFor(
   environmentId: EnvironmentId,
   url?: string,
@@ -64,11 +57,12 @@ export function usePreviewAvailable(environmentId: EnvironmentId | null): boolea
 export function rendersServerTabNatively(
   environmentId: EnvironmentId,
   primaryEnvironmentId: EnvironmentId | null,
-  snapshot: Pick<PreviewSessionSnapshot, "runtime"> | null | undefined,
+  snapshot: Pick<PreviewSessionSnapshot, "runtime" | "headless"> | null | undefined,
 ): boolean {
   return (
     isElectron &&
     snapshot?.runtime === "server" &&
+    !snapshot.headless &&
     primaryEnvironmentId !== null &&
     environmentId === primaryEnvironmentId
   );
@@ -76,7 +70,7 @@ export function rendersServerTabNatively(
 
 export function useRendersServerTabNatively(
   environmentId: EnvironmentId,
-  snapshot: Pick<PreviewSessionSnapshot, "runtime"> | null | undefined,
+  snapshot: Pick<PreviewSessionSnapshot, "runtime" | "headless"> | null | undefined,
 ): boolean {
   return rendersServerTabNatively(environmentId, useAtomValue(primaryEnvironmentIdAtom), snapshot);
 }
