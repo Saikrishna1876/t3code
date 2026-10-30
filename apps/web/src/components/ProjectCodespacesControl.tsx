@@ -110,7 +110,8 @@ export function CodespacesMenuItems({
   projectId: ProjectId;
 }) {
   const model = useProjectCodespaces(environmentId, projectId);
-  if (!model.supported || (!model.spaces.length && !model.error)) return null;
+  if (!model.supported || (!model.spaces.length && !model.error && !model.project.data?.name))
+    return null;
   return (
     <MenuGroup>
       <MenuGroupLabel>Cloud computers</MenuGroupLabel>

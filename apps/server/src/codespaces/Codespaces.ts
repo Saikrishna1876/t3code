@@ -18,6 +18,7 @@ import {
   type CodespacesOptions,
   CodespacesRunInput,
   type CodespacesPairResult,
+  type FilesystemEntryMetadata,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -369,10 +370,6 @@ const make = Effect.gen(function* () {
       yield* closeProjectTerminals(input.projectId);
       yield* saveBinding({ projectId: input.projectId, name: null });
     } else {
-      const existing = (yield* workspaces.bindings).find(
-        (entry) =>
-          entry.projectId === input.projectId && entry.name === input.name && entry.remoteRoot,
-      );
       const inventory = yield* pinned(list);
       if (!inventory.codespaces.some((space) => space.name === input.name))
         return yield* error("configuration", "Codespace no longer exists in this GitHub account.");
@@ -385,7 +382,7 @@ const make = Effect.gen(function* () {
           "conflict",
           "Start and connect this Codespace before adding a project.",
         );
-      const binding = existing ?? (yield* prepareProject(input.projectId, input.name));
+      const binding = yield* prepareProject(input.projectId, input.name);
       yield* closeProjectTerminals(input.projectId);
       yield* saveBinding(binding);
     }
@@ -621,6 +618,21 @@ const make = Effect.gen(function* () {
     name: string,
   ) {
     const localRoot = yield* projectRoot(projectId);
+    const existing = (yield* workspaces.bindings).find(
+      (binding) => binding.projectId === projectId && binding.name === name && binding.remoteRoot,
+    );
+    if (existing) {
+      const metadata = yield* workspaces
+        .call<FilesystemEntryMetadata | null>(localRoot, "files", "getMetadata", [
+          { cwd: localRoot, relativePath: "" },
+        ])
+        .pipe(
+          Effect.mapError(() =>
+            error("bootstrap", "Could not check the remote project folder. Reconnect and retry."),
+          ),
+        );
+      if (metadata?.kind === "directory") return existing;
+    }
     const info = yield* project({ projectId });
     if (!info.eligible) return yield* error("configuration", info.reason);
     const folder =
@@ -785,11 +797,7 @@ const make = Effect.gen(function* () {
     }));
     if (input.projectId) {
       yield* assertIdle(input.projectId);
-      const existing = (yield* workspaces.bindings).find(
-        (binding) =>
-          binding.projectId === input.projectId && binding.name === name && binding.remoteRoot,
-      );
-      const binding = existing ?? (yield* prepareProject(input.projectId, name));
+      const binding = yield* prepareProject(input.projectId, name);
       yield* closeProjectTerminals(input.projectId);
       yield* workspaces.bind(binding, input.clientRequestId);
     }

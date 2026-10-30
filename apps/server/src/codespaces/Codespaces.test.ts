@@ -84,11 +84,14 @@ function harness(
   overrides: {
     rest?: GitHubRest.GitHubRest["Service"]["rest"];
     connect?: CodespacesHost.CodespacesHost["Service"]["connect"];
+    prepareProject?: CodespacesHost.CodespacesHost["Service"]["prepareProject"];
     prepareStop?: CodespacesHost.CodespacesHost["Service"]["prepareStop"];
     saved?: Uint8Array;
     devcontainerEntries?: string[];
     hasDevcontainer?: boolean;
     origin?: string;
+    head?: string;
+    remoteFolderExists?: boolean;
     bindings?: ReadonlyArray<CodespacesWorkspace.WorkspaceBinding>;
     threads?: ReadonlyArray<
       Pick<
@@ -192,7 +195,9 @@ function harness(
               exitCode: ChildProcessSpawner.ExitCode(0),
               stdout: input.args.includes("origin")
                 ? (overrides.origin ?? "https://github.com/example/fork.git")
-                : "main",
+                : input.args.includes("--verify")
+                  ? (overrides.head ?? "main")
+                  : "main",
               stderr: "",
               stdoutTruncated: false,
               stderrTruncated: false,
@@ -230,7 +235,8 @@ function harness(
           register: () => Effect.void,
           stageAttachment: () => Effect.die("Unexpected attachment staging"),
           openAsset: () => Effect.die("Unexpected asset streaming"),
-          call: () => Effect.die("Unexpected worker request"),
+          call: <A>() =>
+            Effect.succeed((overrides.remoteFolderExists ? { kind: "directory" } : null) as A),
         }),
         Layer.mock(TerminalManager.TerminalManager)({
           close: ({ threadId }) =>
@@ -274,8 +280,9 @@ function harness(
                 overrides.connect ? overrides.connect(...args) : Effect.succeed(managed),
               ),
             ),
-          prepareProject: () =>
-            Effect.succeed({ remoteRoot: "/workspaces/fork", setupWarning: null }),
+          prepareProject:
+            overrides.prepareProject ??
+            (() => Effect.succeed({ remoteRoot: "/workspaces/fork", setupWarning: null })),
           prepareStop: overrides.prepareStop ?? (() => Effect.void),
           disconnect: () =>
             Effect.sync(() => {
@@ -331,6 +338,45 @@ const completed = (service: Codespaces.Codespaces["Service"], id: string) =>
   );
 
 describe("Codespaces controller", () => {
+  it.effect.each([
+    ["connect", false],
+    ["bind", false],
+    ["connect", true],
+    ["bind", true],
+  ] as const)(
+    "revalidates the saved project folder on %s with remote folder present %s",
+    ([action, remoteFolderExists]) => {
+      const test = harness({
+        head: remoteFolderExists ? "" : "main",
+        remoteFolderExists,
+        bindings: [
+          {
+            projectId: testProjectId,
+            localRoot: "/workspace/fork",
+            name: managed.name,
+            remoteRoot: "/workspaces/stale-folder",
+          },
+        ],
+        prepareProject: () =>
+          Effect.succeed({ remoteRoot: "/workspaces/recovered-folder", setupWarning: null }),
+      });
+      return Effect.gen(function* () {
+        const service = yield* Codespaces.Codespaces;
+        yield* service.run({
+          action: "connect",
+          name: managed.name,
+          clientRequestId: "connect-computer",
+          ...(action === "connect" ? { projectId: testProjectId } : {}),
+        });
+        expect((yield* completed(service, "connect-computer")).status).toBe("succeeded");
+        if (action === "bind")
+          yield* service.bind({ projectId: testProjectId, name: managed.name });
+        expect((yield* service.project({ projectId: testProjectId })).workspacePath).toBe(
+          remoteFolderExists ? "/workspaces/stale-folder" : "/workspaces/recovered-folder",
+        );
+      }).pipe(Effect.provide(test.layer));
+    },
+  );
   it.effect("completed connect retries bypass new-operation checks while work is active", () => {
     const test = harness();
     return Effect.gen(function* () {
