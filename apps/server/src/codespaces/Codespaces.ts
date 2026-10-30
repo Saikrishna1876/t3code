@@ -623,15 +623,15 @@ const make = Effect.gen(function* () {
     );
     if (existing) {
       const metadata = yield* workspaces
-        .call<FilesystemEntryMetadata | null>(localRoot, "files", "getMetadata", [
-          { cwd: localRoot, relativePath: "" },
+        .call<FilesystemEntryMetadata | null>(existing.localRoot, "files", "getMetadata", [
+          { cwd: existing.localRoot, relativePath: "" },
         ])
         .pipe(
           Effect.mapError(() =>
             error("bootstrap", "Could not check the remote project folder. Reconnect and retry."),
           ),
         );
-      if (metadata?.kind === "directory") return existing;
+      if (metadata?.kind === "directory") return { ...existing, localRoot };
     }
     const info = yield* project({ projectId });
     if (!info.eligible) return yield* error("configuration", info.reason);
