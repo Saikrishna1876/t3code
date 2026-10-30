@@ -2,7 +2,36 @@ import type { DesktopUpdateState } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createInitialDesktopUpdateState } from "../updates/updateMachine.ts";
-import { resolveStartupRecoveryOffer } from "./DesktopStartupRecovery.ts";
+import {
+  resolveStartupRecoveryOffer,
+  resolveStartupRecoveryReleasesUrl,
+} from "./DesktopStartupRecovery.ts";
+
+it.each([
+  [
+    "provider: github\nowner: Saikrishna1876\nrepo: t3code\n",
+    "https://github.com/Saikrishna1876/t3code/releases",
+  ],
+  [
+    "provider: github\nowner: another-owner\nrepo: custom-builds\n",
+    "https://github.com/another-owner/custom-builds/releases",
+  ],
+  [
+    "provider: 'github'\nowner: \"pingdotgg\"\nrepo: 't3code'\n",
+    "https://github.com/pingdotgg/t3code/releases",
+  ],
+  ["", "https://github.com/Saikrishna1876/t3code/releases"],
+  [
+    "provider: generic\nurl: https://example.com\n",
+    "https://github.com/Saikrishna1876/t3code/releases",
+  ],
+  [
+    "provider: github\nowner: ../wrong\nrepo: t3code\n",
+    "https://github.com/Saikrishna1876/t3code/releases",
+  ],
+] as const)("uses the packaged update repository from %j", (config, expected) => {
+  expect(resolveStartupRecoveryReleasesUrl(config)).toBe(expected);
+});
 
 const updateState = (patch: Partial<DesktopUpdateState>): DesktopUpdateState => ({
   ...createInitialDesktopUpdateState(
