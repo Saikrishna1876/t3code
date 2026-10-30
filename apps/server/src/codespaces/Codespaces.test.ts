@@ -235,8 +235,10 @@ function harness(
           register: () => Effect.void,
           stageAttachment: () => Effect.die("Unexpected attachment staging"),
           openAsset: () => Effect.die("Unexpected asset streaming"),
-          call: <A>() =>
-            Effect.succeed((overrides.remoteFolderExists ? { kind: "directory" } : null) as A),
+          call: <A>(cwd: string) =>
+            bindings.some((binding) => binding.localRoot === cwd)
+              ? Effect.succeed((overrides.remoteFolderExists ? { kind: "directory" } : null) as A)
+              : Effect.fail(new CodespacesError({ code: "conflict", message: "No binding" })),
         }),
         Layer.mock(TerminalManager.TerminalManager)({
           close: ({ threadId }) =>
@@ -340,20 +342,22 @@ const completed = (service: Codespaces.Codespaces["Service"], id: string) =>
 
 describe("Codespaces controller", () => {
   it.effect.each([
-    ["connect", false],
-    ["bind", false],
-    ["connect", true],
-    ["bind", true],
+    ["connect", false, false],
+    ["bind", false, false],
+    ["connect", true, false],
+    ["bind", true, false],
+    ["connect", true, true],
+    ["bind", true, true],
   ] as const)(
-    "revalidates the saved project folder on %s with remote folder present %s",
-    ([action, remoteFolderExists]) => {
+    "revalidates the saved project folder on %s with remote folder present %s and local folder moved %s",
+    ([action, remoteFolderExists, localFolderMoved]) => {
       const test = harness({
-        head: remoteFolderExists ? "" : "main",
+        head: remoteFolderExists && !localFolderMoved ? "" : "main",
         remoteFolderExists,
         bindings: [
           {
             projectId: testProjectId,
-            localRoot: "/workspace/fork",
+            localRoot: localFolderMoved ? "/workspace/old-folder" : "/workspace/fork",
             name: managed.name,
             remoteRoot: "/workspaces/stale-folder",
           },
