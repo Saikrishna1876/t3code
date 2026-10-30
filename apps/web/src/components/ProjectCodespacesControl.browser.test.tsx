@@ -15,6 +15,7 @@ import { userEvent, page } from "vite-plus/test/browser";
 const state = vi.hoisted(() => ({
   snapshot: null as CodespacesSnapshot | null,
   project: null as CodespacesProject | null,
+  inventoryMissing: false,
   run: vi.fn(),
   bind: vi.fn(),
   authorize: vi.fn(),
@@ -96,14 +97,16 @@ vi.mock(import("~/state/query"), () => ({
           ? state.snapshot
           : {
               account: "example",
-              codespaces: [
-                {
-                  name: "computer",
-                  displayName: "Cloud computer",
-                  state: "Shutdown",
-                  machine: "basicLinux32gb",
-                },
-              ],
+              codespaces: state.inventoryMissing
+                ? []
+                : [
+                    {
+                      name: "computer",
+                      displayName: "Cloud computer",
+                      state: "Shutdown",
+                      machine: "basicLinux32gb",
+                    },
+                  ],
             },
     error: null,
     isPending: false,
@@ -141,6 +144,7 @@ const deferred = <T,>() => {
   return { promise, resolve };
 };
 function setup() {
+  state.inventoryMissing = false;
   for (const command of [
     state.run,
     state.bind,
@@ -267,6 +271,26 @@ it("dismisses a setup warning without losing the binding and offers restoration"
   expect(state.bind).toHaveBeenLastCalledWith({
     environmentId: local,
     input: { projectId, name: "computer", dismissSetupWarning: false },
+  });
+});
+
+it("allows returning to local work after the bound computer disappears", async () => {
+  setup();
+  state.inventoryMissing = true;
+  state.project = { ...state.project!, name: "computer" };
+  await using screen = await render(
+    <Menu>
+      <MenuTrigger render={<Button />}>Run on</MenuTrigger>
+      <MenuPopup>
+        <CodespacesMenuItems environmentId={local} projectId={projectId} />
+      </MenuPopup>
+    </Menu>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Run on" }));
+  await userEvent.click(page.getByRole("menuitem", { name: "Work locally" }));
+  expect(state.bind).toHaveBeenCalledWith({
+    environmentId: local,
+    input: { projectId, name: null },
   });
 });
 
