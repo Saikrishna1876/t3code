@@ -50,6 +50,7 @@ function Owner() {
     <AppAtomRegistryProvider>
       <AddEnvironmentDialog
         open={open}
+        supportsCodespaces={true}
         routeTarget={null}
         error={error}
         savedEnvironments={[]}
@@ -97,43 +98,50 @@ describe("AddEnvironmentDialog", () => {
     await expectDefaultModeAfterReopen();
   });
 
-  it("clears the form after dismissing it on SSH", async () => {
-    using _bridge = setup();
-    await using _screen = await render(<Owner />);
+  it.each(["escape", "codespaces"] as const)(
+    "clears the form and ignores stale SSH errors after dismissal through %s",
+    async (dismissal) => {
+      const dismiss = () =>
+        dismissal === "escape"
+          ? userEvent.keyboard("{Escape}")
+          : userEvent.click(page.getByRole("button", { name: "GitHub Codespaces" }));
+      using _bridge = setup();
+      await using _screen = await render(<Owner />);
 
-    await openDialogOnSsh();
-    await userEvent.click(remoteCard());
-    await userEvent.type(page.getByPlaceholder("backend.example.com"), "devbox.example.com");
-    await userEvent.type(page.getByPlaceholder("PAIRCODE"), "PAIRCODE");
-    await userEvent.click(sshCard());
-    await userEvent.type(page.getByPlaceholder("Search hosts or type devbox"), "devbox");
-    await userEvent.type(page.getByPlaceholder("root"), "maria");
-    await userEvent.type(page.getByPlaceholder("22"), "2222");
-    await userEvent.keyboard("{Escape}");
+      await openDialogOnSsh();
+      await userEvent.click(remoteCard());
+      await userEvent.type(page.getByPlaceholder("backend.example.com"), "devbox.example.com");
+      await userEvent.type(page.getByPlaceholder("PAIRCODE"), "PAIRCODE");
+      await userEvent.click(sshCard());
+      await userEvent.type(page.getByPlaceholder("Search hosts or type devbox"), "devbox");
+      await userEvent.type(page.getByPlaceholder("root"), "maria");
+      await userEvent.type(page.getByPlaceholder("22"), "2222");
+      await dismiss();
 
-    await expectDefaultModeAfterReopen();
-    await expect.element(page.getByPlaceholder("backend.example.com")).toHaveValue("");
-    await expect.element(page.getByPlaceholder("PAIRCODE")).toHaveValue("");
-    await userEvent.click(sshCard());
-    await expect.element(page.getByPlaceholder("Search hosts or type devbox")).toHaveValue("");
-    await expect.element(page.getByPlaceholder("root")).toHaveValue("");
-    await expect.element(page.getByPlaceholder("22")).toHaveValue("");
+      await expectDefaultModeAfterReopen();
+      await expect.element(page.getByPlaceholder("backend.example.com")).toHaveValue("");
+      await expect.element(page.getByPlaceholder("PAIRCODE")).toHaveValue("");
+      await userEvent.click(sshCard());
+      await expect.element(page.getByPlaceholder("Search hosts or type devbox")).toHaveValue("");
+      await expect.element(page.getByPlaceholder("root")).toHaveValue("");
+      await expect.element(page.getByPlaceholder("22")).toHaveValue("");
 
-    let finishConnection!: (result: AtomCommandResult<void, Error>) => void;
-    const pending = new Promise<AtomCommandResult<void, Error>>((resolve) => {
-      finishConnection = resolve;
-    });
-    mocks.connectSshEnvironment.mockImplementationOnce(() => pending);
-    await userEvent.type(page.getByPlaceholder("Search hosts or type devbox"), "devbox");
-    await userEvent.click(
-      page.getByRole("dialog").getByRole("button", { name: "Add environment" }),
-    );
-    await userEvent.keyboard("{Escape}");
-    await expectDefaultModeAfterReopen();
-    finishConnection(AsyncResult.failure(Cause.fail(new Error("dismissed SSH attempt"))));
-    await expect
-      .element(page.getByRole("dialog").getByRole("button", { name: "Add environment" }))
-      .toBeEnabled();
-    await expect.element(page.getByText(/dismissed SSH attempt/)).not.toBeInTheDocument();
-  });
+      let finishConnection!: (result: AtomCommandResult<void, Error>) => void;
+      const pending = new Promise<AtomCommandResult<void, Error>>((resolve) => {
+        finishConnection = resolve;
+      });
+      mocks.connectSshEnvironment.mockImplementationOnce(() => pending);
+      await userEvent.type(page.getByPlaceholder("Search hosts or type devbox"), "devbox");
+      await userEvent.click(
+        page.getByRole("dialog").getByRole("button", { name: "Add environment" }),
+      );
+      await dismiss();
+      await expectDefaultModeAfterReopen();
+      finishConnection(AsyncResult.failure(Cause.fail(new Error("dismissed SSH attempt"))));
+      await expect
+        .element(page.getByRole("dialog").getByRole("button", { name: "Add environment" }))
+        .toBeEnabled();
+      await expect.element(page.getByText(/dismissed SSH attempt/)).not.toBeInTheDocument();
+    },
+  );
 });

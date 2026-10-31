@@ -241,6 +241,63 @@ describe("Codespace workspace worker", () => {
     });
   });
 
+  it.each([false, true])(
+    "rejects Claude paths into sibling projects and worker state with readOnly=%s",
+    async (readOnly) => {
+      const test = await fixture();
+      const project = NodePath.join(test.remote, "project");
+      const sibling = NodePath.join(test.remote, "project-other");
+      await NodeFSP.mkdir(project);
+      await NodeFSP.mkdir(sibling);
+      await NodeFSP.writeFile(NodePath.join(project, "proof.txt"), "project only");
+      await NodeFSP.writeFile(NodePath.join(sibling, "secret.txt"), "other project");
+      await NodeFSP.mkdir(NodePath.join(test.remote, ".t3-executors"));
+      await NodeFSP.writeFile(NodePath.join(test.remote, ".t3-executors/token"), "private token");
+      await NodeFSP.symlink(sibling, NodePath.join(project, "escape"), "junction");
+      const client = new Client({ name: "project-boundary-test", version: "1.0.0" });
+      await client.connect(
+        new StreamableHTTPClientTransport(
+          new URL(
+            `http://127.0.0.1:${test.worker.port}/claude/mcp${readOnly ? "/read-only" : ""}?cwd=${encodeURIComponent(project)}`,
+          ),
+          { requestInit: { headers: { Authorization: "Bearer executor-token" } } },
+        ) as Transport,
+      );
+      cleanups.push(() => client.close());
+      expect(
+        await client.callTool({ name: "Read", arguments: { file_path: "proof.txt" } }),
+      ).toMatchObject({ content: [{ text: expect.stringContaining("project only") }] });
+      for (const file_path of [
+        "../project-other/secret.txt",
+        NodePath.join(sibling, "secret.txt"),
+        "escape/secret.txt",
+        "../.t3-executors/token",
+      ]) {
+        expect(await client.callTool({ name: "Read", arguments: { file_path } })).toMatchObject({
+          isError: true,
+        });
+      }
+      for (const path of ["../project-other", "escape"]) {
+        expect(
+          await client.callTool({ name: "Glob", arguments: { path, pattern: "**/*" } }),
+        ).toMatchObject({ isError: true });
+        expect(
+          await client.callTool({ name: "Grep", arguments: { path, pattern: "other" } }),
+        ).toMatchObject({ isError: true });
+      }
+      if (!readOnly) {
+        for (const file_path of ["../project-other/new.txt", "escape/new.txt"]) {
+          expect(
+            await client.callTool({ name: "Write", arguments: { file_path, content: "bad" } }),
+          ).toMatchObject({ isError: true });
+        }
+        await expect(NodeFSP.stat(NodePath.join(sibling, "new.txt"))).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      }
+    },
+  );
+
   async function claudeClient(readOnly = false) {
     const test = await fixture();
     const client = new Client({ name: "claude-workspace-test", version: "1.0.0" });

@@ -657,7 +657,7 @@ export function AddEnvironmentDialog({
               <Button
                 variant="outline"
                 onClick={() => {
-                  onOpenChange(false);
+                  handleOpenChange(false);
                   document
                     .getElementById("connections-codespaces")
                     ?.scrollIntoView({ block: "start" });

@@ -428,9 +428,11 @@ function CodespacesAgentAccess({
       } else {
         setOptimisticValue(result.value.configuration.agentAccessEnabled);
       }
-    } finally {
-      setSaving(false);
+    } catch (cause) {
+      setOptimisticValue(null);
+      setError(cause instanceof Error ? cause.message : "Could not update agent access.");
     }
+    setSaving(false);
   };
   return (
     <div aria-busy={saving}>

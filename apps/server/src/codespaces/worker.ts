@@ -66,11 +66,11 @@ export async function startWorker(root: string, token: string, port = 0) {
   const git = await runtime.runPromise(GitVcsDriver.GitVcsDriver);
   const driver = await runtime.runPromise(SchemaDriver);
   const checkpoints = driver.checkpoints!;
-  const validPath = async (value: string, writing = false) => {
+  const validPath = async (value: string, writing = false, boundary = workspaceRoot) => {
     let target = NodePath.resolve(workspaceRoot, value);
     if (target === workspaceAlias || target.startsWith(workspaceAlias + NodePath.sep))
       target = NodePath.resolve(workspaceRoot, NodePath.relative(workspaceAlias, target));
-    const inside = (p: string) => p === workspaceRoot || p.startsWith(workspaceRoot + NodePath.sep);
+    const inside = (p: string) => p === boundary || p.startsWith(boundary + NodePath.sep);
     if (!inside(target)) throw new Error("Path is outside the Codespace workspace.");
     let existing = target;
     while (writing) {
@@ -530,14 +530,18 @@ export async function startWorker(root: string, token: string, port = 0) {
         request.method === "POST" &&
         (url.pathname === "/claude/mcp" || url.pathname === "/claude/mcp/read-only")
       ) {
-        const claudeRoot = await validPath(url.searchParams.get("cwd") ?? workspaceRoot);
+        const claudeRoot = await NodeFSP.realpath(
+          await validPath(url.searchParams.get("cwd") ?? workspaceRoot),
+        );
+        await validPath(claudeRoot);
         await handleClaudeWorkspaceMcp({
           request,
           response,
           payload,
           root: claudeRoot,
           readOnly: url.pathname.endsWith("/read-only"),
-          validPath: (path, writing) => validPath(NodePath.resolve(claudeRoot, path), writing),
+          validPath: (path, writing) =>
+            validPath(NodePath.resolve(claudeRoot, path), writing, claudeRoot),
           readPath: async (path) => {
             const resolved = NodePath.resolve(claudeRoot, path);
             // Attachments are staged outside Git so checkpoints never capture them.
@@ -549,7 +553,7 @@ export async function startWorker(root: string, token: string, port = 0) {
                 throw new Error("Attachment path changed.");
               return resolved;
             }
-            return validPath(resolved);
+            return validPath(resolved, false, claudeRoot);
           },
           searchContents: entries.searchContents,
         });
