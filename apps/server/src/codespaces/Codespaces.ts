@@ -9,6 +9,7 @@ import * as CodespacesWorkspace from "./CodespacesWorkspace.ts";
 import { ProjectId, type CodespacesProject } from "@t3tools/contracts";
 import {
   Codespace,
+  CODESPACES_BLANK_REPOSITORY,
   CodespacesConfiguration,
   CodespacesError,
   CodespacesManagedEnvironment,
@@ -17,6 +18,7 @@ import {
   type CodespacesOptions,
   CodespacesRunInput,
   type CodespacesPairResult,
+  type FilesystemEntryMetadata,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -48,13 +50,14 @@ export class Codespaces extends Context.Service<
     readonly bind: (input: {
       projectId: ProjectId;
       name: string | null;
+      dismissSetupWarning?: boolean;
     }) => Effect.Effect<CodespacesProject, CodespacesError>;
     readonly list: Effect.Effect<
       { account: string; codespaces: ReadonlyArray<Codespace> },
       CodespacesError
     >;
     readonly options: (input: {
-      repository: string;
+      repository?: string;
       ref?: string;
     }) => Effect.Effect<CodespacesOptions, CodespacesError>;
     readonly snapshot: Effect.Effect<CodespacesSnapshot>;
@@ -106,6 +109,7 @@ const normalize = (space: typeof RawCodespace.Type): Codespace => ({
   retentionMinutes: space.retention_period_minutes ?? null,
 });
 const Store = Schema.Struct({
+  setupWarningDismissals: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   bindingRevision: Schema.optionalKey(Schema.Number),
   configuration: CodespacesConfiguration,
   operations: Schema.Array(CodespacesOperation),
@@ -287,38 +291,61 @@ const make = Effect.gen(function* () {
           Effect.map((value) => value.stdout.trim()),
           Effect.orElseSucceed(() => ""),
         );
-    const [origin, ref, target] = yield* Effect.all(
+    if (yield* exists(root + "/.devcontainer.json")) paths.unshift(".devcontainer.json");
+    const [origin, ref, target, head] = yield* Effect.all(
       [
         git(["remote", "get-url", "origin"]),
         git(["symbolic-ref", "--short", "HEAD"]),
         workspaces.lookup(root),
+        git(["rev-parse", "--verify", "HEAD"]),
       ],
       { concurrency: 3 },
     );
     const match = /(?:github\.com[:/])([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(origin);
     const repository = match?.[1] ?? "";
-    const eligible = paths.length > 0 && repository !== "" && ref !== "";
+    const eligible = head !== "";
     return {
       projectId: input.projectId,
       eligible,
-      reason: !paths.length
-        ? "Add a .devcontainer/devcontainer.json to this project first."
-        : !repository
-          ? "This project needs a GitHub origin remote."
-          : !ref
-            ? "Check out a branch before creating a Codespace."
-            : "",
+      reason: eligible ? "" : "Commit this project's files before adding it to a Codespace.",
       repository,
       ref,
       devcontainerPaths: paths,
       name: target?.name ?? null,
       connected: target?.executor !== null && target?.executor !== undefined,
+      workspacePath: target?.remoteRoot ?? null,
+      setupWarning: target?.setupWarning ?? null,
+      setupWarningDismissed: target
+        ? ((yield* SubscriptionRef.get(state)).setupWarningDismissals?.[input.projectId] ??
+          target.setupWarningDismissed ??
+          false)
+        : false,
     };
   });
   const bind = Effect.fn("Codespaces.bind")(function* (input: {
     projectId: ProjectId;
     name: string | null;
+    dismissSetupWarning?: boolean;
   }) {
+    if (input.dismissSetupWarning !== undefined) {
+      const binding = (yield* workspaces.bindings).find(
+        (entry) => entry.projectId === input.projectId && entry.name === input.name,
+      );
+      if (!binding)
+        return yield* error(
+          "configuration",
+          "Add this project to the Codespace before changing setup notifications.",
+        );
+      yield* update((current) => ({
+        ...current,
+        bindingRevision: (current.bindingRevision ?? 0) + 1,
+        setupWarningDismissals: {
+          ...current.setupWarningDismissals,
+          [input.projectId]: input.dismissSetupWarning!,
+        },
+      }));
+      return yield* project(input);
+    }
     const reservationId = `bind:${input.projectId}`;
     yield* workspaces.reserve({
       id: reservationId,
@@ -326,7 +353,7 @@ const make = Effect.gen(function* () {
       ...(input.name ? { name: input.name } : {}),
     });
     yield* assertIdle(input.projectId);
-    const root = yield* projectRoot(input.projectId);
+    yield* projectRoot(input.projectId);
     const saveBinding = (binding: Parameters<typeof workspaces.bind>[0]) =>
       mutex.withPermits(1)(
         workspaces.bind(binding, reservationId).pipe(
@@ -343,21 +370,21 @@ const make = Effect.gen(function* () {
       yield* closeProjectTerminals(input.projectId);
       yield* saveBinding({ projectId: input.projectId, name: null });
     } else {
-      const info = yield* project(input);
-      if (!info.eligible) return yield* error("configuration", info.reason);
       const inventory = yield* pinned(list);
-      const space = inventory.codespaces.find((space) => space.name === input.name);
-      if (
-        !space ||
-        space.repository.toLowerCase() !== info.repository.toLowerCase() ||
-        space.branch !== info.ref
-      )
+      if (!inventory.codespaces.some((space) => space.name === input.name))
+        return yield* error("configuration", "Codespace no longer exists in this GitHub account.");
+      const environment = (yield* SubscriptionRef.get(state)).environments.find(
+        (entry) =>
+          entry.name === input.name && entry.account === inventory.account && entry.connected,
+      );
+      if (!environment)
         return yield* error(
-          "configuration",
-          "Choose a Codespace for this project's repository and branch.",
+          "conflict",
+          "Start and connect this Codespace before adding a project.",
         );
+      const binding = yield* prepareProject(input.projectId, input.name);
       yield* closeProjectTerminals(input.projectId);
-      yield* saveBinding({ projectId: input.projectId, localRoot: root, name: input.name });
+      yield* saveBinding(binding);
     }
     return yield* project(input);
   }, Effect.scoped);
@@ -391,6 +418,7 @@ const make = Effect.gen(function* () {
         onNone: () =>
           Effect.succeed({
             configuration: emptyConfiguration,
+            setupWarningDismissals: {} as Record<string, boolean>,
             operations: [] as CodespacesOperation[],
             environments: [] as CodespacesManagedEnvironment[],
             requests: {} as Record<string, string>,
@@ -501,12 +529,12 @@ const make = Effect.gen(function* () {
   const list = Effect.all([account, inventory], { concurrency: 2 }).pipe(
     Effect.map(([login, codespaces]) => ({ account: login, codespaces })),
   );
-  const options = Effect.fn("Codespaces.options")(function* (input: {
-    repository: string;
+  const options = Effect.fn("Codespaces.options")(function* (_input: {
+    repository?: string;
     ref?: string;
   }) {
-    const path = input.repository.split("/").map(encodeURIComponent).join("/");
-    const query = input.ref ? `?ref=${encodeURIComponent(input.ref)}` : "";
+    const path = CODESPACES_BLANK_REPOSITORY.split("/").map(encodeURIComponent).join("/");
+    const query = "";
     const [machinesResponse, containersResponse] = yield* Effect.all(
       [
         rest(`repos/${path}/codespaces/machines${query}`),
@@ -585,6 +613,43 @@ const make = Effect.gen(function* () {
             ),
       ),
     );
+  const prepareProject = Effect.fn("Codespaces.prepareProject")(function* (
+    projectId: ProjectId,
+    name: string,
+  ) {
+    const localRoot = yield* projectRoot(projectId);
+    const existing = (yield* workspaces.bindings).find(
+      (binding) => binding.projectId === projectId && binding.name === name && binding.remoteRoot,
+    );
+    if (existing) {
+      const metadata = yield* workspaces
+        .call<FilesystemEntryMetadata | null>(existing.localRoot, "files", "getMetadata", [
+          { cwd: existing.localRoot, relativePath: "" },
+        ])
+        .pipe(
+          Effect.mapError(() =>
+            error("bootstrap", "Could not check the remote project folder. Reconnect and retry."),
+          ),
+        );
+      if (metadata?.kind === "directory") return { ...existing, localRoot };
+    }
+    const info = yield* project({ projectId });
+    if (!info.eligible) return yield* error("configuration", info.reason);
+    const folder =
+      (localRoot.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) ?? "project")
+        .replace(/[^a-zA-Z0-9._-]/g, "-")
+        .replace(/^[^a-zA-Z0-9]+/, "")
+        .slice(0, 100) || "project";
+    const prepared = yield* host.prepareProject({
+      name,
+      projectId,
+      localRoot,
+      folder,
+      ref: info.ref,
+      ...(info.devcontainerPaths[0] ? { devcontainerPath: info.devcontainerPaths[0] } : {}),
+    });
+    return { projectId, localRoot, name, ...prepared };
+  });
   const perform = Effect.fn("Codespaces.perform")(function* (
     input: CodespacesRunInput,
     login: string,
@@ -594,19 +659,17 @@ const make = Effect.gen(function* () {
     if (input.projectId) yield* assertIdle(input.projectId);
     if (input.action === "create") {
       yield* stage(input.clientRequestId, "creating", "Creating a Codespace in GitHub.");
-      const repository = yield* rest(`repos/${input.repository}`).pipe(
+      const repository = yield* rest(`repos/${CODESPACES_BLANK_REPOSITORY}`).pipe(
         Effect.flatMap((response) =>
           decodeRepository(response.body).pipe(Effect.mapError(invalidGitHubResponse)),
         ),
       );
       const result = yield* rest("user/codespaces", "POST", {
         repository_id: repository.id,
-        ...(input.ref ? { ref: input.ref } : {}),
         machine: input.machine,
-        ...(input.devcontainerPath ? { devcontainer_path: input.devcontainerPath } : {}),
         idle_timeout_minutes: input.idleTimeoutMinutes,
         retention_period_minutes: input.retentionDays * 1440,
-        display_name: `T3 ${input.clientRequestId.slice(0, 36)}`,
+        display_name: input.displayName ?? `T3 ${input.clientRequestId.slice(0, 36)}`,
         multi_repo_permissions_opt_out: true,
       }).pipe(
         Effect.flatMap((response) =>
@@ -617,16 +680,6 @@ const make = Effect.gen(function* () {
       yield* stage(input.clientRequestId, "starting", "Waiting for the Codespace to start.", name);
       const affected = yield* workspaces.reserve({ id: input.clientRequestId, name, extend: true });
       for (const projectId of affected) yield* assertIdle(ProjectId.make(projectId));
-    }
-    if (input.projectId && ["create", "start", "connect", "rebuild"].includes(input.action)) {
-      // GitHub creation can take long enough for new local work to start.
-      yield* assertIdle(input.projectId);
-      const localRoot = yield* projectRoot(input.projectId);
-      yield* closeProjectTerminals(input.projectId);
-      yield* workspaces.bind(
-        { projectId: input.projectId, localRoot, name },
-        input.clientRequestId,
-      );
     }
     let space = yield* get(name);
     const previous = (yield* SubscriptionRef.get(state)).environments.find(
@@ -742,6 +795,12 @@ const make = Effect.gen(function* () {
         environment,
       ],
     }));
+    if (input.projectId) {
+      yield* assertIdle(input.projectId);
+      const binding = yield* prepareProject(input.projectId, name);
+      yield* closeProjectTerminals(input.projectId);
+      yield* workspaces.bind(binding, input.clientRequestId);
+    }
   });
   const run = Effect.fn("Codespaces.run")(function* (
     input: CodespacesRunInput,
@@ -758,6 +817,16 @@ const make = Effect.gen(function* () {
           "permission",
           "Thread callers can manage only their project’s bound Codespace.",
         );
+      if (
+        ["delete", "stop", "rebuild"].includes(input.action) &&
+        bindings.some(
+          (binding) => binding.name === input.name && binding.projectId !== callerProjectId,
+        )
+      )
+        return yield* error(
+          "permission",
+          "This Codespace also hosts other projects. Manage it from Settings.",
+        );
     }
     const login = yield* account;
     const requestKey = yield* encodeRequestKey({ account: login, input }).pipe(Effect.orDie);
@@ -773,43 +842,9 @@ const make = Effect.gen(function* () {
         );
       return previous;
     }
-    if (input.action === "create" || ["start", "connect", "rebuild"].includes(input.action)) {
-      if (!input.projectId)
-        return yield* error("configuration", "Start Codespaces from an existing project.");
+    if (input.projectId && ["create", "start", "connect", "rebuild"].includes(input.action)) {
       const info = yield* project({ projectId: input.projectId });
-      if (!info.eligible) return yield* error("configuration", info.reason);
-      if (input.action === "create") {
-        if (input.repository !== info.repository || input.ref !== info.ref)
-          return yield* error(
-            "configuration",
-            "Codespace repository and branch must match this project.",
-          );
-        if (!input.devcontainerPath || !info.devcontainerPaths.includes(input.devcontainerPath))
-          return yield* error(
-            "configuration",
-            "Choose a .devcontainer configuration from this project.",
-          );
-        const remoteOptions = yield* options({ repository: info.repository, ref: info.ref });
-        if (
-          !remoteOptions.devcontainers.some(
-            (container) => container.path === input.devcontainerPath,
-          )
-        )
-          return yield* error(
-            "configuration",
-            "Push this dev-container configuration to GitHub before creating a Codespace.",
-          );
-      } else {
-        const space = yield* get(input.name);
-        if (
-          space.repository.toLowerCase() !== info.repository.toLowerCase() ||
-          space.branch !== info.ref
-        )
-          return yield* error(
-            "configuration",
-            "Codespace repository and branch must match this project.",
-          );
-      }
+      if (!info.eligible && !info.name) return yield* error("configuration", info.reason);
       yield* assertIdle(input.projectId);
     }
     if ("name" in input) {
@@ -959,12 +994,11 @@ const make = Effect.gen(function* () {
         const binding = (yield* workspaces.bindings).find(
           (entry) => entry.name === environment.name,
         );
-        if (!binding) continue;
         const space = yield* get(environment.name).pipe(Effect.option);
         if (Option.isSome(space) && space.value.state === "Available")
           yield* run({
             action: "connect",
-            projectId: ProjectId.make(binding.projectId),
+            ...(binding ? { projectId: ProjectId.make(binding.projectId) } : {}),
             name: environment.name,
             clientRequestId: `restore-${timestamp}-${environment.codespaceId}`,
           }).pipe(Effect.ignore);

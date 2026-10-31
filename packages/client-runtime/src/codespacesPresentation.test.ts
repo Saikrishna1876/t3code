@@ -85,6 +85,21 @@ describe("execution location readiness", () => {
 });
 
 describe("Codespace lifecycle feedback", () => {
+  it("links failed setup to GitHub's creation-log instructions without showing recovery on success", () => {
+    const operation = { ...stopping, action: "create" as const, stage: "bootstrapping" };
+    for (const action of ["create", "start", "connect", "rebuild"] as const) {
+      expect(
+        codespacesOperationPresentation({ ...operation, action, status: "failed" }).logHelpUrl,
+      ).toBe(
+        "https://docs.github.com/en/codespaces/troubleshooting/github-codespaces-logs#creation-logs",
+      );
+    }
+    expect(codespacesOperationPresentation(operation).logHelpUrl).toBeNull();
+    expect(
+      codespacesOperationPresentation({ ...operation, status: "succeeded" }).logHelpUrl,
+    ).toBeNull();
+  });
+
   it("keeps a stop request pending until the operation succeeds", () => {
     const waiting = codespacesOperationPresentation(stopping);
     expect(waiting.tone).toBe("info");
@@ -107,6 +122,7 @@ describe("Codespace lifecycle feedback", () => {
     expect(result.tone).toBe("error");
     expect(result.label).toBe("Codespace needs attention");
     expect(result.description).toBe(message);
+    expect(result.logHelpUrl).toBeNull();
   });
 
   it("does not announce readiness while creation or SSH setup is running", () => {

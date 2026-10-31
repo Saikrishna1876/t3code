@@ -2,7 +2,6 @@ import { describe, expect, it } from "@effect/vitest";
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Workspace from "./CodespacesWorkspace.ts";
 import * as Preview from "./CodespacesPreview.ts";
@@ -11,7 +10,7 @@ import * as Projection from "../orchestration-v2/ProjectionStore.ts";
 import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 const threadId = ThreadId.make("preview-thread");
 const projectId = ProjectId.make("project:mcp-test");
-const project = Schema.decodeUnknownSync(Project.ProjectRow)({
+const project = Schema.decodeSync(Project.ProjectRow)({
   projectId,
   title: "Project",
   workspaceRoot: "/local/repo",
@@ -21,6 +20,8 @@ const project = Schema.decodeUnknownSync(Project.ProjectRow)({
   faviconPath: null,
   projectIcon: null,
   scripts: [],
+  pinnedAt: null,
+  archivedAt: null,
   createdAt: "2026-10-08T00:00:00Z",
   updatedAt: "2026-10-08T00:00:00Z",
   deletedAt: null,
@@ -29,7 +30,7 @@ function layer(connected: boolean, ports: number[], forwardedPort = () => 60000)
   return Preview.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.mock(Project.ProjectStoreV2)({ get: () => Effect.succeed(Option.some(project)) }),
+        Layer.mock(Project.ProjectStoreV2)({ get: () => Effect.succeedSome(project) }),
         Layer.mock(Projection.ProjectionStoreV2)({
           getThreadShell: () => Effect.succeed(liveThreadShell(threadId)),
         }),

@@ -12,7 +12,7 @@ export function codespacesProjectSendBlockReason(
   return query.error === null ? null : "Could not check execution location. Retry before sending.";
 }
 
-export const codespacesActionLabels = {
+const codespacesActionLabels = {
   create: "Creating Codespace",
   start: "Starting Codespace",
   connect: "Connecting workspace",
@@ -29,6 +29,9 @@ export function codespacesOperationPresentation(operation: CodespacesOperation) 
       label: "Codespace needs attention",
       description: operation.message,
       tone: "error" as const,
+      logHelpUrl: ["create", "start", "connect", "rebuild"].includes(operation.action)
+        ? "https://docs.github.com/en/codespaces/troubleshooting/github-codespaces-logs#creation-logs"
+        : null,
     };
   if (operation.status === "succeeded") {
     const labels = {
@@ -49,6 +52,7 @@ export function codespacesOperationPresentation(operation: CodespacesOperation) 
             ? "Your local thread history remains on this T3 host."
             : "",
       tone: "success" as const,
+      logHelpUrl: null,
     };
   }
   const stages: Record<string, { label: string; description: string }> = {
@@ -84,6 +88,7 @@ export function codespacesOperationPresentation(operation: CodespacesOperation) 
       description: operation.message,
     }),
     tone: "info" as const,
+    logHelpUrl: null,
   };
 }
 
@@ -115,7 +120,7 @@ export function codespaceStateLabel(state: string | undefined) {
 /** Draft setup for local review before the user sends it to their agent. */
 export function codespacesSetupPrompt(existingPrompt: string) {
   const instruction =
-    "Make this project compatible with GitHub Codespaces. Inspect its stack and existing setup, then add or update .devcontainer/devcontainer.json and any required supporting files. Install the project's dependencies and tools, include Node.js 22.13 or later with npm and an SSH server for T3's remote executor, configure useful forwarded ports, and keep setup reproducible. Preserve existing dev-container configurations. Keep T3 thread history and provider login on my local machine; do not copy credentials or require a provider sign-in in the Codespace. Validate the configuration and explain any GitHub remote, branch, commit, or push steps I need before creating a Codespace. Do not create a Codespace or push changes without my approval.";
+    "Make this project compatible with GitHub Codespaces. Inspect its stack and existing setup, then add or update .devcontainer/devcontainer.json and supporting files only where needed. The Codespace is a shared computer created from a blank template, with projects under /workspaces/{project_name}. A devcontainer is optional. Preserve existing configurations. Do not rebuild, replace, stop, or delete the shared computer. Explain image or feature requirements that cannot be applied safely to it. Check available memory before proposing dependency installation. Use enforceable memory limits for setup commands; if those are unavailable or installation would exceed them, explain how the user can finish setup manually. Do not run an unrestricted dependency installation. Keep T3 thread history and provider login on my T3 host; do not copy credentials or require provider sign-in in the Codespace. Validate the configuration and explain what I need to commit before adding this project to a computer from Settings, Environments, Codespaces. Do not create a Codespace or push changes without my approval.";
   if (existingPrompt.includes(instruction)) return existingPrompt;
   return existingPrompt.trim() ? `${existingPrompt}\n\n${instruction}` : instruction;
 }

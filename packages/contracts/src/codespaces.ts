@@ -5,6 +5,7 @@ export const CodespaceName = Schema.String.check(
   Schema.isPattern(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$/),
 );
 export const CodespaceRepository = Schema.String.check(Schema.isPattern(/^[\w.-]+\/[\w.-]+$/));
+export const CODESPACES_BLANK_REPOSITORY = "github/codespaces-blank";
 export const CodespacesRequestId = Schema.String.check(
   Schema.isPattern(/^[a-zA-Z0-9][a-zA-Z0-9_-]{7,79}$/),
 );
@@ -52,7 +53,7 @@ export const Codespace = Schema.Struct({
 });
 export type Codespace = typeof Codespace.Type;
 export const CodespacesOptionsInput = Schema.Struct({
-  repository: CodespaceRepository,
+  repository: Schema.optionalKey(CodespaceRepository),
   ref: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export const CodespacesOptions = Schema.Struct({
@@ -77,9 +78,10 @@ export const CodespacesRunInput = Schema.Union([
   Schema.Struct({
     ...requestFields,
     action: Schema.Literal("create"),
-    repository: CodespaceRepository,
+    repository: Schema.optionalKey(CodespaceRepository),
     ref: Schema.optionalKey(TrimmedNonEmptyString),
     machine: TrimmedNonEmptyString,
+    displayName: Schema.optionalKey(TrimmedNonEmptyString),
     devcontainerPath: Schema.optionalKey(TrimmedNonEmptyString),
     idleTimeoutMinutes: Schema.Int.check(Schema.isBetween({ minimum: 5, maximum: 240 })),
     retentionDays: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 30 })),
@@ -156,6 +158,7 @@ export const CodespacesProjectInput = Schema.Struct({ projectId: ProjectId });
 export const CodespacesBindInput = Schema.Struct({
   projectId: ProjectId,
   name: Schema.NullOr(CodespaceName),
+  dismissSetupWarning: Schema.optionalKey(Schema.Boolean),
 });
 export const CodespacesProject = Schema.Struct({
   projectId: ProjectId,
@@ -166,5 +169,16 @@ export const CodespacesProject = Schema.Struct({
   devcontainerPaths: Schema.Array(Schema.String),
   name: Schema.NullOr(CodespaceName),
   connected: Schema.Boolean,
+  workspacePath: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  setupWarning: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  setupWarningDismissed: Schema.optionalKey(Schema.Boolean),
 });
 export type CodespacesProject = typeof CodespacesProject.Type;
+
+export const CodespacesProjectTransfer = Schema.Struct({
+  projectId: Schema.String,
+  folder: Schema.String,
+  ref: Schema.optionalKey(Schema.String),
+  origin: Schema.optionalKey(Schema.String),
+  devcontainerPath: Schema.optionalKey(Schema.String),
+});

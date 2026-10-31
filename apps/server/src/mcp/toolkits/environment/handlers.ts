@@ -65,7 +65,7 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
         return yield* new OrchestratorMcpFailure({
           code: "capability_denied",
           message:
-            "Enable Codespaces agent management in project settings before agents can manage billable workspaces.",
+            "Enable Codespaces agent management in Settings, Environments, Codespaces before agents can manage billable workspaces.",
         });
       if (context.caller && input.projectId && input.projectId !== context.caller.projectId)
         return yield* new OrchestratorMcpFailure({

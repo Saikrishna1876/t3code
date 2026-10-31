@@ -38,6 +38,63 @@ function fixture(httpClient = FetchHttpClient.layer) {
 }
 
 describe("project workspace binding", () => {
+  it.effect("leaves legacy bindings disconnected until their project folder is prepared", () =>
+    Effect.gen(function* () {
+      const service = yield* Workspace.CodespacesWorkspace;
+      const binding = { projectId: "legacy", localRoot: "/local/legacy", name: "computer" };
+      yield* service.bind(binding);
+      yield* service.register({
+        name: "computer",
+        computer: true,
+        remoteRoot: "/workspaces",
+        workerUrl: "http://localhost:1",
+        execServerUrl: "ws://localhost:2",
+        token: "private",
+      });
+      expect((yield* service.lookup(binding.localRoot))?.executor).toBeNull();
+      yield* service.bind(binding);
+      expect(yield* service.bindings).toEqual([binding]);
+      expect((yield* service.lookup(binding.localRoot))?.executor).toBeNull();
+    }).pipe(Effect.provide(fixture())),
+  );
+
+  it.effect("keeps separate project roots on one computer across reconnects", () =>
+    Effect.gen(function* () {
+      const service = yield* Workspace.CodespacesWorkspace;
+      yield* service.bind({
+        projectId: "one",
+        localRoot: "/local/one",
+        name: "computer",
+        remoteRoot: "/workspaces/one",
+      });
+      yield* service.bind({
+        projectId: "two",
+        localRoot: "/local/two",
+        name: "computer",
+        remoteRoot: "/workspaces/two",
+      });
+      const executor = {
+        name: "computer",
+        remoteRoot: "/workspaces",
+        workerUrl: "http://localhost:1",
+        execServerUrl: "ws://localhost:2",
+        token: "private",
+      };
+      yield* service.register(executor);
+      expect((yield* service.lookup("/local/one/src"))?.remoteCwd).toBe("/workspaces/one/src");
+      expect((yield* service.lookup("/local/two/src"))?.executor?.remoteRoot).toBe(
+        "/workspaces/two",
+      );
+      yield* service.disconnect("computer");
+      yield* service.register(executor);
+      expect((yield* service.lookup("/local/two"))?.remoteCwd).toBe("/workspaces/two");
+      expect(yield* service.bindings).toMatchObject([
+        { remoteRoot: "/workspaces/one" },
+        { remoteRoot: "/workspaces/two" },
+      ]);
+    }).pipe(Effect.provide(fixture())),
+  );
+
   it.effect.each(["C:\\Repo\\", "\\\\host\\share\\Repo\\"])(
     "routes Windows children of %s remotely and refuses disconnected work",
     (root) =>
@@ -289,7 +346,7 @@ describe("project workspace binding", () => {
       const layer = Workspace.layer.pipe(
         Layer.provide(
           Layer.mock(ServerSecretStore.ServerSecretStore)({
-            get: () => Effect.succeed(Option.none()),
+            get: () => Effect.succeedNone,
             set: () =>
               Effect.suspend(() =>
                 delaySave

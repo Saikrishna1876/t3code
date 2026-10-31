@@ -37,7 +37,11 @@ export const claudeWorkspaceExecution = Effect.fn("claudeWorkspaceExecution")(fu
     mcpServers: {
       "t3-workspace": {
         type: "http",
-        url: target.executor.workerUrl + (readOnly ? "/claude/mcp/read-only" : "/claude/mcp"),
+        url:
+          target.executor.workerUrl +
+          (readOnly ? "/claude/mcp/read-only" : "/claude/mcp") +
+          "?cwd=" +
+          encodeURIComponent(target.remoteCwd),
         headers: { Authorization: `Bearer ${target.executor.token}` },
         timeout: 150000,
         alwaysLoad: true,
@@ -62,8 +66,8 @@ export const claudeWorkspaceExecution = Effect.fn("claudeWorkspaceExecution")(fu
     toolAliases: Object.fromEntries(names.map((name) => [name, `mcp__t3-workspace__${name}`])),
     // Headless dontAsk sessions otherwise deny even the remote read tools.
     allowedTools: ["Read", "Glob", "Grep"].map((name) => `mcp__t3-workspace__${name}`),
-    settingSources: [],
-    instructions: `\nWorkspace execution is in GitHub Codespace ${target.name}, rooted at ${target.remoteCwd}. Use t3-workspace MCP tools for workspace operations. Local project files are not the active workspace. Read the remote CLAUDE.md and AGENTS.md instructions before working. Native local workspace tools, skills and subagents are unavailable for this target. ${readOnly ? "This workspace is read-only. Use Read, Glob and Grep. Shell commands and file edits are unavailable." : "Use Bash for commands, including searches that need extra options. Background shell commands are unsupported; use the project terminal for persistent servers."}`,
+    settingSources: ["user"],
+    instructions: `\nWorkspace execution is in GitHub Codespace ${target.name}, rooted at ${target.remoteCwd}. Use t3-workspace MCP tools for workspace operations. Local project files are not the active workspace. Read the remote CLAUDE.md and AGENTS.md instructions before working. Native local workspace tools, the native Skill tool and subagents are unavailable for this target. Read all skills and their references from the host through T3 host_skills_list and host_skills_read; never read laptop skill paths through the remote shell. ${readOnly ? "This workspace is read-only. Use Read, Glob and Grep. Shell commands and file edits are unavailable." : "Use Bash for commands, including searches that need extra options. Background shell commands are unsupported; use the project terminal for persistent servers."}`,
   } satisfies Pick<
     Options,
     "mcpServers" | "tools" | "disallowedTools" | "toolAliases" | "allowedTools" | "settingSources"

@@ -1,14 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { codespacesSetupPrompt } from "@t3tools/client-runtime/codespaces-presentation";
-import { ProjectCodespacesControl } from "./ProjectCodespacesControl";
-import {
-  Dialog,
-  DialogPopup,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogPanel,
-} from "./ui/dialog";
+import { CodespacesMenuItems } from "./ProjectCodespacesControl";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { formatFilePathForClipboard } from "@t3tools/client-runtime/media-actions";
 import { readLocalApi } from "../localApi";
@@ -20,7 +11,6 @@ import { ComposerContextLabel } from "./ComposerContextLabel";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import {
-  ChevronDownIcon,
   CloudIcon,
   FolderGit2Icon,
   FolderGitIcon,
@@ -31,12 +21,11 @@ import {
 import {
   type Ref,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   memo,
   useImperativeHandle,
   useRef,
   useState,
-  useEffect,
-  useEffectEvent,
 } from "react";
 import { flushSync } from "react-dom";
 
@@ -89,8 +78,6 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { useComposerMenuProps } from "./chat/composerEventScope";
-import { measureRestingComposerControls } from "./chat/restingComposerControlsMeasurement";
-import { resolveRestingComposerControlsNaturalWidth } from "./composerFooterLayout";
 import { cn } from "~/lib/utils";
 import { observeResize } from "~/lib/observeResize";
 
@@ -122,10 +109,10 @@ interface BranchToolbarProps {
   envLocked: boolean;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
+  /** Shown at the end of the composer strip, such as the new thread's permissions. */
+  trailing?: ReactNode;
   availableEnvironments?: readonly EnvironmentOption[];
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
-  composerControlsHostRef?: (element: HTMLDivElement | null) => void;
-  contextStripVisible?: boolean;
 }
 
 function showWorkspaceContextMenu(event: ReactMouseEvent, workspacePath: string) {
@@ -176,7 +163,7 @@ interface RunContextSelectorProps {
   availableEnvironments: readonly EnvironmentOption[] | undefined;
   showEnvironmentPicker: boolean;
   showEnvironmentIndicator: boolean;
-  onCodespaces?: (() => void) | undefined;
+  codespacesProjectId?: ProjectId | undefined;
   codespaceLabel?: string | undefined;
   onEnvironmentChange: ((environmentId: EnvironmentId) => void) | undefined;
   effectiveEnvMode: EnvMode;
@@ -201,7 +188,7 @@ const RunContextSelector = memo(function RunContextSelector({
   availableEnvironments,
   showEnvironmentPicker,
   showEnvironmentIndicator,
-  onCodespaces,
+  codespacesProjectId,
   codespaceLabel,
   onEnvironmentChange,
   effectiveEnvMode,
@@ -231,7 +218,7 @@ const RunContextSelector = memo(function RunContextSelector({
         : resolveCurrentWorkspaceLabel(activeWorktreePath);
   const isPanel = displayMode === "panel";
   const isLocked =
-    !onCodespaces && (envLocked || (envModeLocked && (!isPanel || !showEnvironmentPicker)));
+    !codespacesProjectId && (envLocked || (envModeLocked && (!isPanel || !showEnvironmentPicker)));
   const workspacePath =
     forceNewWorktree || (effectiveEnvMode === "worktree" && !activeWorktreePath)
       ? null
@@ -244,9 +231,7 @@ const RunContextSelector = memo(function RunContextSelector({
   const workspaceIcon = (
     <Tooltip>
       <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
-        <WorkspaceIcon
-          className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
-        />
+        <WorkspaceIcon className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"} />
       </TooltipTrigger>
       <TooltipPopup>
         {isPanel
@@ -267,7 +252,7 @@ const RunContextSelector = memo(function RunContextSelector({
           />
         ) : autoEnvironmentLabel ? (
           <ScaleIcon
-            className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
+            className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"}
             aria-hidden="true"
           />
         ) : (
@@ -275,9 +260,7 @@ const RunContextSelector = memo(function RunContextSelector({
             kind={activeEnvironment?.machine ?? "server"}
             // Wide machine glyphs need a little more box to match the square row icons.
             className={
-              isPanel
-                ? cn(THREAD_DETAILS_PANEL_ICON_CLASS, "-mx-px size-4.5")
-                : "size-3 shrink-0 mx-0!"
+              isPanel ? cn(THREAD_DETAILS_PANEL_ICON_CLASS, "-mx-px size-4.5") : "size-3 shrink-0"
             }
           />
         )}
@@ -287,17 +270,7 @@ const RunContextSelector = memo(function RunContextSelector({
       </TooltipPopup>
     </Tooltip>
   );
-  const icon = !showEnvironmentIndicator ? (
-    workspaceIcon
-  ) : isPanel ? (
-    environmentIcon
-  ) : (
-    // Button's SVG margins consume 4px of the gap; mx-0! restores the intended 2px.
-    <span className="inline-flex shrink-0 items-center gap-0.5">
-      {environmentIcon}
-      {workspaceIcon}
-    </span>
-  );
+  const icon = showEnvironmentIndicator ? environmentIcon : workspaceIcon;
   const triggerContent = (
     <>
       {icon}
@@ -315,12 +288,16 @@ const RunContextSelector = memo(function RunContextSelector({
     return (
       <span
         className={cn(
-          "inline-flex h-7 min-w-0 max-w-[48%] flex-initial items-center justify-start gap-1 rounded-md border border-transparent px-1.75 font-normal text-foreground/70 text-xs sm:h-6 dark:text-muted-foreground",
+          "inline-flex h-7 min-w-0 max-w-[48%] flex-initial items-center justify-start gap-1 rounded-md border border-transparent px-1.75 font-normal text-foreground/70 text-sm sm:h-6 sm:text-xs dark:text-muted-foreground",
           isPanel && "max-w-full",
           isPanel && THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
         )}
         onContextMenu={handleContextMenu}
-        aria-label={isPanel ? "Run context" : undefined}
+        aria-label={
+          isPanel
+            ? `Run context: ${[autoEnvironmentLabel ?? activeEnvironment?.label, workspaceLabel].filter(Boolean).join(", ")}`
+            : undefined
+        }
         data-composer-context-control
       >
         {triggerContent}
@@ -341,15 +318,18 @@ const RunContextSelector = memo(function RunContextSelector({
               }
             : undefined
         }
-        aria-label={isPanel ? "Run context" : undefined}
+        aria-label={
+          isPanel
+            ? `Run context: ${[autoEnvironmentLabel ?? activeEnvironment?.label, workspaceLabel].filter(Boolean).join(", ")}`
+            : undefined
+        }
         data-composer-context-control
         data-composer-shortcut={[
-          onCodespaces || (showEnvironmentPicker && !envLocked) ? "composer.host" : "",
+          codespacesProjectId || (showEnvironmentPicker && !envLocked) ? "composer.host" : "",
           !envModeLocked ? "composer.workspace" : "",
         ].join(" ")}
       >
         {triggerContent}
-        {!isPanel ? <ChevronDownIcon className="size-3 shrink-0 mx-0!" /> : null}
       </MenuTrigger>
       <MenuPopup
         align="start"
@@ -436,15 +416,8 @@ const RunContextSelector = memo(function RunContextSelector({
             <MenuSeparator />
           </>
         ) : null}
-        {onCodespaces ? (
-          <MenuGroup>
-            {!showEnvironmentPicker ? <MenuGroupLabel>Run on</MenuGroupLabel> : null}
-            <MenuItem onClick={onCodespaces}>
-              <CloudIcon className="size-3" aria-hidden="true" />
-              {codespaceLabel ?? "Codespace…"}
-            </MenuItem>
-            <MenuSeparator />
-          </MenuGroup>
+        {codespacesProjectId ? (
+          <CodespacesMenuItems environmentId={environmentId} projectId={codespacesProjectId} />
         ) : null}
         <MenuGroup>
           <MenuGroupLabel>Workspace</MenuGroupLabel>
@@ -586,16 +559,7 @@ function useLabelsOverflow(): readonly [
       let groups = 0;
       for (const child of current.children) {
         if (!(child instanceof HTMLElement)) continue;
-        // Reserve overflowed controls' width to prevent repeated hiding and expansion.
-        const hostedControls = child.matches('[data-chat-resting-composer-controls-host="true"]')
-          ? child.querySelector<HTMLElement>('[data-chat-composer-resting-controls="true"]')
-          : null;
-        const hostedMeasurement = hostedControls
-          ? measureRestingComposerControls(hostedControls)
-          : null;
-        const width = hostedMeasurement
-          ? resolveRestingComposerControlsNaturalWidth(hostedMeasurement)
-          : contentWidth(hostedControls ?? child);
+        const width = contentWidth(child);
         if (width <= 1) continue;
         groups += 1;
         needed += width;
@@ -627,7 +591,6 @@ function useLabelsOverflow(): readonly [
         [
           current,
           ...Array.from(current.children),
-          ...Array.from(current.querySelectorAll("[data-chat-composer-resting-controls='true']")),
           ...Array.from(current.querySelectorAll(COMPOSER_CONTEXT_LABEL_SELECTOR)),
         ],
         measure,
@@ -682,8 +645,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   onComposerFocusRequest,
   availableEnvironments,
   onEnvironmentChange,
-  composerControlsHostRef,
-  contextStripVisible = true,
+  trailing,
 }: BranchToolbarProps) {
   const branchSelectorRef = useRef<BranchToolbarBranchSelectorHandle>(null);
   const threadRef = scopeThreadRef(environmentId, threadId);
@@ -702,44 +664,16 @@ export const BranchToolbar = memo(function BranchToolbar({
       : null,
   );
   const codespaceBound = Boolean(codespace.data?.name);
-  const projectKey = `${environmentId}:${activeProjectRef?.projectId ?? ""}`;
-  const [codespacesProjectKey, setCodespacesProjectKey] = useState<string | null>(null);
-  if (codespacesProjectKey !== null && codespacesProjectKey !== projectKey) {
-    setCodespacesProjectKey(null);
-  }
-  const codespacesOpen = codespacesProjectKey === projectKey;
   const canManageCodespaces = Boolean(
     canRunCodespaces &&
     activeProjectRef &&
     environment?.serverConfig?.environment.capabilities.codespaces,
   );
-  const codespaceLabel = codespaceBound
-    ? codespace.data?.connected
-      ? "Codespace"
-      : "Codespace unavailable"
+  const codespaceLabel = codespace.data?.name
+    ? codespace.data.connected
+      ? codespace.data.name
+      : `${codespace.data.name} unavailable`
     : undefined;
-  const prepareCodespaces = () => {
-    const store = useComposerDraftStore.getState();
-    const target = draftId ?? threadRef;
-    store.setPrompt(target, codespacesSetupPrompt(store.getComposerDraft(target)?.prompt ?? ""));
-    onComposerFocusRequest?.();
-  };
-  const openCodespaces = () => {
-    if (codespace.data && !codespace.data.eligible && !codespace.data.name) {
-      prepareCodespaces();
-    } else {
-      setCodespacesProjectKey(projectKey);
-    }
-  };
-  const closeIncompatibleCodespace = useEffectEvent(() => {
-    prepareCodespaces();
-    setCodespacesProjectKey(null);
-  });
-  useEffect(() => {
-    if (codespacesOpen && codespace.data && !codespace.data.eligible && !codespace.data.name)
-      // oxlint-disable-next-line react/set-state-in-effect -- Async eligibility can arrive after opening; redirect that dialog to the setup draft.
-      closeIncompatibleCodespace();
-  }, [codespacesOpen, codespace.data]);
 
   const codespaceDraft =
     codespaceBound && (!isServerThread || (worktreePath === null && !envLocked));
@@ -807,33 +741,9 @@ export const BranchToolbar = memo(function BranchToolbar({
 
   if (!activeProject) return null;
 
-  const codespacesDialog = (
-    <Dialog
-      open={codespacesOpen}
-      onOpenChange={(open) => setCodespacesProjectKey(open ? projectKey : null)}
-    >
-      <DialogPopup>
-        <DialogHeader>
-          <DialogTitle>Project Codespace</DialogTitle>
-          <DialogDescription>Choose where this project's files and commands run.</DialogDescription>
-        </DialogHeader>
-        <DialogPanel>
-          {codespacesOpen ? (
-            <ProjectCodespacesControl
-              key={`${environmentId}:${activeProject.id}`}
-              environmentId={environmentId}
-              projectId={activeProject.id}
-            />
-          ) : null}
-        </DialogPanel>
-      </DialogPopup>
-    </Dialog>
-  );
-
   if (layout === "panel") {
     return (
       <div className="flex w-full flex-col" data-thread-panel-run-context>
-        {codespacesDialog}
         {panelSection !== "branch" ? (
           <RunContextSelector
             displayMode="panel"
@@ -845,7 +755,7 @@ export const BranchToolbar = memo(function BranchToolbar({
             envModeLocked={envModeLocked}
             environmentId={environmentId}
             availableEnvironments={availableEnvironments}
-            onCodespaces={canManageCodespaces ? openCodespaces : undefined}
+            codespacesProjectId={canManageCodespaces ? projectId : undefined}
             codespaceLabel={codespaceLabel}
             showEnvironmentPicker={showEnvironmentPicker}
             showEnvironmentIndicator={activeEnvironmentOption !== null}
@@ -882,118 +792,102 @@ export const BranchToolbar = memo(function BranchToolbar({
   }
 
   return (
-    <>
-      {codespacesDialog}
-      <ComposerSurface.ContextStrip
-        ref={attachStrip}
-        data-compact={labelsOverflow ? "" : undefined}
-        className={cn(
-          "gap-1 text-xs font-normal text-foreground/70 dark:text-muted-foreground",
-          // A non-Git strip with no visible composer controls should occupy no
-          // space, but its host must retain a prospective width so controls can
-          // become visible again when the chat view grows.
-          !contextStripVisible && "pointer-events-none invisible absolute inset-x-0 top-full",
-        )}
-      >
-        {showGitControls ? (
-          <div className="contents @3xl/composer-surface:hidden">
-            <RunContextSelector
+    <ComposerSurface.ContextStrip
+      ref={attachStrip}
+      data-compact={labelsOverflow ? "" : undefined}
+      className={cn("gap-1 text-xs font-normal text-foreground/70 dark:text-muted-foreground")}
+    >
+      {showGitControls ? (
+        <div className="contents @xl/composer-surface:hidden">
+          <RunContextSelector
+            workspaceRoot={activeProject.workspaceRoot}
+            codespacesProjectId={canManageCodespaces ? projectId : undefined}
+            codespaceLabel={codespaceLabel}
+            forceNewWorktree={forceNewWorktree}
+            autoEnvironmentLabel={autoEnvironmentLabel}
+            onAutoEnvironment={onAutoEnvironment}
+            envLocked={envLocked}
+            envModeLocked={envModeLocked}
+            environmentId={environmentId}
+            availableEnvironments={availableEnvironments}
+            showEnvironmentPicker={showEnvironmentPicker}
+            showEnvironmentIndicator={showEnvironmentIndicator}
+            onEnvironmentChange={onEnvironmentChange}
+            effectiveEnvMode={effectiveEnvMode}
+            activeWorktreePath={activeWorktreePath}
+            onEnvModeChange={onEnvModeChange}
+            previousWorktreeLabel={previousWorktreeLabel}
+            previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
+            onUsePreviousWorktree={onUsePreviousWorktree}
+            addTargets={addTargets}
+            onAddToMachine={onAddToMachine}
+          />
+        </div>
+      ) : null}
+      {showGitControls || showEnvironmentIndicator ? (
+        <div
+          className={cn(
+            "min-h-7 min-w-10 items-center gap-1 sm:min-h-6",
+            showGitControls ? "hidden @xl/composer-surface:flex" : "flex",
+            "flex-1",
+          )}
+        >
+          {showEnvironmentIndicator && availableEnvironments && (
+            <>
+              <BranchToolbarEnvironmentSelector
+                codespacesProjectId={canManageCodespaces ? projectId : undefined}
+                codespaceLabel={codespaceLabel}
+                autoEnvironmentLabel={autoEnvironmentLabel}
+                onAutoEnvironment={onAutoEnvironment}
+                envLocked={envLocked}
+                environmentId={environmentId}
+                availableEnvironments={availableEnvironments}
+                {...(showEnvironmentPicker ? { onEnvironmentChange } : {})}
+                {...(addTargets.length > 0 ? { onAddToMachine: () => onAddToMachine(null) } : {})}
+              />
+              {showGitControls ? (
+                <Separator
+                  orientation="vertical"
+                  className="mx-0.5 h-3.5!"
+                  data-composer-context-control
+                />
+              ) : null}
+            </>
+          )}
+          {showGitControls ? (
+            <BranchToolbarEnvModeSelector
               forceNewWorktree={forceNewWorktree}
-              autoEnvironmentLabel={autoEnvironmentLabel}
-              onAutoEnvironment={onAutoEnvironment}
-              envLocked={envLocked}
-              envModeLocked={envModeLocked}
-              environmentId={environmentId}
-              availableEnvironments={availableEnvironments}
-              onCodespaces={canManageCodespaces ? openCodespaces : undefined}
-              codespaceLabel={codespaceLabel}
-              showEnvironmentPicker={showEnvironmentPicker}
-              showEnvironmentIndicator={showEnvironmentIndicator}
-              onEnvironmentChange={onEnvironmentChange}
+              envLocked={envModeLocked}
               effectiveEnvMode={effectiveEnvMode}
               activeWorktreePath={activeWorktreePath}
               onEnvModeChange={onEnvModeChange}
               previousWorktreeLabel={previousWorktreeLabel}
               previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
               onUsePreviousWorktree={onUsePreviousWorktree}
-              addTargets={addTargets}
-              onAddToMachine={onAddToMachine}
             />
-          </div>
-        ) : null}
-        {showGitControls || showEnvironmentIndicator ? (
-          <div
-            className={cn(
-              "min-h-7 min-w-10 items-center gap-1 sm:min-h-6",
-              showGitControls ? "hidden @3xl/composer-surface:flex" : "flex",
-              composerControlsHostRef ? "shrink" : "flex-1",
-            )}
-          >
-            {showEnvironmentIndicator && availableEnvironments && (
-              <>
-                <BranchToolbarEnvironmentSelector
-                  autoEnvironmentLabel={autoEnvironmentLabel}
-                  onAutoEnvironment={onAutoEnvironment}
-                  envLocked={envLocked}
-                  onCodespaces={canManageCodespaces ? openCodespaces : undefined}
-                  codespaceLabel={codespaceLabel}
-                  environmentId={environmentId}
-                  availableEnvironments={availableEnvironments}
-                  {...(showEnvironmentPicker ? { onEnvironmentChange } : {})}
-                  {...(addTargets.length > 0 ? { onAddToMachine: () => onAddToMachine(null) } : {})}
-                />
-                {showGitControls ? (
-                  <Separator
-                    orientation="vertical"
-                    className="mx-0.5 h-3.5!"
-                    data-composer-context-control
-                  />
-                ) : null}
-              </>
-            )}
-            {showGitControls ? (
-              <BranchToolbarEnvModeSelector
-                forceNewWorktree={forceNewWorktree}
-                envLocked={envModeLocked}
-                effectiveEnvMode={effectiveEnvMode}
-                activeWorktreePath={activeWorktreePath}
-                onEnvModeChange={onEnvModeChange}
-                previousWorktreeLabel={previousWorktreeLabel}
-                previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
-                onUsePreviousWorktree={onUsePreviousWorktree}
-              />
-            ) : null}
-          </div>
-        ) : null}
+          ) : null}
+        </div>
+      ) : null}
 
-        {composerControlsHostRef ? (
-          <div
-            ref={composerControlsHostRef}
-            data-composer-context-control
-            data-chat-resting-composer-controls-host="true"
-            className="flex min-w-0 flex-1 items-center justify-start overflow-x-clip overflow-y-visible"
-          />
-        ) : null}
-
-        {showGitControls ? (
-          <BranchToolbarBranchSelector
-            forceNewWorktree={forceNewWorktree}
-            ref={branchSelectorRef}
-            className="min-w-0 flex-initial justify-end @3xl/composer-surface:ml-auto"
-            environmentId={environmentId}
-            threadId={threadId}
-            {...(draftId ? { draftId } : {})}
-            envLocked={envLocked}
-            effectiveEnvModeOverride={effectiveEnvMode}
-            {...(activeThreadBranchOverride !== undefined ? { activeThreadBranchOverride } : {})}
-            {...(onActiveThreadBranchOverrideChange ? { onActiveThreadBranchOverrideChange } : {})}
-            startFromOrigin={startFromOrigin}
-            onStartFromOriginChange={onStartFromOriginChange}
-            {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
-            {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
-          />
-        ) : null}
-      </ComposerSurface.ContextStrip>
-    </>
+      {showGitControls ? (
+        <BranchToolbarBranchSelector
+          forceNewWorktree={forceNewWorktree}
+          ref={branchSelectorRef}
+          className="min-w-0 flex-initial justify-end @xl/composer-surface:ml-auto"
+          environmentId={environmentId}
+          threadId={threadId}
+          {...(draftId ? { draftId } : {})}
+          envLocked={envLocked}
+          effectiveEnvModeOverride={effectiveEnvMode}
+          {...(activeThreadBranchOverride !== undefined ? { activeThreadBranchOverride } : {})}
+          {...(onActiveThreadBranchOverrideChange ? { onActiveThreadBranchOverrideChange } : {})}
+          startFromOrigin={startFromOrigin}
+          onStartFromOriginChange={onStartFromOriginChange}
+          {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
+          {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
+        />
+      ) : null}
+      {trailing}
+    </ComposerSurface.ContextStrip>
   );
 });
