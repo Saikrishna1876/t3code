@@ -245,15 +245,24 @@ several projects, each in `/workspaces/{project_name}`. Creation does not requir
 a project, GitHub repository, or devcontainer configuration.
 In browser VS Code, open `/workspaces` to see every project's folder.
 
-Choose a project in the same settings section, then choose **Use computer**.
+Choose a project in the same settings section, then choose **Prepare project**.
 The first connection copies the project's current committed branch and Git
 history from your T3 host. Commit local changes first. A GitHub origin is optional.
 Reconnecting preserves the remote checkout and any uncommitted remote changes.
 Projects with the same folder name receive separate folders automatically.
+Choose **New worktree** to give a thread its own branch and checkout on the
+selected computer. Worktrees, file edits, terminals and checkpoints stay there;
+your host's worktree directory setting applies only to local work.
+Worktree setup and settle scripts run there too. Automatic cleanup follows the
+same rules for local changes and submodules as local projects.
+To open a remote worktree in an external editor, use VS Code or VS Code Insiders
+with the GitHub Codespaces extension.
 
 The **Run on** picker lists computers added in settings. Stopped computers stay
 visible with a **Start** button. Start resumes the existing computer and its
-files. **Work locally** returns a project to its local checkout.
+files. Choose the host or a Codespace before creating a thread. That choice stays
+fixed for the thread. The same project can have host and Codespace threads running
+at once. Switching a draft between prepared computers does not move existing threads.
 
 A devcontainer is optional. When present, T3 attempts its lifecycle setup commands
 with memory, process and CPU limits. If the computer cannot enforce those limits,
@@ -279,11 +288,11 @@ then enter the displayed code on GitHub. Existing GitHub permissions are retaine
 If your host uses a token from Settings or its environment, add Codespaces
 permission to that token instead.
 
-Remote execution supports Claude Code and Codex 0.160.1 or later, using each
-project's main checkout. No provider sign-in is required in the Codespace.
+Remote execution supports Claude Code and Codex 0.160.1 or later in the main
+checkout or a worktree. No provider sign-in is required in the Codespace.
 Commands, file browsing, terminals, Git and checkpoints use its filesystem.
-Preview URLs are forwarded privately through your T3 host. Other providers and
-additional worktrees are not supported for this execution target.
+Preview URLs are forwarded privately through your T3 host. Other providers are
+not supported for this execution target.
 
 Claude uses remote tools for reading, searching, editing and shell commands.
 The agent reads skills and their text references from your T3 host through
@@ -299,12 +308,12 @@ requires an active Codex or Claude session. Claude may omit tool descriptions an
 when requesting a call. Other providers keep their native MCP tools.
 Host MCP calls require a full-access thread in Default mode.
 
-Finish or stop active turns before stopping a computer or switching targets.
+Finish or stop active turns on a Codespace before stopping, rebuilding or deleting it.
+Host threads can keep running.
 Stopping affects every project on that computer. Agents cannot stop, rebuild or
 delete a computer shared with other projects; use Settings for those actions.
 Local and remote edits are not
-copied back automatically. Commit and push changes before switching if you need
-them elsewhere. Checkpoint refs belong to the checkout where they were captured.
+copied back automatically. Commit and push changes to use them in another checkout. Checkpoint refs belong to the checkout where they were captured.
 Private repository pushes may require granting that Codespace access to the
 repository through GitHub.
 

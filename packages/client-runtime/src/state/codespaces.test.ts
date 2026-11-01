@@ -79,6 +79,8 @@ describe("Codespaces project status", () => {
         return SubscriptionRef.changes(state);
       });
       mocks.request.mockImplementation((tag: string) => {
+        if (tag === WS_METHODS.codespacesList)
+          return Effect.succeed({ account: "example", codespaces: [] });
         expect(tag).toBe(WS_METHODS.codespacesProject);
         return Queue.offer(reads, connected).pipe(
           Effect.as({
@@ -160,12 +162,19 @@ describe("Codespaces project status", () => {
       );
       expect(registry.get(atoms.run.permissionAtom(environmentId))).toBe(false);
       const project = atoms.project({ environmentId, input: { projectId } });
+      const inventory = atoms.list({ environmentId, input: {} });
+      const inventoryReads = () =>
+        mocks.request.mock.calls.filter(([tag]) => tag === WS_METHODS.codespacesList).length;
+      mocks.request.mockClear();
       registry.mount(project);
+      registry.mount(inventory);
       yield* AtomRegistry.getResult(registry, atoms.state({ environmentId, input: undefined }));
       expect(
         (yield* AtomRegistry.getResult(registry, project, { suspendOnWaiting: true })).connected,
       ).toBe(false);
       expect(yield* Queue.takeAll(reads)).toEqual([false]);
+      yield* AtomRegistry.getResult(registry, inventory, { suspendOnWaiting: true });
+      expect(inventoryReads()).toBe(1);
       connected = true;
       yield* SubscriptionRef.set(state, {
         ...snapshot,
@@ -182,18 +191,24 @@ describe("Codespaces project status", () => {
       expect(
         (yield* AtomRegistry.getResult(registry, project, { suspendOnWaiting: true })).name,
       ).toBe("space");
+      yield* AtomRegistry.getResult(registry, inventory, { suspendOnWaiting: true });
+      expect(inventoryReads()).toBe(2);
       connected = false;
       yield* SubscriptionRef.update(state, (current) => ({ ...current, bindingRevision: 1 }));
       expect(yield* Queue.take(reads)).toBe(false);
       const local = yield* AtomRegistry.getResult(registry, project, { suspendOnWaiting: true });
       expect(local.name).toBeNull();
       expect(local.connected).toBe(false);
+      yield* AtomRegistry.getResult(registry, inventory, { suspendOnWaiting: true });
+      expect(inventoryReads()).toBe(2);
       yield* SubscriptionRef.update(state, (current) => ({
         ...current,
         authorization: { phase: "succeeded" as const, code: null, message: "Permissions updated" },
       }));
       expect(yield* Queue.take(reads)).toBe(false);
       yield* AtomRegistry.getResult(registry, project, { suspendOnWaiting: true });
+      yield* AtomRegistry.getResult(registry, inventory, { suspendOnWaiting: true });
+      expect(inventoryReads()).toBe(3);
     }),
   );
 });

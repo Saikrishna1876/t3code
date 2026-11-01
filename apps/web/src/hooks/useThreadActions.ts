@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import {
   parseScopedThreadKey,
   scopeProjectRef,
@@ -588,7 +589,7 @@ export function useThreadActions() {
       ? await removeWorktree({
           environmentId: threadRef.environmentId,
           input: {
-            cwd: threadProject.workspaceRoot,
+            cwd: threadWorkspaceRoot(thread, threadProject.workspaceRoot),
             path: orphanedWorktreePath,
             force: true,
           },
@@ -605,7 +606,7 @@ export function useThreadActions() {
       removeResult._tag === "Success"
         ? await refreshVcsStatus({
             environmentId: threadRef.environmentId,
-            input: { cwd: threadProject.workspaceRoot },
+            input: { cwd: threadWorkspaceRoot(thread, threadProject.workspaceRoot) },
           })
         : null;
     const cleanupFailure =
@@ -620,7 +621,7 @@ export function useThreadActions() {
       const message = error instanceof Error ? error.message : "An error occurred.";
       console.error("Worktree cleanup failed after thread deletion", {
         threadId: threadRef.threadId,
-        projectCwd: threadProject.workspaceRoot,
+        projectCwd: threadWorkspaceRoot(thread, threadProject.workspaceRoot),
         worktreePath: orphanedWorktreePath,
         error,
       });

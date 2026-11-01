@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import * as Dialog from "../../components/ui/Dialog";
 import { useRememberThreadProject } from "./useRememberThreadProject";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
@@ -544,7 +545,9 @@ function ThreadRouteContent(
   });
   const terminalMenuSessions = buildTerminalMenuSessions({
     knownSessions: knownTerminalSessions ?? [],
-    workspaceRoot: selectedThreadProject?.workspaceRoot ?? null,
+    workspaceRoot: selectedThreadProject
+      ? threadWorkspaceRoot(selectedThread ?? {}, selectedThreadProject.workspaceRoot)
+      : null,
   });
   const selectedThreadDetailWorktreePath = selectedThreadDetail?.thread.worktreePath ?? null;
   const handleReconnectEnvironment = () => {
@@ -759,11 +762,15 @@ function ThreadRouteContent(
       threadDetailWorktreePath: selectedThreadDetailWorktreePath,
     });
     const cwd = projectScriptCwd({
-      project: { cwd: selectedThreadProject.workspaceRoot },
+      project: {
+        cwd: threadWorkspaceRoot(selectedThread ?? {}, selectedThreadProject.workspaceRoot),
+      },
       worktreePath: preferredWorktreePath,
     });
     const env = projectScriptRuntimeEnv({
-      project: { cwd: selectedThreadProject.workspaceRoot },
+      project: {
+        cwd: threadWorkspaceRoot(selectedThread ?? {}, selectedThreadProject.workspaceRoot),
+      },
       worktreePath: preferredWorktreePath,
     });
     stagePendingTerminalLaunch({
@@ -903,7 +910,8 @@ function ThreadRouteContent(
       input: buildProjectThreadStartTurnInput({
         ...metadata,
         projectId: selectedThread.projectId,
-        projectCwd: selectedThreadProject.workspaceRoot,
+        codespaceName: selectedThread.codespaceName ?? null,
+        projectCwd: threadWorkspaceRoot(selectedThread ?? {}, selectedThreadProject.workspaceRoot),
         text: setupMessage.text,
         titleText: selectedThread.title,
         ...(setupMessage.context ? { context: setupMessage.context } : {}),
@@ -1057,7 +1065,11 @@ function ThreadRouteContent(
           onCancelQueuedRunEdit={composer.cancelQueuedRunEdit}
           onRemoveQueuedEditAttachment={composer.onRemoveQueuedEditAttachment}
           environmentId={selectedThread.environmentId}
-          projectWorkspaceRoot={selectedThreadProject?.workspaceRoot ?? null}
+          projectWorkspaceRoot={
+            selectedThreadProject
+              ? threadWorkspaceRoot(selectedThread ?? {}, selectedThreadProject.workspaceRoot)
+              : null
+          }
           threadCwd={selectedThreadCwd}
           selectedThreadQueueCount={composer.selectedThreadQueueCount}
           queuedMessages={

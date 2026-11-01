@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import { useAtomMount } from "@effect/atom-react";
 
 import { EnvironmentProject, EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
@@ -81,7 +82,9 @@ export function useSelectedThreadGitActions() {
     { reportFailure: false },
   );
 
-  const selectedThreadGitRootCwd = selectedThreadProject?.workspaceRoot ?? null;
+  const selectedThreadGitRootCwd = selectedThreadProject
+    ? threadWorkspaceRoot(selectedThread ?? {}, selectedThreadProject.workspaceRoot)
+    : null;
   const branchTarget = {
     environmentId: selectedThread?.environmentId ?? null,
     cwd: selectedThreadGitRootCwd,
@@ -308,7 +311,7 @@ export function useSelectedThreadGitActions() {
         const result = await createWorktree({
           environmentId: thread.environmentId,
           input: {
-            cwd: project.workspaceRoot,
+            cwd: threadWorkspaceRoot(selectedThread ?? {}, project.workspaceRoot),
             refName: nextWorktree.baseBranch,
             newRefName: sanitizeFeatureBranchName(nextWorktree.newBranch),
             path: null,

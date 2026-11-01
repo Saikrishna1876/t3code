@@ -352,6 +352,20 @@ describe("useNewThreadHandler", () => {
     );
   });
 
+  it("applies a Codespace-only choice when reusing the open empty draft", async () => {
+    testState.reset(null);
+    testState.openEmptyDraft("draft-open");
+    testState.completeProjectFileRead(null);
+    await useNewThreadHandler()(
+      { environmentId: "environment-ssh", projectId: "project-remote" } as never,
+      { codespaceName: "computer" },
+    );
+    expect(testState.draftStore.setDraftThreadContext).toHaveBeenCalledWith(
+      "draft-open",
+      expect.objectContaining({ codespaceName: "computer" }),
+    );
+  });
+
   it("opens the draft without waiting on a project file from an offline machine", async () => {
     testState.reset(null, { envMode: null, startFromOrigin: false });
     testState.disconnect("environment-ssh");

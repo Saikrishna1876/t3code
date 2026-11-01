@@ -10,6 +10,11 @@ import * as NodeCrypto from "node:crypto";
 import { NodeServices } from "@effect/platform-node";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import {
+  WorkspaceGitProgressEvent,
+  makeWorkspaceGitProgress,
+  gitProgressOptionsIndex,
+} from "./WorkspaceGitProgress.ts";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Schema from "effect/Schema";
 import {
@@ -23,8 +28,10 @@ import {
   type ProjectSearchContentsInput,
   type FilesystemBrowseInput,
   type FilesystemEntryMetadata,
+  type VcsCreateWorktreeInput,
 } from "@t3tools/contracts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as WorktreeInspection from "../vcs/WorktreeInspection.ts";
 import * as WorkspaceSearchIndex from "../workspace/WorkspaceSearchIndex.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as ServerConfig from "../config.ts";
@@ -41,6 +48,7 @@ import { prepareProject } from "./prepareProject.ts";
 
 const decodeProject = Schema.decodeUnknownSync(CodespacesProjectTransfer);
 
+const encodeGitProgress = Schema.encodeSync(Schema.fromJsonString(WorkspaceGitProgressEvent));
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 const encodeVcsError = Schema.encodeSync(Schema.toCodecJson(VcsError));
 const MAX_FILE_BYTES = 1024 * 1024;
@@ -63,7 +71,36 @@ export async function startWorker(root: string, token: string, port = 0) {
       Layer.provide(NodeServices.layer),
     ),
   );
-  const git = await runtime.runPromise(GitVcsDriver.GitVcsDriver);
+  const gitCore = await runtime.runPromise(GitVcsDriver.GitVcsDriver);
+  const worktrees = await runtime.runPromise(
+    WorktreeInspection.make.pipe(Effect.provide(NodeServices.layer)),
+  );
+  const git = {
+    ...gitCore,
+    createWorktree: Effect.fn("CodespacesWorker.createWorktree")(function* (
+      input: VcsCreateWorktreeInput,
+      options?: GitVcsDriver.CreateWorktreeOptions,
+    ) {
+      const common = yield* gitCore.execute({
+        operation: "CodespacesWorker.createWorktree",
+        cwd: input.cwd,
+        args: ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      });
+      const directory = yield* Effect.promise(() => validPath(common.stdout.trim()));
+      const worktreesDirectory = NodePath.join(directory, "t3-worktrees");
+      yield* Effect.promise(async () => {
+        await validPath(worktreesDirectory, true);
+        await NodeFSP.mkdir(worktreesDirectory, { recursive: true });
+        await validPath(worktreesDirectory, false, worktreesDirectory);
+        if (input.path) await validPath(input.path, true, worktreesDirectory);
+      });
+      // Keep remote worktrees inside their binding and outside the main checkout's tracked files.
+      return yield* gitCore.createWorktree(input, {
+        ...options,
+        worktreesDirectory,
+      });
+    }),
+  };
   const driver = await runtime.runPromise(SchemaDriver);
   const checkpoints = driver.checkpoints!;
   const validPath = async (value: string, writing = false, boundary = workspaceRoot) => {
@@ -238,6 +275,27 @@ export async function startWorker(root: string, token: string, port = 0) {
         };
       } finally {
         await handle.close();
+      }
+    },
+    readRepositoryInstructions: async (input: { cwd: string; fileName: string }) => {
+      if (input.fileName !== "AGENTS.md" && input.fileName !== "CLAUDE.md")
+        throw new Error("Invalid instruction file.");
+      try {
+        const root = await NodeFSP.realpath(input.cwd);
+        const target = await NodeFSP.realpath(await validPath(NodePath.join(root, input.fileName)));
+        if (!target.startsWith(root + NodePath.sep)) return "";
+        const handle = await NodeFSP.open(target, "r");
+        try {
+          const info = await handle.stat();
+          if (!info.isFile() || info.size > 20_000) return "";
+          const bytes = Buffer.alloc(20_001);
+          const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+          return bytesRead > 20_000 ? "" : bytes.subarray(0, bytesRead).toString("utf8").trim();
+        } finally {
+          await handle.close();
+        }
+      } catch {
+        return "";
       }
     },
     readFile: async (input: { cwd: string; relativePath: string }) => {
@@ -471,7 +529,7 @@ export async function startWorker(root: string, token: string, port = 0) {
     },
     refresh: async () => null,
   };
-  const groups = { git, vcs: driver, checkpoints, files: filesystem, entries };
+  const groups = { git, vcs: driver, checkpoints, files: filesystem, entries, worktrees };
   const server = NodeHttp.createServer(async (request, response) => {
     const supplied = Buffer.from(request.headers.authorization ?? "");
     const expected = Buffer.from(`Bearer ${token}`);
@@ -607,7 +665,8 @@ export async function startWorker(root: string, token: string, port = 0) {
         throw new Error("Unknown workspace operation.");
       // Every port takes cwd first, either directly or in its input. Later strings are opaque.
       const input = payload.args[0];
-      if (typeof input === "string") await validPath(input);
+      if (typeof input === "string")
+        await validPath(input, payload.group === "worktrees" && payload.method === "metadata");
       else if (
         input &&
         typeof input === "object" &&
@@ -620,6 +679,36 @@ export async function startWorker(root: string, token: string, port = 0) {
       const method = Reflect.get(group, payload.method) as (
         ...args: unknown[]
       ) => Effect.Effect<unknown, VcsError> | Promise<unknown>;
+      const progressIndex =
+        payload.group === "git" ? gitProgressOptionsIndex(payload.method) : null;
+      const streaming = progressIndex !== null && request.headers.accept === "application/x-ndjson";
+      const controller = new AbortController();
+      response.once("close", () => {
+        if (!response.writableEnded) controller.abort();
+      });
+      if (payload.group === "git") {
+        response.writeHead(200, {
+          "content-type": streaming ? "application/x-ndjson" : "application/json",
+        });
+        // Acknowledge Git before execution so the transport deadline only covers the handshake.
+        response.flushHeaders();
+        // JSON and NDJSON both allow blank lines, which keep quiet hooks past fetch's idle timeout.
+        // @effect-diagnostics-next-line globalTimers:off -- Node HTTP responses own and clear their heartbeat timer on close.
+        const heartbeat = setInterval(() => response.write("\n"), 30_000);
+        heartbeat.unref();
+        response.once("close", () => clearInterval(heartbeat));
+      }
+      if (streaming && progressIndex !== null) {
+        const options = payload.args[progressIndex] as object | undefined;
+        payload.args[progressIndex] = {
+          ...options,
+          progress: makeWorkspaceGitProgress((event) =>
+            Effect.sync(() => {
+              response.write(encodeGitProgress(event) + "\n");
+            }),
+          ),
+        };
+      }
       const result = method(...payload.args);
       const body = Effect.isEffect(result)
         ? await runtime.runPromise(
@@ -631,9 +720,11 @@ export async function startWorker(root: string, token: string, port = 0) {
                 }),
               }),
             ),
+            { signal: controller.signal },
           )
         : { value: (await result) ?? null };
-      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(body));
+      if (!response.headersSent) response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(body) + (streaming ? "\n" : ""));
     } catch (error) {
       if (response.headersSent) {
         response.destroy();

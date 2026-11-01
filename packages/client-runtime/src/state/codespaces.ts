@@ -18,31 +18,36 @@ export function createCodespacesEnvironmentAtoms<R, E>(
     label: "codespaces:state",
     tag: WS_METHODS.codespacesSubscribe,
   });
-  const refreshes = Atom.family((environmentId: EnvironmentId) => {
-    const seen = new WeakMap<object, { signature: string; revision: number }>();
-    return Atom.make((get) => {
-      const snapshot = Option.getOrUndefined(
-        AsyncResult.value(get(state({ environmentId, input: undefined }))),
-      );
-      const previous = seen.get(get.registry);
-      if (!snapshot) return previous?.revision ?? 0;
-      const signature = JSON.stringify([
-        snapshot.bindingRevision ?? 0,
-        snapshot.authorization?.phase === "succeeded",
-        snapshot.operations.map(({ clientRequestId, projectId, name, status }) => [
-          clientRequestId,
-          projectId,
-          name,
-          status,
-        ]),
-        snapshot.environments.map(({ name, connected }) => [name, connected]),
-      ]);
-      // The first snapshot is a baseline, not a mutation that needs another inventory read.
-      const revision = previous ? previous.revision + Number(previous.signature !== signature) : 0;
-      seen.set(get.registry, { signature, revision });
-      return revision;
+  const createRefreshes = (includeBindings: boolean) =>
+    Atom.family((environmentId: EnvironmentId) => {
+      const seen = new WeakMap<object, { signature: string; revision: number }>();
+      return Atom.make((get) => {
+        const snapshot = Option.getOrUndefined(
+          AsyncResult.value(get(state({ environmentId, input: undefined }))),
+        );
+        const previous = seen.get(get.registry);
+        if (!snapshot) return previous?.revision ?? 0;
+        const signature = JSON.stringify([
+          includeBindings ? (snapshot.bindingRevision ?? 0) : 0,
+          snapshot.authorization?.phase === "succeeded",
+          snapshot.operations.map(({ clientRequestId, projectId, name, status }) => [
+            clientRequestId,
+            projectId,
+            name,
+            status,
+          ]),
+          snapshot.environments.map(({ name, connected }) => [name, connected]),
+        ]);
+        // The first snapshot is a baseline, not a mutation that needs another inventory read.
+        const revision = previous
+          ? previous.revision + Number(previous.signature !== signature)
+          : 0;
+        seen.set(get.registry, { signature, revision });
+        return revision;
+      });
     });
-  });
+  const projectRefreshes = createRefreshes(true);
+  const inventoryRefreshes = createRefreshes(false);
   return {
     authorize: createEnvironmentRpcCommand(runtime, {
       label: "codespaces:authorize",
@@ -52,7 +57,7 @@ export function createCodespacesEnvironmentAtoms<R, E>(
       label: "codespaces:project",
       tag: WS_METHODS.codespacesProject,
       staleTimeMs: 2000,
-      refreshTrigger: ({ environmentId }) => refreshes(environmentId),
+      refreshTrigger: ({ environmentId }) => projectRefreshes(environmentId),
     }),
     bind: createEnvironmentRpcCommand(runtime, {
       label: "codespaces:bind",
@@ -63,7 +68,7 @@ export function createCodespacesEnvironmentAtoms<R, E>(
       label: "codespaces:list",
       tag: WS_METHODS.codespacesList,
       staleTimeMs: 10_000,
-      refreshTrigger: ({ environmentId }) => refreshes(environmentId),
+      refreshTrigger: ({ environmentId }) => inventoryRefreshes(environmentId),
     }),
     options: createEnvironmentRpcCommand(runtime, {
       label: "codespaces:options",

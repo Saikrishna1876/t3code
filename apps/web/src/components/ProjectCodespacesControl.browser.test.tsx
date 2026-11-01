@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   snapshot: null as CodespacesSnapshot | null,
   project: null as CodespacesProject | null,
   inventoryMissing: false,
+  inventoryState: "Shutdown",
   run: vi.fn(),
   bind: vi.fn(),
   authorize: vi.fn(),
@@ -30,7 +31,8 @@ const state = vi.hoisted(() => ({
       }) => Promise<AsyncResult.AsyncResult<CodespacesSnapshot, Error>>
     >(),
 }));
-vi.mock(import("~/state/environments"), () => ({
+vi.mock(import("~/state/environments"), async (original) => ({
+  ...(await original()),
   useEnvironment: (() => ({
     serverConfig: { environment: { capabilities: { codespaces: true } } },
   })) as never,
@@ -54,20 +56,6 @@ vi.mock(import("~/composerDraftStore"), async () => {
     } as never,
   };
 });
-vi.mock(import("~/components/settings/settingsLayout"), () => ({
-  SettingsSection: ({
-    title,
-    children,
-  }: {
-    title: string;
-    children: import("react").ReactNode;
-  }) => (
-    <section>
-      <h2>{title}</h2>
-      {children}
-    </section>
-  ),
-}));
 vi.mock(import("~/state/codespaces"), async () => {
   const { Atom } = await import("effect/reactivity");
   const allowed = Atom.make(true);
@@ -103,7 +91,7 @@ vi.mock(import("~/state/query"), () => ({
                     {
                       name: "computer",
                       displayName: "Cloud computer",
-                      state: "Shutdown",
+                      state: state.inventoryState,
                       machine: "basicLinux32gb",
                     },
                   ],
@@ -145,6 +133,7 @@ const deferred = <T,>() => {
 };
 function setup() {
   state.inventoryMissing = false;
+  state.inventoryState = "Shutdown";
   for (const command of [
     state.run,
     state.bind,
@@ -227,8 +216,17 @@ it("creates a blank computer from settings before any project is attached", asyn
   expect(state.run.mock.calls[0]![0].input).not.toHaveProperty("devcontainerPath");
 });
 
-it("keeps a stopped computer in the picker and starts it for this project", async () => {
+it.each([
+  ["Shutdown", false],
+  ["Available", false],
+  ["Available", true],
+] as const)("selects a computer in state %s with connected=%s", async (status, connected) => {
   setup();
+  state.inventoryState = status;
+  state.snapshot = {
+    ...state.snapshot!,
+    environments: state.snapshot!.environments.map((entry) => ({ ...entry, connected })),
+  };
   await using screen = await render(
     <Menu>
       <MenuTrigger render={<Button />}>Run on</MenuTrigger>
@@ -239,11 +237,23 @@ it("keeps a stopped computer in the picker and starts it for this project", asyn
   );
   await userEvent.click(screen.getByRole("button", { name: "Run on" }));
   await expect.element(page.getByRole("menuitem", { name: /Cloud computer/ })).toBeVisible();
-  await userEvent.click(page.getByRole("menuitem", { name: /Cloud computer.*Start/ }));
-  expect(state.run).toHaveBeenCalledWith({
-    environmentId: local,
-    input: expect.objectContaining({ action: "start", name: "computer", projectId }),
-  });
+  await userEvent.click(page.getByRole("menuitem", { name: /Cloud computer/ }));
+  if (connected) {
+    expect(state.bind).toHaveBeenCalledWith({
+      environmentId: local,
+      input: { name: "computer", projectId },
+    });
+    expect(state.run).not.toHaveBeenCalled();
+  } else {
+    expect(state.run).toHaveBeenCalledWith({
+      environmentId: local,
+      input: expect.objectContaining({
+        action: status === "Shutdown" ? "start" : "connect",
+        name: "computer",
+        projectId,
+      }),
+    });
+  }
   expect(document.querySelector('[role="dialog"]')).toBeNull();
 });
 
@@ -271,26 +281,6 @@ it("dismisses a setup warning without losing the binding and offers restoration"
   expect(state.bind).toHaveBeenLastCalledWith({
     environmentId: local,
     input: { projectId, name: "computer", dismissSetupWarning: false },
-  });
-});
-
-it("allows returning to local work after the bound computer disappears", async () => {
-  setup();
-  state.inventoryMissing = true;
-  state.project = { ...state.project!, name: "computer" };
-  await using screen = await render(
-    <Menu>
-      <MenuTrigger render={<Button />}>Run on</MenuTrigger>
-      <MenuPopup>
-        <CodespacesMenuItems environmentId={local} projectId={projectId} />
-      </MenuPopup>
-    </Menu>,
-  );
-  await userEvent.click(screen.getByRole("button", { name: "Run on" }));
-  await userEvent.click(page.getByRole("menuitem", { name: "Work locally" }));
-  expect(state.bind).toHaveBeenCalledWith({
-    environmentId: local,
-    input: { projectId, name: null },
   });
 });
 

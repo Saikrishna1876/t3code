@@ -241,7 +241,7 @@ function SetupDetailsSheet({
             />
             {onWorkLocally ? (
               <Button
-                label="Work locally"
+                label="Use current checkout"
                 tone="secondary"
                 onPress={() => {
                   onClose();

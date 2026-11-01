@@ -123,8 +123,8 @@ describe("resolveNewTaskBranchWorktreePath", () => {
   });
 });
 
-describe("Codespace task workspace selection", () => {
-  it("uses the main checkout despite a worktree default", () => {
+describe("locked task workspace selection", () => {
+  it("uses the main checkout while workspace selection is locked", () => {
     expect(
       resolveNewTaskWorkspaceSelection({
         canChooseWorkspace: false,
@@ -135,7 +135,7 @@ describe("Codespace task workspace selection", () => {
   });
 
   it.each(["local", "worktree"] as const)(
-    "ignores saved %s worktree selections while bound",
+    "ignores saved %s worktree selections while locked",
     (mode) => {
       expect(
         resolveNewTaskWorkspaceSelection({
@@ -153,7 +153,7 @@ describe("Codespace task workspace selection", () => {
     },
   );
 
-  it("restores the saved selection after returning to local work", () => {
+  it("restores the saved selection after unlocking", () => {
     const selection = {
       mode: "worktree" as const,
       branch: "feature",

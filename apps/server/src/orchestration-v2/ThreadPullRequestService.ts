@@ -1,3 +1,5 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
+import { makeWorkspacePathExists } from "../codespaces/CodespacesWorkspace.ts";
 import {
   CommandId,
   type OrchestrationProjectShell,
@@ -12,7 +14,6 @@ import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import type * as Scope from "effect/Scope";
@@ -101,7 +102,7 @@ export const make = Effect.gen(function* () {
   const pullRequests = yield* PullRequestService.PullRequestService;
   const repositoryIdentities = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
   const crypto = yield* Crypto.Crypto;
-  const fileSystem = yield* FileSystem.FileSystem;
+  const workspacePathExists = yield* makeWorkspacePathExists;
   const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
   const pendingBackfill = new Map<ThreadId, number>();
 
@@ -173,7 +174,12 @@ export const make = Effect.gen(function* () {
         (thread.branch !== null || thread.branchPullRequest != null),
     );
     const groups = Map.groupBy(threads, (thread) =>
-      JSON.stringify([thread.projectId, thread.worktreePath, thread.branch]),
+      JSON.stringify([
+        thread.projectId,
+        thread.codespaceName ?? null,
+        thread.worktreePath,
+        thread.branch,
+      ]),
     );
 
     yield* Effect.forEach(
@@ -183,17 +189,20 @@ export const make = Effect.gen(function* () {
           const first = group[0]!;
           const project = projects.get(first.projectId);
           if (project === undefined) return finishBackfill(group);
+          const workspaceRoot = threadWorkspaceRoot(first, project.workspaceRoot);
           const { project: resolvedProject, repository } =
-            yield* resolveProjectForPullRequestDiscovery(project, repositoryIdentities, {
-              refresh: request.refresh,
-            });
+            yield* resolveProjectForPullRequestDiscovery(
+              { ...project, workspaceRoot },
+              repositoryIdentities,
+              {
+                refresh: request.refresh,
+              },
+            );
           if (first.branch !== null && repository === null) return finishBackfill(group);
           const worktreeExists =
-            first.worktreePath !== null && (yield* fileSystem.exists(first.worktreePath));
+            first.worktreePath !== null && (yield* workspacePathExists(first.worktreePath));
           const cwd =
-            worktreeExists && first.worktreePath !== null
-              ? first.worktreePath
-              : project.workspaceRoot;
+            worktreeExists && first.worktreePath !== null ? first.worktreePath : workspaceRoot;
           const detected =
             first.branch === null
               ? null
@@ -279,7 +288,7 @@ export const make = Effect.gen(function* () {
               { cwd, branch: first.branch },
               { freshGitState: true },
             );
-            const currentIdentity = yield* repositoryIdentities.resolve(project.workspaceRoot, {
+            const currentIdentity = yield* repositoryIdentities.resolve(workspaceRoot, {
               refresh: true,
             });
             if (

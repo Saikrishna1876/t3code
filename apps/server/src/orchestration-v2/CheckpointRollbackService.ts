@@ -1,3 +1,5 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
+import { makeWorkspacePathExists } from "../codespaces/CodespacesWorkspace.ts";
 import {
   CheckpointId,
   CheckpointScopeId,
@@ -129,6 +131,7 @@ export const layer: Layer.Layer<
     const sessions = yield* ProviderSessionManagerV2;
     const runtimePolicy = yield* RuntimePolicyV2;
     const fileSystem = yield* FileSystem.FileSystem;
+    const workspacePathExists = yield* makeWorkspacePathExists;
     const projects = yield* ProjectStore.ProjectStoreV2;
     const path = yield* Path.Path;
     const threadCommands = yield* ThreadCommandExecutor.ThreadCommandExecutor;
@@ -204,14 +207,16 @@ export const layer: Layer.Layer<
       if (
         worktreePath != null &&
         branch != null &&
-        !(yield* fileSystem.exists(worktreePath)) &&
+        !(yield* workspacePathExists(worktreePath)) &&
         (yield* isManagedWorktreePath(worktreePath))
       ) {
         const project = yield* projects.get(context.thread.projectId);
         if (Option.isSome(project)) {
-          yield* gitWorkflow.pruneWorktrees({ cwd: project.value.workspaceRoot });
+          yield* gitWorkflow.pruneWorktrees({
+            cwd: threadWorkspaceRoot(context.thread, project.value.workspaceRoot),
+          });
           yield* gitWorkflow.createWorktree({
-            cwd: project.value.workspaceRoot,
+            cwd: threadWorkspaceRoot(context.thread, project.value.workspaceRoot),
             refName: branch,
             path: worktreePath,
           });

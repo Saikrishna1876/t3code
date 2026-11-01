@@ -1,3 +1,4 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import { SourceControlProviderKind } from "@t3tools/contracts";
@@ -586,6 +587,7 @@ function preparePullRequestThread(
 }
 
 function makeManager(input?: {
+  workspace?: CodespacesWorkspace.CodespacesWorkspace["Service"];
   providerScenario?: FakeProviderScenario;
   sourceControlProvider?: SourceControlProvider["Service"];
   textGeneration?: Partial<FakeGitTextGeneration>;
@@ -722,6 +724,10 @@ function makeManager(input?: {
     const manager = yield* GitManager.make.pipe(
       Effect.provide(layerManager),
       Effect.provideContext(stores),
+      (effect) =>
+        input?.workspace
+          ? Effect.provideService(effect, CodespacesWorkspace.CodespacesWorkspace, input.workspace)
+          : effect,
     );
     return { manager, providerCalls };
   });
@@ -2523,40 +2529,63 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
-  it.effect("includes CLAUDE.md for Claude writers only when it differs from AGENTS.md", () =>
-    Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
-      yield* initRepo(repoDir);
-      NodeFS.writeFileSync(NodePath.join(repoDir, "AGENTS.md"), "Use imperative subjects.\n");
-      NodeFS.copyFileSync(NodePath.join(repoDir, "AGENTS.md"), NodePath.join(repoDir, "CLAUDE.md"));
-      NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\n");
-      const commitInstructions: Array<string | undefined> = [];
+  it.effect.each([false, true])(
+    "includes CLAUDE.md for Claude writers only when it differs from AGENTS.md, remote=%s",
+    (remote) =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        NodeFS.writeFileSync(NodePath.join(repoDir, "AGENTS.md"), "Use imperative subjects.\n");
+        NodeFS.copyFileSync(
+          NodePath.join(repoDir, "AGENTS.md"),
+          NodePath.join(repoDir, "CLAUDE.md"),
+        );
+        NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\n");
+        const commitInstructions: Array<string | undefined> = [];
+        const workspace = remote
+          ? ({
+              lookup: () => Effect.succeed({} as never),
+              call: (_cwd: string, _group: string, _method: string, args: ReadonlyArray<unknown>) =>
+                Effect.sync(() => {
+                  const input = args[0] as { fileName: string };
+                  return (
+                    "Remote " +
+                    NodeFS.readFileSync(NodePath.join(repoDir, input.fileName), "utf8").trim()
+                  );
+                }),
+            } as unknown as CodespacesWorkspace.CodespacesWorkspace["Service"])
+          : undefined;
 
-      const { manager } = yield* makeManager({
-        serverSettings: {
-          textGenerationModelSelection: {
-            instanceId: ProviderInstanceId.make("claudeAgent"),
-            model: "claude-sonnet-4-5",
+        const { manager } = yield* makeManager({
+          ...(workspace ? { workspace } : {}),
+          serverSettings: {
+            textGenerationModelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: "claude-sonnet-4-5",
+            },
           },
-        },
-        textGeneration: {
-          generateCommitMessage: (input) => {
-            commitInstructions.push(input.policy?.commitInstructions);
-            return Effect.succeed({ subject: "Update readme", body: "" });
+          textGeneration: {
+            generateCommitMessage: (input) => {
+              commitInstructions.push(input.policy?.commitInstructions);
+              return Effect.succeed({ subject: "Update readme", body: "" });
+            },
           },
-        },
-      });
+        });
 
-      yield* runStackedAction(manager, { cwd: repoDir, action: "commit" });
+        yield* runStackedAction(manager, { cwd: repoDir, action: "commit" });
 
-      NodeFS.writeFileSync(NodePath.join(repoDir, "CLAUDE.md"), "Mention the Claude provider.\n");
-      NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello again\n");
-      yield* runStackedAction(manager, { cwd: repoDir, action: "commit" });
+        NodeFS.writeFileSync(NodePath.join(repoDir, "CLAUDE.md"), "Mention the Claude provider.\n");
+        NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello again\n");
+        yield* runStackedAction(manager, { cwd: repoDir, action: "commit" });
 
-      expect(commitInstructions[0]).toContain("Local AGENTS.md:\nUse imperative subjects.");
-      expect(commitInstructions[0]).not.toContain("Local CLAUDE.md:");
-      expect(commitInstructions[1]).toContain("Local CLAUDE.md:\nMention the Claude provider.");
-    }),
+        expect(commitInstructions[0]).toContain(
+          `Local AGENTS.md:\n${remote ? "Remote " : ""}Use imperative subjects.`,
+        );
+        expect(commitInstructions[0]).not.toContain("Local CLAUDE.md:");
+        expect(commitInstructions[1]).toContain(
+          `Local CLAUDE.md:\n${remote ? "Remote " : ""}Mention the Claude provider.`,
+        );
+      }),
   );
 
   it.effect("falls back when the dedicated source control writer is unavailable", () =>

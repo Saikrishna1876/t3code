@@ -23,12 +23,17 @@ import { randomUUID } from "~/lib/utils";
 import { Button } from "./ui/button";
 import { MenuGroup, MenuGroupLabel, MenuItem } from "./ui/menu";
 
-function useProjectCodespaces(environmentId: EnvironmentId, projectId: ProjectId) {
+function useProjectCodespaces(
+  environmentId: EnvironmentId,
+  projectId: ProjectId,
+  name: string | null,
+  onSelect?: (name: string) => void,
+) {
   const environment = useEnvironment(environmentId);
   const supported = environment?.serverConfig?.environment.capabilities.codespaces === true;
   const canManage = useAtomValue(codespacesEnvironment.run.permissionAtom(environmentId));
   const project = useEnvironmentQuery(
-    supported ? codespacesEnvironment.project({ environmentId, input: { projectId } }) : null,
+    supported ? codespacesEnvironment.project({ environmentId, input: { projectId, name } }) : null,
   );
   const inventory = useEnvironmentQuery(
     supported ? codespacesEnvironment.list({ environmentId, input: {} }) : null,
@@ -52,7 +57,7 @@ function useProjectCodespaces(environmentId: EnvironmentId, projectId: ProjectId
       (entry) => managed.has(entry.name) || entry.name === project.data?.name,
     ) ?? [];
   const execute = async (
-    input: CodespacesRunInput | { name: null; dismissSetupWarning?: boolean },
+    input: CodespacesRunInput | { name: string | null; dismissSetupWarning?: boolean },
   ) => {
     setPending(true);
     setError(null);
@@ -69,15 +74,18 @@ function useProjectCodespaces(environmentId: EnvironmentId, projectId: ProjectId
     }
     setPending(false);
     project.refresh();
-    inventory.refresh();
+    if ("action" in input) inventory.refresh();
   };
-  const select = (name: string, stopped: boolean) =>
-    void execute({
-      action: stopped ? "start" : "connect",
-      name,
-      projectId,
-      clientRequestId: randomUUID(),
-    });
+  const select = (name: string, stopped: boolean, reconnect = false) => {
+    onSelect?.(name);
+    void execute(
+      !stopped &&
+        !reconnect &&
+        state.data?.environments.some((entry) => entry.name === name && entry.connected)
+        ? { name }
+        : { action: stopped ? "start" : "connect", name, projectId, clientRequestId: randomUUID() },
+    );
+  };
   const dismissWarning = async (dismissSetupWarning: boolean) => {
     setPending(true);
     const result = await bind({
@@ -105,11 +113,17 @@ function useProjectCodespaces(environmentId: EnvironmentId, projectId: ProjectId
 export function CodespacesMenuItems({
   environmentId,
   projectId,
+  codespaceName = null,
+  onCodespaceChange,
+  locked = false,
 }: {
   environmentId: EnvironmentId;
   projectId: ProjectId;
+  codespaceName?: string | null | undefined;
+  onCodespaceChange?: ((name: string | null) => void) | undefined;
+  locked?: boolean;
 }) {
-  const model = useProjectCodespaces(environmentId, projectId);
+  const model = useProjectCodespaces(environmentId, projectId, codespaceName, onCodespaceChange);
   if (!model.supported || (!model.spaces.length && !model.error && !model.project.data?.name))
     return null;
   return (
@@ -119,7 +133,7 @@ export function CodespacesMenuItems({
         <MenuItem
           key={space.name}
           closeOnClick={false}
-          disabled={model.busy || !model.canManage}
+          disabled={locked || model.busy || !model.canManage}
           onClick={() => model.select(space.name, space.state === "Shutdown")}
         >
           <span className="min-w-0 truncate">
@@ -131,15 +145,6 @@ export function CodespacesMenuItems({
           </span>
         </MenuItem>
       ))}
-      {model.project.data?.name ? (
-        <MenuItem
-          closeOnClick={false}
-          disabled={model.busy || !model.canManage}
-          onClick={() => void model.execute({ name: null })}
-        >
-          Work locally
-        </MenuItem>
-      ) : null}
       {model.error || model.feedback?.tone === "error" ? (
         <p role="alert" className="px-2 py-1 text-xs text-destructive">
           {model.error ?? model.feedback?.description}
@@ -167,7 +172,8 @@ export function ProjectCodespacesControl({
   environmentId: EnvironmentId;
   projectId: ProjectId;
 }) {
-  const model = useProjectCodespaces(environmentId, projectId);
+  const [name, setName] = useState<string | null>(null);
+  const model = useProjectCodespaces(environmentId, projectId, name, setName);
   const info = model.project.data;
   if (!model.supported) return null;
   return (
@@ -222,28 +228,18 @@ export function ProjectCodespacesControl({
             size="sm"
             variant="outline"
             disabled={model.busy || !model.canManage || (!info?.eligible && !info?.name)}
-            onClick={() => model.select(space.name, space.state === "Shutdown")}
+            onClick={() => model.select(space.name, space.state === "Shutdown", true)}
           >
             {space.state === "Shutdown"
               ? "Start"
               : info?.name === space.name && info.connected
                 ? "Reconnect"
-                : "Use computer"}
+                : "Prepare project"}
           </Button>
         </div>
       ))}
       {!model.spaces.length ? (
         <p className="text-sm text-muted-foreground">No computers added yet.</p>
-      ) : null}
-      {info?.name ? (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={model.busy || !model.canManage}
-          onClick={() => void model.execute({ name: null })}
-        >
-          Work locally
-        </Button>
       ) : null}
       {model.feedback ? (
         <div

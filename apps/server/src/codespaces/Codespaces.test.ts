@@ -1,3 +1,4 @@
+import { codespaceWorkspaceRoot } from "@t3tools/contracts";
 import { makeWorkspaceReservations } from "./WorkspaceReservations.ts";
 import { describe, expect, it } from "@effect/vitest";
 import {
@@ -96,7 +97,12 @@ function harness(
     threads?: ReadonlyArray<
       Pick<
         OrchestrationV2ThreadShell,
-        "id" | "projectId" | "status" | "activityRunStatus" | "pendingRuntimeRequest"
+        | "id"
+        | "projectId"
+        | "status"
+        | "activityRunStatus"
+        | "pendingRuntimeRequest"
+        | "codespaceName"
       >
     >;
   } = {},
@@ -105,6 +111,13 @@ function harness(
   let bindings = overrides.bindings
     ? [...overrides.bindings]
     : [{ projectId: "project-test", localRoot: "/workspace/fork", name: "test-space-1" }];
+  bindings = bindings.map((binding) => ({
+    ...binding,
+    hostRoot: binding.hostRoot ?? binding.localRoot,
+    localRoot: binding.hostRoot
+      ? binding.localRoot
+      : codespaceWorkspaceRoot(binding.localRoot, binding.name),
+  }));
   const requests: GitHubRest.GitHubRestInput[] = [];
   const targetEvents: string[] = [];
   const pinnedTokens: string[] = [];
@@ -112,9 +125,14 @@ function harness(
   let token = "first-token";
   let state = "Available";
   let connects = 0;
+  let prepares = 0;
+  let remoteInspections = 0;
   let disconnects = 0;
   let rebuilds = 0;
-  let threads = overrides.threads ?? [];
+  let threads = (overrides.threads ?? []).map((thread) => ({
+    ...thread,
+    codespaceName: thread.codespaceName === undefined ? managed.name : thread.codespaceName,
+  }));
   const stored = new Map<string, Uint8Array>(
     overrides.saved ? [["codespaces-controller-v1", overrides.saved]] : [],
   );
@@ -222,7 +240,11 @@ function harness(
             Effect.sync(() => {
               targetEvents.push("bind:" + binding.name);
               bindings = [
-                ...bindings.filter((entry) => entry.projectId !== binding.projectId),
+                ...bindings.filter(
+                  (entry) =>
+                    entry.projectId !== binding.projectId ||
+                    (binding.name !== null && entry.name !== binding.name),
+                ),
                 ...(binding.name === null ? [] : [binding]),
               ];
             }),
@@ -235,10 +257,12 @@ function harness(
           register: () => Effect.void,
           stageAttachment: () => Effect.die("Unexpected attachment staging"),
           openAsset: () => Effect.die("Unexpected asset streaming"),
-          call: <A>(cwd: string) =>
-            bindings.some((binding) => binding.localRoot === cwd)
+          call: <A>(cwd: string) => {
+            remoteInspections++;
+            return bindings.some((binding) => binding.localRoot === cwd)
               ? Effect.succeed((overrides.remoteFolderExists ? { kind: "directory" } : null) as A)
-              : Effect.fail(new CodespacesError({ code: "conflict", message: "No binding" })),
+              : Effect.fail(new CodespacesError({ code: "conflict", message: "No binding" }));
+          },
         }),
         Layer.mock(TerminalManager.TerminalManager)({
           close: ({ threadId }) =>
@@ -283,9 +307,12 @@ function harness(
                 overrides.connect ? overrides.connect(...args) : Effect.succeed(managed),
               ),
             ),
-          prepareProject:
-            overrides.prepareProject ??
-            (() => Effect.succeed({ remoteRoot: "/workspaces/fork", setupWarning: null })),
+          prepareProject: (input) => {
+            prepares++;
+            return overrides.prepareProject
+              ? overrides.prepareProject(input)
+              : Effect.succeed({ remoteRoot: "/workspaces/fork", setupWarning: null });
+          },
           prepareStop: overrides.prepareStop ?? (() => Effect.void),
           disconnect: () =>
             Effect.sync(() => {
@@ -315,10 +342,15 @@ function harness(
     pinnedTokens,
     targetEvents,
     connects: () => connects,
+    prepares: () => prepares,
+    remoteInspections: () => remoteInspections,
     disconnects: () => disconnects,
     rebuilds: () => rebuilds,
-    threads: (value: typeof threads) => {
-      threads = value;
+    threads: (value: NonNullable<typeof overrides.threads>) => {
+      threads = value.map((thread) => ({
+        ...thread,
+        codespaceName: thread.codespaceName === undefined ? managed.name : thread.codespaceName,
+      }));
     },
     saved: () => stored.get("codespaces-controller-v1")!,
     account: (value: string) => {
@@ -376,9 +408,9 @@ describe("Codespaces controller", () => {
         expect((yield* completed(service, "connect-computer")).status).toBe("succeeded");
         if (action === "bind")
           yield* service.bind({ projectId: testProjectId, name: managed.name });
-        expect((yield* service.project({ projectId: testProjectId })).workspacePath).toBe(
-          remoteFolderExists ? "/workspaces/stale-folder" : "/workspaces/recovered-folder",
-        );
+        expect(
+          (yield* service.project({ projectId: testProjectId, name: managed.name })).workspacePath,
+        ).toBe(remoteFolderExists ? "/workspaces/stale-folder" : "/workspaces/recovered-folder");
       }).pipe(Effect.provide(test.layer));
     },
   );
@@ -502,7 +534,8 @@ describe("Codespaces controller", () => {
           "busy",
         );
         expect(
-          (yield* service.bind({ projectId: testProjectId, name: null }).pipe(Effect.flip)).code,
+          (yield* service.bind({ projectId: testProjectId, name: managed.name }).pipe(Effect.flip))
+            .code,
         ).toBe("busy");
         expect(
           (yield* service.run({ ...create, clientRequestId: "competing-create" }).pipe(Effect.flip))
@@ -628,9 +661,12 @@ describe("Codespaces controller", () => {
     }).pipe(Effect.provide(test.layer));
   });
 
-  it.effect("keeps the local target when work starts during GitHub creation", () => {
+  it.effect("prepares cloud checkout while a host turn runs", () => {
     const threads: Array<
-      Pick<OrchestrationV2ThreadShell, "id" | "projectId" | "status" | "pendingRuntimeRequest">
+      Pick<
+        OrchestrationV2ThreadShell,
+        "id" | "projectId" | "status" | "pendingRuntimeRequest" | "codespaceName"
+      >
     > = [];
     const test = harness({
       threads,
@@ -639,6 +675,7 @@ describe("Codespaces controller", () => {
           if (input.path === "user/codespaces" && input.method === "POST")
             threads.push({
               id: ThreadId.make("new-local-turn"),
+              codespaceName: null,
               projectId: ProjectId.make("project-test"),
               status: "running",
               pendingRuntimeRequest: null,
@@ -662,15 +699,14 @@ describe("Codespaces controller", () => {
       const service = yield* Codespaces.Codespaces;
       yield* service.run(create);
       const operation = yield* completed(service, create.clientRequestId);
-      expect(operation.status).toBe("failed");
+      expect(operation.status).toBe("succeeded");
       expect(operation.name).toBe("test-space-1");
-      expect(operation.message).toContain("Stop active turns");
-      expect(test.targetEvents).toEqual([]);
-      expect(test.connects()).toBe(0);
+      expect(test.targetEvents).toEqual(["bind:test-space-1"]);
+      expect(test.connects()).toBe(1);
     }).pipe(Effect.provide(test.layer));
   });
   it.effect(
-    "closes only this project's terminals before changing targets, preserving history",
+    "prepares a checkout without closing host terminals or changing existing threads",
     () => {
       const projectId = ProjectId.make("project-test");
       const test = harness({
@@ -696,17 +732,32 @@ describe("Codespaces controller", () => {
         expect((yield* service.snapshot).bindingRevision).toBe(1);
         yield* service.bind({ projectId, name: null });
         const changed = yield* service.changes.pipe(Stream.runHead);
-        expect(Option.getOrThrow(changed).bindingRevision).toBe(2);
-        expect(test.targetEvents).toEqual([
-          "close:owned",
-          "bind:test-space-1",
-          "close:owned",
-          "bind:null",
-        ]);
+        expect(Option.getOrThrow(changed).bindingRevision).toBe(1);
+        expect(test.targetEvents).toEqual(["bind:test-space-1"]);
+        const requests = test.requests.length;
+        const prepares = test.prepares();
+        const inspections = test.remoteInspections();
+        for (let index = 0; index < 2; index++) {
+          const selected = yield* service.bind({ projectId, name: managed.name });
+          expect(selected.workspacePath).toBe("/workspaces/fork");
+          yield* service.bind({ projectId, name: null });
+        }
+        expect(test.requests).toHaveLength(requests);
+        expect(test.prepares()).toBe(prepares);
+        expect(test.remoteInspections()).toBe(inspections);
+        expect((yield* service.snapshot).bindingRevision).toBe(1);
+        yield* service.run({
+          action: "connect",
+          name: managed.name,
+          projectId,
+          clientRequestId: "explicit-reconnect",
+        });
+        expect((yield* completed(service, "explicit-reconnect")).status).toBe("succeeded");
+        expect(test.prepares()).toBe(prepares + 1);
       }).pipe(Effect.provide(test.layer));
     },
   );
-  it.effect("refuses switching targets while a turn waits for approval", () => {
+  it.effect("host selection leaves a waiting Codespace thread untouched", () => {
     const projectId = ProjectId.make("project-test");
     const test = harness({
       threads: [
@@ -716,7 +767,7 @@ describe("Codespaces controller", () => {
     return Effect.gen(function* () {
       const service = yield* Codespaces.Codespaces;
       expect((yield* service.bind({ projectId, name: null }).pipe(Effect.result))._tag).toBe(
-        "Failure",
+        "Success",
       );
       expect(test.targetEvents).toEqual([]);
     }).pipe(Effect.provide(test.layer));
@@ -733,7 +784,10 @@ describe("Codespaces controller", () => {
       });
       yield* completed(service, "connect-account");
       test.account("different");
-      yield* service.list;
+      expect(
+        (yield* service.bind({ projectId: testProjectId, name: managed.name }).pipe(Effect.result))
+          ._tag,
+      ).toBe("Failure");
       expect(test.disconnects()).toBe(1);
       expect((yield* service.snapshot).environments[0]?.connected).toBe(false);
     }).pipe(Effect.provide(test.layer));
@@ -824,7 +878,9 @@ describe("Codespaces controller", () => {
     const test = harness({ hasDevcontainer: false });
     return Effect.gen(function* () {
       const service = yield* Codespaces.Codespaces;
-      expect((yield* service.project({ projectId: testProjectId })).eligible).toBe(true);
+      expect(
+        (yield* service.project({ projectId: testProjectId, name: managed.name })).eligible,
+      ).toBe(true);
       yield* service.run(create);
       expect((yield* completed(service, create.clientRequestId)).status).toBe("succeeded");
       const body = test.requests.find(
@@ -1152,7 +1208,7 @@ it.effect("adds a project without a GitHub remote or devcontainer to an unrelate
   const test = harness({ bindings: [], hasDevcontainer: false, origin: "" });
   return Effect.gen(function* () {
     const service = yield* Codespaces.Codespaces;
-    const info = yield* service.project({ projectId: testProjectId });
+    const info = yield* service.project({ projectId: testProjectId, name: managed.name });
     expect(info.eligible).toBe(true);
     expect(info.repository).toBe("");
     expect(info.devcontainerPaths).toEqual([]);
@@ -1163,9 +1219,9 @@ it.effect("adds a project without a GitHub remote or devcontainer to an unrelate
       clientRequestId: "unrelated-computer",
     });
     expect((yield* completed(service, "unrelated-computer")).status).toBe("succeeded");
-    expect((yield* service.project({ projectId: testProjectId })).workspacePath).toBe(
-      "/workspaces/fork",
-    );
+    expect(
+      (yield* service.project({ projectId: testProjectId, name: managed.name })).workspacePath,
+    ).toBe("/workspaces/fork");
   }).pipe(Effect.provide(test.layer));
 });
 

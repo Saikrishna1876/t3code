@@ -1,3 +1,4 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto digest is effectful; a sync hash keeps historyPath a plain function.
 import * as NodeCrypto from "node:crypto";
 
@@ -1543,6 +1544,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   options: TerminalManagerOptions,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
+  const workspace = yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace);
+  const workspacePathExists = yield* CodespacesWorkspace.makeWorkspacePathExists;
   const path = yield* Path.Path;
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
@@ -2152,6 +2155,13 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   });
 
   const assertValidCwd = Effect.fn("terminal.assertValidCwd")(function* (cwd: string) {
+    if (Option.isSome(workspace) && (yield* workspace.value.lookup(cwd))) {
+      const exists = yield* workspacePathExists(cwd, true).pipe(
+        Effect.mapError((cause) => new TerminalCwdStatError({ cwd, cause })),
+      );
+      if (!exists) return yield* new TerminalCwdNotFoundError({ cwd });
+      return;
+    }
     const stats = yield* fileSystem.stat(cwd).pipe(
       Effect.catchTags({
         PlatformError: (cause) =>
@@ -2471,7 +2481,12 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       increment(terminalSessionsTotal, { lifecycle: eventType }).pipe(
         Effect.andThen(
           Effect.gen(function* () {
-            const shellCandidates = resolveShellCandidates(shellResolver, platform, baseEnv);
+            const remote = Option.isSome(workspace)
+              ? yield* workspace.value.lookup(session.cwd)
+              : null;
+            const shellCandidates = remote
+              ? [{ shell: "bash" }]
+              : resolveShellCandidates(shellResolver, platform, baseEnv);
             const terminalEnv = createTerminalSpawnEnv(
               baseEnv,
               session.runtimeEnv,

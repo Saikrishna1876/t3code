@@ -1,6 +1,10 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
+import { migrateThreadTargets } from "../codespaces/migrateThreadTargets.ts";
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
+  CodespacesError,
+  CheckpointScopeId,
   MessageId,
   EventId,
   NodeId,
@@ -927,6 +931,7 @@ it.effect("keeps delegated child pull-request links independent of the parent", 
       interactionMode: "default",
       branch: "feature/parent-pr",
       worktreePath: "/repo-worktree",
+      codespaceName: "cloud-computer",
       createdBy: "user",
       creationSource: "web",
     });
@@ -965,6 +970,20 @@ it.effect("keeps delegated child pull-request links independent of the parent", 
     const updatedParent = yield* projections.getThreadProjection(parentThreadId);
     const childThreadId = updatedParent.subagents[0]!.childThreadId!;
     const child = yield* projections.getThreadProjection(childThreadId);
+    assert.equal(child.thread.codespaceName, "cloud-computer");
+    const targetChange = yield* orchestrator
+      .dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("move-child-to-host"),
+        threadId: childThreadId,
+        codespaceName: null,
+      })
+      .pipe(Effect.flip);
+    assert.instanceOf(targetChange, Orchestrator.OrchestratorDispatchError);
+    assert.equal(
+      (yield* projections.getThreadProjection(childThreadId)).thread.codespaceName,
+      "cloud-computer",
+    );
     assert.isNull(child.thread.linkedPullRequest);
     assert.deepEqual(child.thread.pullRequests, []);
     assert.equal(child.thread.branch, parent.thread.branch);
@@ -1521,4 +1540,124 @@ it.effect("dispatch records the command outcome and its duration", () =>
     assert.strictEqual((yield* successes).count - successesBefore, 1);
     assert.strictEqual((yield* durations).count - durationsBefore, 1);
   }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect(
+  "pins legacy cloud and host threads before replacing routes and resumes after interruption",
+  () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const sink = yield* EventSink.EventSinkV2;
+      const now = yield* DateTime.now;
+      const cloudProject = ProjectId.make("legacy-cloud");
+      const hostProject = ProjectId.make("legacy-host");
+      const ids = [
+        ThreadId.make("legacy-active"),
+        ThreadId.make("legacy-archived"),
+        ThreadId.make("legacy-host"),
+      ];
+      for (const [index, id] of ids.entries()) {
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(`legacy-create:${id}`),
+          threadId: id,
+          projectId: index < 2 ? cloudProject : hostProject,
+          title: "Legacy",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: "main",
+          worktreePath: index < 2 ? "/project/.git/t3-worktrees/feature" : null,
+          createdBy: "user",
+          creationSource: "web",
+        });
+        if (index === 1)
+          yield* orchestrator.dispatch({
+            type: "thread.archive",
+            commandId: CommandId.make("legacy-archive"),
+            threadId: id,
+          });
+        const { codespaceName: _target, ...legacy } = (yield* projections.getThreadProjection(id))
+          .thread;
+        yield* sink.write({
+          events: [
+            {
+              id: EventId.make(`legacy-event:${id}`),
+              type: "thread.metadata-updated",
+              threadId: id,
+              occurredAt: now,
+              payload: legacy,
+            },
+          ],
+        });
+      }
+      const scopeId = CheckpointScopeId.make("legacy-scope");
+      yield* sink.write({
+        events: [
+          {
+            id: EventId.make("legacy-scope-event"),
+            type: "checkpoint-scope.created",
+            threadId: ids[0]!,
+            occurredAt: now,
+            payload: {
+              id: scopeId,
+              threadId: ids[0]!,
+              runId: null,
+              nodeId: NodeId.make("legacy-scope-node"),
+              parentScopeId: null,
+              providerThreadId: null,
+              kind: "manual",
+              ordinalWithinParent: 0,
+              advancesAppRunCount: false,
+              cwd: "/project/.git/t3-worktrees/feature",
+              createdAt: now,
+            },
+          },
+        ],
+      });
+      let bindings: ReadonlyArray<CodespacesWorkspace.WorkspaceBinding> = [
+        {
+          projectId: cloudProject,
+          localRoot: "/project",
+          name: "computer",
+          remoteRoot: "/workspaces/project",
+        },
+      ];
+      let fail = true;
+      let writes = 0;
+      const workspace = Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+        bindings: Effect.sync(() => bindings),
+        bind: (binding) =>
+          Effect.suspend(() => {
+            if (fail)
+              return Effect.fail(new CodespacesError({ code: "storage", message: "Interrupted" }));
+            if (binding.name !== null) bindings = [binding];
+            writes++;
+            return Effect.void;
+          }),
+      });
+      const first = yield* migrateThreadTargets().pipe(Effect.provide(workspace), Effect.result);
+      assert.equal(first._tag, "Failure");
+      for (const id of ids.slice(0, 2)) {
+        const thread = yield* projections.getThread(id);
+        assert.equal(thread.codespaceName, "computer");
+        assert.equal(
+          thread.worktreePath,
+          "/project/.git/t3-codespaces/computer/.git/t3-worktrees/feature",
+        );
+      }
+      assert.isNull((yield* projections.getThread(ids[2]!)).codespaceName);
+      assert.equal(
+        (yield* projections.getThreadRecords(ids[0]!, ["checkpointScopes"])).checkpointScopes[0]
+          ?.cwd,
+        "/project/.git/t3-codespaces/computer/.git/t3-worktrees/feature",
+      );
+      fail = false;
+      yield* migrateThreadTargets().pipe(Effect.provide(workspace));
+      yield* migrateThreadTargets().pipe(Effect.provide(workspace));
+      assert.equal(writes, 1);
+      assert.equal(bindings[0]?.hostRoot, "/project");
+      assert.equal(bindings[0]?.localRoot, "/project/.git/t3-codespaces/computer");
+    }).pipe(Effect.provide(layerTest)),
 );

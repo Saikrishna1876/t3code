@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import {
   OrchestratorMcpFailure,
   ProviderSessionId,
@@ -98,7 +99,9 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError(unavailable));
     if (Option.isNone(project))
       return yield* invalid("The calling project no longer exists on the host.");
-    const cwd = records.thread.worktreePath ?? project.value.workspaceRoot;
+    const cwd =
+      records.thread.worktreePath ??
+      threadWorkspaceRoot(records.thread, project.value.workspaceRoot);
     const inventory = yield* providers.refreshWorkspaceSnapshot({
       instanceId: caller.providerInstanceId,
       cwd,

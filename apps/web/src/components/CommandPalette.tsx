@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -1425,7 +1426,7 @@ function OpenCommandPaletteDialog(props: {
           environmentId,
           input: {
             instanceId: thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId,
-            cwd: thread.worktreePath ?? project.workspaceRoot,
+            cwd: thread.worktreePath ?? threadWorkspaceRoot(thread, project.workspaceRoot),
             fresh: true,
           },
         });

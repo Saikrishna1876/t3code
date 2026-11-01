@@ -27,6 +27,7 @@ import { CodexSettings, ProviderInstanceId } from "@t3tools/contracts";
 import * as ServerConfig from "../config.ts";
 import { makeProcessProbe, processProbeSource } from "../testUtils/processProbe.ts";
 import * as TextGeneration from "./TextGeneration.ts";
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
 import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
@@ -454,6 +455,7 @@ it.effect.each([false, true])("text generation preflight: exhausted=%s", (exhaus
       options: [{ id: "effort", value: "high" }],
     };
     const calls: ModelSelection[] = [];
+    const cwds: string[] = [];
     const instances: ProviderInstance[] = [primary, fallback].map((instanceId) => {
       const driver = ProviderDriverKind.make(instanceId === primary ? "codex" : "claudeAgent");
       const snapshot: ServerProvider = {
@@ -493,6 +495,7 @@ it.effect.each([false, true])("text generation preflight: exhausted=%s", (exhaus
           generateThreadTitle: (input) =>
             Effect.sync(() => {
               calls.push(input.modelSelection);
+              cwds.push(input.cwd);
               return { title: "Generated title" };
             }),
         }),
@@ -501,6 +504,16 @@ it.effect.each([false, true])("text generation preflight: exhausted=%s", (exhaus
     const service = yield* TextGeneration.make.pipe(
       Effect.provide(
         Layer.mergeAll(
+          Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+            lookup: () =>
+              Effect.succeed({
+                projectId: "proof",
+                name: "space",
+                localRoot: "/host/project",
+                remoteCwd: "/workspaces/proof/.git/t3-worktrees/proof/branch",
+                executor: null,
+              }),
+          }),
           Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
             listInstances: Effect.succeed(instances),
             getInstance: (id) =>
@@ -519,12 +532,13 @@ it.effect.each([false, true])("text generation preflight: exhausted=%s", (exhaus
     );
     expect(
       yield* service.generateThreadTitle({
-        cwd: "/tmp",
+        cwd: "/host/project/.git/t3-worktrees/project/branch",
         message: "hello",
         linkedContext: "",
         modelSelection: selection,
       }),
     ).toEqual({ title: "Generated title" });
+    expect(cwds).toEqual(["/host/project"]);
     expect(calls).toEqual([
       exhausted
         ? {

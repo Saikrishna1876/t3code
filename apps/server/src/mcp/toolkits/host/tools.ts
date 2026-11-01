@@ -28,7 +28,7 @@ export const HostToolkit = Toolkit.make(
   Tool.make("host_skills_list", {
     ...shared,
     description:
-      "List enabled skills from the calling provider's T3 host, including user, project and plugin skills. All skills are sourced from the host even when project commands run in a Codespace. Returns host paths; read them with host_skills_read, never a remote shell. fresh refreshes discovery. Thread credential required.",
+      "Codespace workspaces only. Never call from a host workspace; use the native skill catalog and local filesystem instead. List enabled skills from the calling provider's T3 host, including user, project and plugin skills. Returns host paths; read them with host_skills_read, never a remote shell. fresh refreshes discovery. Thread credential required.",
     parameters: HostSkillsListInput,
     success: HostSkillsListResult,
   })
@@ -37,7 +37,7 @@ export const HostToolkit = Toolkit.make(
   Tool.make("host_skills_read", {
     ...shared,
     description:
-      "Read a skill or its text references directly from the T3 host. skill is the exact path or unique name from host_skills_list or the native skill catalog. Omit file for SKILL.md; file can be relative to the skill directory or an absolute host path inside it. This reads instructions; scripts still need their declared runtime and credentials. Do not execute host paths in a Codespace. Thread credential required.",
+      "Codespace workspaces only. Never call from a host workspace; read skills and references directly from the local filesystem instead. Read a skill or its text references from the T3 host. skill is the exact path or unique name from host_skills_list or the native skill catalog. Omit file for SKILL.md; file can be relative to the skill directory or an absolute host path inside it. This reads instructions; scripts still need their declared runtime and credentials. Do not execute host paths in a Codespace. Thread credential required.",
     parameters: HostSkillReadInput,
     success: HostSkillReadResult,
   })

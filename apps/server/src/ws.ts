@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot as executionWorkspaceRoot } from "@t3tools/contracts";
 import * as Codespaces from "./codespaces/Codespaces.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -2943,7 +2944,9 @@ export const layerWsRpc = (
             }
             return yield* issueAssetUrl({
               resource: input.resource,
-              workspaceRoot: thread.thread.worktreePath ?? project.value.workspaceRoot,
+              workspaceRoot:
+                thread.thread.worktreePath ??
+                executionWorkspaceRoot(thread.thread, project.value.workspaceRoot),
             });
           }),
         [WS_METHODS.assetsPersistChatAttachments]: (input) =>

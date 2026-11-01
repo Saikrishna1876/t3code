@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { isAttachmentOnlyBootstrapPrompt } from "@t3tools/shared/composerContextReferences";
 import {
@@ -161,7 +162,9 @@ const make = Effect.gen(function* () {
         projection.thread.projectId,
       ).settings;
       const result = yield* textGeneration.generateThreadTitle({
-        cwd: projection.thread.worktreePath ?? project.value.workspaceRoot,
+        cwd:
+          projection.thread.worktreePath ??
+          threadWorkspaceRoot(projection.thread, project.value.workspaceRoot),
         message: context.message,
         attachments: context.attachments,
         ...(input.kind.type === "regenerate" ? { previousTitle: projection.thread.title } : {}),

@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Duration from "effect/Duration";
 import * as Layer from "effect/Layer";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -18,6 +19,12 @@ import * as Stream from "effect/Stream";
 import * as Scope from "effect/Scope";
 import { makeWorkspaceReservations } from "./WorkspaceReservations.ts";
 import * as NodePath from "node:path";
+import {
+  WorkspaceGitProgressEvent,
+  applyWorkspaceGitProgress,
+  gitProgressOptionsIndex,
+  type WorkspaceGitProgress,
+} from "./WorkspaceGitProgress.ts";
 
 export interface WorkspaceExecutor {
   readonly name: string;
@@ -29,9 +36,12 @@ export interface WorkspaceExecutor {
   readonly forwardPort?: (port: number) => Effect.Effect<number, CodespacesError>;
   readonly isForwardedPort?: (port: number) => boolean;
 }
+const decodeProgressFrame = Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown));
+const decodeGitProgress = Schema.decodeUnknownEffect(WorkspaceGitProgressEvent);
 const Binding = Schema.Struct({
   projectId: Schema.String,
   localRoot: Schema.String,
+  hostRoot: Schema.optionalKey(Schema.String),
   name: Schema.String,
   remoteRoot: Schema.optionalKey(Schema.String),
   setupWarning: Schema.optionalKey(Schema.NullOr(Schema.String)),
@@ -54,7 +64,10 @@ export class CodespacesWorkspace extends Context.Service<
       name?: string;
       extend?: boolean;
     }) => Effect.Effect<ReadonlyArray<string>, CodespacesError, Scope.Scope>;
-    readonly acquireWork: (projectId: string) => Effect.Effect<void, CodespacesError, Scope.Scope>;
+    readonly acquireWork: (
+      projectId: string,
+      name?: string | null,
+    ) => Effect.Effect<void, CodespacesError, Scope.Scope>;
     readonly wasRemote: (cwd: string) => Effect.Effect<boolean>;
     readonly register: (executor: WorkspaceExecutor) => Effect.Effect<void, CodespacesError>;
     readonly disconnect: (name: string) => Effect.Effect<void>;
@@ -103,7 +116,7 @@ export function isWorkspacePath(value: string, root: string): boolean {
   return workspaceRelativePath(value, root) !== null;
 }
 
-function mapWorkspacePath(value: string, from: string, to: string): string {
+export function mapWorkspacePath(value: string, from: string, to: string): string {
   if (workspacePathApi(from) === NodePath.win32 && !NodePath.win32.isAbsolute(value))
     return value.replaceAll("\\", "/");
   const relative = workspaceRelativePath(value, from);
@@ -249,6 +262,11 @@ const make = Effect.gen(function* () {
         message: "Codespace is disconnected. Resume it from this project before continuing.",
       });
     const executor = target.executor;
+    const progressIndex = group === "git" ? gitProgressOptionsIndex(method) : null;
+    const progress =
+      progressIndex === null
+        ? undefined
+        : (args[progressIndex] as { progress?: WorkspaceGitProgress } | undefined)?.progress;
     const remoteArgs = args.map((argument, index) => {
       if (index === 0 && typeof argument === "string")
         return mapWorkspacePath(argument, target.localRoot, executor.remoteRoot);
@@ -288,12 +306,49 @@ const make = Effect.gen(function* () {
     });
     const response = yield* client
       .execute(
-        request.pipe(HttpClientRequest.setHeader("authorization", `Bearer ${executor.token}`)),
+        request.pipe(
+          HttpClientRequest.setHeader("authorization", `Bearer ${executor.token}`),
+          HttpClientRequest.setHeader(
+            "accept",
+            progress ? "application/x-ndjson" : "application/json",
+          ),
+        ),
       )
       .pipe(
-        Effect.flatMap(HttpClientResponse.filterStatusOk),
-        Effect.flatMap((response) => response.json),
         Effect.timeout("5 minutes"),
+        Effect.flatMap(HttpClientResponse.filterStatusOk),
+        Effect.flatMap((response) => {
+          if (!progress) return response.json;
+          let result: unknown;
+          return response.stream.pipe(
+            Stream.decodeText(),
+            Stream.splitLines,
+            Stream.runForEach((line) =>
+              Effect.gen(function* () {
+                if (line === "") return;
+                const frame: unknown = yield* decodeProgressFrame(line);
+                if (frame !== null && typeof frame === "object" && "progress" in frame) {
+                  const event = yield* decodeGitProgress(frame);
+                  const mapped =
+                    event.progress === "onWorktreeClaimed"
+                      ? {
+                          ...event,
+                          value: mapWorkspacePath(
+                            event.value,
+                            executor.remoteRoot,
+                            target.localRoot,
+                          ),
+                        }
+                      : event;
+                  yield* applyWorkspaceGitProgress(progress, mapped);
+                } else result = frame;
+              }),
+            ),
+            Effect.map(() => result),
+          );
+        }),
+        // Git owns its operation deadlines, including checkouts and pushes with no fixed limit.
+        Effect.timeout(group === "git" ? Duration.infinity : "5 minutes"),
         Effect.mapError(
           () =>
             new CodespacesError({
@@ -340,19 +395,25 @@ const make = Effect.gen(function* () {
     reserve: Effect.fn("CodespacesWorkspace.reserve")((input) =>
       mutex.withPermits(1)(
         Effect.suspend(() => {
-          const names = new Set(input.name ? [input.name] : []);
-          for (const binding of bindings)
-            if (binding.projectId === input.projectId) names.add(binding.name);
-          const projectIds = new Set(input.projectId ? [input.projectId] : []);
-          for (const binding of bindings)
-            if (names.has(binding.name)) projectIds.add(binding.projectId);
+          const selected = bindings.filter((binding) =>
+            input.name ? binding.name === input.name : binding.projectId === input.projectId,
+          );
+          const names = new Set(
+            input.name ? [input.name] : selected.map((binding) => binding.name),
+          );
+          const projectIds = new Set(selected.map((binding) => binding.projectId));
+          if (input.projectId) projectIds.add(input.projectId);
+          const keys = new Set(selected.map((binding) => `${binding.name}\0${binding.projectId}`));
+          if (input.projectId) keys.add(`${input.name ?? "host"}\0${input.projectId}`);
           return reservations
-            .reserve(input.id, [...projectIds], [...names], input.extend)
+            .reserve(input.id, [...keys], [...names], input.extend)
             .pipe(Effect.as([...projectIds]));
         }),
       ),
     ),
-    acquireWork: reservations.acquireWork,
+    acquireWork: Effect.fn("CodespacesWorkspace.acquireWork")((projectId, name) =>
+      reservations.acquireWork(`${name ?? "host"}\0${projectId}`),
+    ),
     bindings: Effect.sync(() => bindings),
     wasRemote: Effect.fn("CodespacesWorkspace.wasRemote")((cwd) =>
       Effect.sync(() =>
@@ -367,7 +428,7 @@ const make = Effect.gen(function* () {
       mutex.withPermits(1)(
         Effect.gen(function* () {
           yield* reservations.assertBindingAvailable(
-            binding.projectId,
+            `${binding.name ?? "host"}\0${binding.projectId}`,
             binding.name,
             reservationId,
           );
@@ -398,7 +459,11 @@ const make = Effect.gen(function* () {
                   ? undefined
                   : executors.get(binding.name)?.remoteRoot));
           const next = [
-            ...bindings.filter((item) => item.projectId !== binding.projectId),
+            ...bindings.filter(
+              (item) =>
+                item.projectId !== binding.projectId ||
+                (binding.name !== null && item.name !== binding.name),
+            ),
             ...(binding.name === null
               ? []
               : [
@@ -559,6 +624,42 @@ const make = Effect.gen(function* () {
   });
 });
 export const layer = Layer.effect(CodespacesWorkspace, make);
+
+export const makeHostWorkspaceCwd = Effect.gen(function* () {
+  const workspace = yield* Effect.serviceOption(CodespacesWorkspace);
+  return Effect.fn("CodespacesWorkspace.hostWorkspaceCwd")(function* (cwd: string) {
+    const target = Option.isSome(workspace) ? yield* workspace.value.lookup(cwd) : null;
+    return target?.hostRoot ?? target?.localRoot ?? cwd;
+  });
+});
+
+export const makeWorkspacePathExists = Effect.gen(function* () {
+  const workspace = yield* Effect.serviceOption(CodespacesWorkspace);
+  const fs = yield* FileSystem.FileSystem;
+  return Effect.fn("CodespacesWorkspace.workspacePathExists")(function* (
+    cwd: string,
+    directoryOnly = false,
+  ) {
+    const target = Option.isSome(workspace) ? yield* workspace.value.lookup(cwd) : null;
+    if (target && Option.isSome(workspace)) {
+      const metadata = yield* workspace.value.call<{ kind: string } | null>(
+        target.localRoot,
+        "files",
+        "getMetadata",
+        [{ cwd: target.localRoot, relativePath: cwd }],
+      );
+      return metadata !== null && (!directoryOnly || metadata.kind === "directory");
+    }
+    if (!directoryOnly) return yield* fs.exists(cwd);
+    return yield* fs.stat(cwd).pipe(
+      Effect.map((stat) => stat.type === "Directory"),
+      Effect.catchIf(
+        (error) => error.reason._tag === "NotFound",
+        () => Effect.succeed(false),
+      ),
+    );
+  });
+});
 
 /** Adapter for existing typed workspace ports; local mode keeps exactly the original implementation. */
 export function routeWorkspaceMethods<T extends object, E extends { readonly _tag: string }>(

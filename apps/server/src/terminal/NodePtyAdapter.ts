@@ -273,9 +273,33 @@ const make = Effect.fn("NodePtyAdapter.make")(function* () {
                 new PtyAdapter.PtySpawnError({ adapter: "Codespace GitHub authentication", cause }),
             ),
           );
+        const remoteRoot = target.executor.remoteRoot;
         const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+        const remoteEnvironment = [
+          "T3CODE_PROJECT_ROOT",
+          "T3CODE_WORKTREE_PATH",
+          "COLORTERM",
+          "NO_COLOR",
+          "FORCE_COLOR",
+        ].flatMap((key) => {
+          const value = input.env[key];
+          if (value === undefined) return [];
+          const remoteValue = key.startsWith("T3CODE_")
+            ? CodespacesWorkspace.mapWorkspacePath(value, target.localRoot, remoteRoot)
+            : value;
+          return [`export ${key}=${quote(remoteValue)}`];
+        });
+        // Codespaces startup files can change directories; select the worktree after login setup.
+        const startup = [
+          "[[ ! -f /etc/profile ]] || . /etc/profile",
+          "if [[ -f ~/.bash_profile ]]; then . ~/.bash_profile; elif [[ -f ~/.bash_login ]]; then . ~/.bash_login; elif [[ -f ~/.profile ]]; then . ~/.profile; elif [[ -f ~/.bashrc ]]; then . ~/.bashrc; fi",
+          ...remoteEnvironment,
+          `cd -- ${quote(target.remoteCwd)}`,
+        ];
+        const bash = `exec bash --rcfile <(printf '%s\\n' ${startup.map(quote).join(" ")}) -i`;
         input = {
           ...input,
+          cwd: target.hostRoot ?? target.localRoot,
           shell: "gh",
           args: [
             "codespace",
@@ -284,7 +308,7 @@ const make = Effect.fn("NodePtyAdapter.make")(function* () {
             target.name,
             "--",
             "-t",
-            `cd ${quote(target.remoteCwd)} && exec bash -l`,
+            `exec bash -c ${quote(bash)}`,
           ],
           env: {
             ...input.env,

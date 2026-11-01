@@ -1,3 +1,4 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 // @effect-diagnostics nodeBuiltinImport:off - the Windows launch smoke tests use filesystem notifications to observe real PowerShell launches.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -58,6 +59,7 @@ function makeMockDetachedHandle(input: MockSpawnResult & { readonly onUnref?: ()
 
 const layerTest = (input: {
   readonly platform: NodeJS.Platform;
+  readonly fileSystem?: FileSystem.FileSystem;
   readonly env?: Record<string, string>;
   readonly resolveExecutable?: (command: string) => string | undefined;
   readonly onSpawn?: (command: ChildProcess.StandardCommand) => void;
@@ -84,7 +86,15 @@ const layerTest = (input: {
   );
 
   return Layer.mergeAll(
-    ExternalLauncher.layer.pipe(Layer.provide(Layer.merge(NodeServices.layer, layerSpawner))),
+    ExternalLauncher.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          NodeServices.layer,
+          layerSpawner,
+          ...(input.fileSystem ? [Layer.succeed(FileSystem.FileSystem, input.fileSystem)] : []),
+        ),
+      ),
+    ),
     Layer.succeed(HostProcess.Platform, input.platform),
     Layer.succeed(
       SpawnExecutableResolution,
@@ -136,6 +146,63 @@ it.effect.skipIf(windowsHost)(
           env: { PATH: binDir, DISPLAY: ":0" },
           extendEnv: false,
         })),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "opens Codespace worktree directories and files through the remote VS Code authority",
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-remote-editors-" });
+      yield* fileSystem.writeFileString(path.join(binDir, "code"), "#!/bin/sh\n");
+      yield* fileSystem.chmod(path.join(binDir, "code"), 0o755);
+      const spawned: ChildProcess.StandardCommand[] = [];
+      const cwd = "/workspace/.git/t3-worktrees/project/feature";
+      yield* Effect.gen(function* () {
+        const launcher = yield* ExternalLauncher.ExternalLauncher;
+        yield* launcher.launchEditor({ editor: "vscode", cwd });
+        yield* launcher.launchEditor({ editor: "vscode", cwd: cwd + "/file.ts:12:4" });
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            layerTest({
+              platform: "linux",
+              env: { PATH: binDir, DISPLAY: ":0" },
+              onSpawn: (command) => spawned.push(command),
+            }),
+            Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+              lookup: (target) =>
+                Effect.succeed({
+                  name: "space",
+                  localRoot: "/workspace",
+                  remoteCwd: target.replace("/workspace", "/workspaces/project"),
+                  executor: { remoteRoot: "/workspaces/project" },
+                } as never),
+              call: () => Effect.succeed({ type: "Directory" }) as never,
+            }),
+          ),
+        ),
+      );
+      assert.deepEqual(
+        spawned
+          .filter(
+            (command) =>
+              command.command === "code" || command.command === path.join(binDir, "code"),
+          )
+          .map((command) => command.args),
+        [
+          [
+            "--folder-uri",
+            "vscode-remote://codespaces+space/workspaces/project/.git/t3-worktrees/project/feature",
+          ],
+          [
+            "--goto",
+            "vscode-remote://codespaces+space/workspaces/project/.git/t3-worktrees/project/feature/file.ts:12:4",
+          ],
+        ],
       );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
@@ -616,6 +683,13 @@ it.effect("keeps the macOS VS Code Insiders bundle out of stable VS Code", () =>
       Effect.provide(
         layerTest({
           platform: "darwin",
+          fileSystem: {
+            ...fs,
+            stat: (target) =>
+              target.startsWith("/Applications/")
+                ? FileSystem.makeNoop({}).stat(target)
+                : fs.stat(target),
+          },
           env: { HOME: home, PATH: path.join(home, "empty") },
           onSpawn: (command) => {
             spawned = command;

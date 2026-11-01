@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import {
   mergeDirectPreviewAnnotation,
   resolveBackgroundDraftWorkspaceOptions,
@@ -184,7 +185,6 @@ interface ComposerSendInput {
   readonly runtimeMode: RuntimeMode;
   readonly sendEnvMode: DraftThreadEnvMode;
   readonly sendWorktreePath: string | null;
-  readonly codespaceBound: boolean;
   readonly workspaceLocationBlockReason: string | null;
   readonly startFromOrigin: boolean;
   readonly localCheckoutBranchMismatch: {
@@ -285,7 +285,6 @@ export function useComposerSend(input: ComposerSendInput) {
     runtimeMode,
     sendEnvMode,
     sendWorktreePath,
-    codespaceBound,
     workspaceLocationBlockReason,
     startFromOrigin,
     localCheckoutBranchMismatch,
@@ -556,13 +555,6 @@ export function useComposerSend(input: ComposerSendInput) {
       return;
     }
     const multipleModelSelections = sendCtx.multipleModelSelections;
-    if (codespaceBound && multipleModelSelections !== null) {
-      setThreadError(
-        activeThread.id,
-        "Codespaces support one model in the main checkout. Choose one model before sending.",
-      );
-      return;
-    }
     const approvalFeedbackTarget = pendingApprovalsRef.current.find(
       (approval) =>
         approval.supportsFeedback && approval.requestId === sendCtx.shownPendingApprovalIds[0],
@@ -1328,6 +1320,7 @@ export function useComposerSend(input: ComposerSendInput) {
                 ? {
                     createThread: {
                       projectId: activeProject.id,
+                      codespaceName: activeThread.codespaceName ?? null,
                       title,
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
@@ -1341,7 +1334,7 @@ export function useComposerSend(input: ComposerSendInput) {
               ...(baseBranchForWorktree
                 ? {
                     prepareWorktree: {
-                      projectCwd: activeProject.workspaceRoot,
+                      projectCwd: threadWorkspaceRoot(activeThread, activeProject.workspaceRoot),
                       baseBranch: baseBranchForWorktree,
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
                     },

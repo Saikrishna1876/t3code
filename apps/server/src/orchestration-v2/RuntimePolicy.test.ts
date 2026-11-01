@@ -107,6 +107,20 @@ const layerTest = RuntimePolicy.layerFromProjectStore.pipe(
 );
 
 it.layer(layerTest)("RuntimePolicyV2", (it) => {
+  it.effect("keeps host and Codespace threads in the same project on separate workspaces", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const host = makeThread({ now, worktreePath: null });
+      const cloud = { ...host, codespaceName: "cloud-computer" };
+      assert.equal((yield* policy.resolve({ thread: host, modelSelection })).cwd, "/project-root");
+      assert.equal(
+        (yield* policy.resolve({ thread: cloud, modelSelection })).cwd,
+        "/project-root/.git/t3-codespaces/cloud-computer",
+      );
+      assert.equal((yield* policy.resolve({ thread: host, modelSelection })).cwd, "/project-root");
+    }),
+  );
   it.effect("runs a mode the provider does not offer in Supervised", () =>
     Effect.gen(function* () {
       const policy = yield* RuntimePolicy.RuntimePolicyV2;

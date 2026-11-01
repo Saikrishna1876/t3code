@@ -198,6 +198,23 @@ it.effect(
   },
 );
 
+it.effect("keeps a legacy host thread on the host when metadata names a Codespace", () => {
+  const dispatched: Array<string> = [];
+  return Effect.gen(function* () {
+    const threads = yield* ThreadManagementService.ThreadManagementService;
+    const result = yield* threads
+      .dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("change-legacy-host-location"),
+        threadId: ThreadId.make("thread:thread-management:chokepoint"),
+        codespaceName: "computer",
+      })
+      .pipe(Effect.result);
+    expect(result._tag).toBe("Failure");
+    expect(dispatched).toEqual([]);
+  }).pipe(Effect.provide(layerDispatchChokepointTest(ServerSettings.layerTest())(dispatched)));
+});
+
 it.effect("waitForThread follows a restart continuation instead of the cut run", () =>
   Effect.gen(function* () {
     const projectId = ProjectId.make("project:thread-management:wait-restart");

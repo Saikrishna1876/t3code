@@ -13,6 +13,7 @@ export function draftThreadShell(input: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly projectId: ProjectId;
+  readonly codespaceName?: string | null;
   readonly modelSelection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
@@ -24,6 +25,7 @@ export function draftThreadShell(input: {
   return presentThreadShell(input.environmentId, {
     id: input.threadId,
     projectId: input.projectId,
+    codespaceName: input.codespaceName ?? null,
     title: "New thread",
     providerInstanceId: input.modelSelection.instanceId,
     modelSelection: input.modelSelection,

@@ -28,6 +28,8 @@ interface BranchToolbarEnvironmentSelectorProps {
   envLocked: boolean;
   codespacesProjectId?: ProjectId | undefined;
   codespaceLabel?: string | undefined;
+  codespaceName?: string | null | undefined;
+  onCodespaceChange?: ((name: string | null) => void) | undefined;
   environmentId: EnvironmentId;
   availableEnvironments: readonly EnvironmentOption[];
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
@@ -40,6 +42,8 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   envLocked,
   codespacesProjectId,
   codespaceLabel,
+  codespaceName,
+  onCodespaceChange,
   environmentId,
   availableEnvironments,
   onEnvironmentChange,
@@ -66,7 +70,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
       <ComposerContextLabel>{label}</ComposerContextLabel>
     </>
   );
-  if (!codespacesProjectId && (envLocked || (!onEnvironmentChange && !onAddToMachine)))
+  if (envLocked || (!codespacesProjectId && !onEnvironmentChange && !onAddToMachine))
     return (
       <Tooltip>
         <TooltipTrigger
@@ -101,7 +105,9 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
             onValueChange={(value) =>
               value === "auto"
                 ? onAutoEnvironment?.()
-                : onEnvironmentChange?.(value as EnvironmentId)
+                : value === environmentId
+                  ? onCodespaceChange?.(null)
+                  : onEnvironmentChange?.(value as EnvironmentId)
             }
           >
             {onAutoEnvironment ? (
@@ -113,7 +119,9 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
               <MenuRadioItem
                 key={environment.environmentId}
                 value={environment.environmentId}
-                disabled={envLocked || !onEnvironmentChange}
+                disabled={
+                  envLocked || (!onEnvironmentChange && environment.environmentId !== environmentId)
+                }
                 closeOnClick
               >
                 <EnvironmentMachineIcon kind={environment.machine} className="size-3" />
@@ -129,7 +137,13 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           ) : null}
         </MenuGroup>
         {codespacesProjectId ? (
-          <CodespacesMenuItems environmentId={environmentId} projectId={codespacesProjectId} />
+          <CodespacesMenuItems
+            environmentId={environmentId}
+            projectId={codespacesProjectId}
+            codespaceName={codespaceName}
+            onCodespaceChange={onCodespaceChange}
+            locked={envLocked}
+          />
         ) : null}
       </MenuPopup>
     </Menu>

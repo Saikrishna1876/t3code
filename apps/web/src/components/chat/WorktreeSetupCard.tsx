@@ -378,7 +378,7 @@ export function WorktreeSetupCard({
         {onWorkLocally ? (
           <Button type="button" size="xs" variant="ghost-muted" onClick={onWorkLocally}>
             <LaptopIcon aria-hidden />
-            Work locally
+            Use current checkout
           </Button>
         ) : null}
         {onCancel && running ? (

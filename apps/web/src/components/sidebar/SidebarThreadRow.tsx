@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { ThreadTerminalStatusButton } from "../ThreadStatusIndicators";
 import { discardComposerDraft } from "../../lib/discardComposerDraft";
@@ -679,7 +680,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     discardComposerDraft(threadRef);
   };
 
-  const gitCwd = thread.worktreePath ?? props.project?.workspaceRoot ?? null;
+  const gitCwd =
+    thread.worktreePath ??
+    (props.project ? threadWorkspaceRoot(thread, props.project.workspaceRoot) : null);
   const linkedPullRequestStatus = useLinkedThreadPullRequest(
     thread.environmentId,
     thread.linkedPullRequest,
@@ -1631,7 +1634,9 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(
     props.isHighlighted || props.isRouteActive,
   );
-  const gitCwd = thread.worktreePath ?? props.project?.workspaceRoot ?? null;
+  const gitCwd =
+    thread.worktreePath ??
+    (props.project ? threadWorkspaceRoot(thread, props.project.workspaceRoot) : null);
   const gitStatus = useEnvironmentQuery(
     leaseLiveStatus && (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
       ? vcsEnvironment.status({

@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import {
   CommandId,
   type RunId,
@@ -2285,7 +2286,9 @@ const make = Effect.gen(function* () {
         const project = yield* requireProject(parent.thread.projectId);
         const base = yield* gitDriver
           .resolveCommit({
-            cwd: parent.thread.worktreePath ?? project.workspaceRoot,
+            cwd:
+              parent.thread.worktreePath ??
+              threadWorkspaceRoot(parent.thread, project.workspaceRoot),
             revision: "HEAD",
           })
           .pipe(
@@ -2298,7 +2301,10 @@ const make = Effect.gen(function* () {
         // Scratch) would hand it a commit it cannot find.
         if (parent.thread.worktreePath !== null) {
           yield* gitDriver
-            .resolveCommit({ cwd: project.workspaceRoot, revision: base.commitSha })
+            .resolveCommit({
+              cwd: threadWorkspaceRoot(parent.thread, project.workspaceRoot),
+              revision: base.commitSha,
+            })
             .pipe(
               Effect.mapError(() =>
                 failure(
@@ -2710,6 +2716,7 @@ const make = Effect.gen(function* () {
                   commandId,
                   threadId,
                   projectId: parent.thread.projectId,
+                  codespaceName: parent.thread.codespaceName ?? null,
                   title,
                   modelSelection: target.modelSelection,
                   runtimeMode,

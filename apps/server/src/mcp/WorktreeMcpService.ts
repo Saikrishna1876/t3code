@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import {
   CommandId,
   MessageId,
@@ -159,7 +160,7 @@ const make = Effect.gen(function* () {
     }
 
     const project = yield* loadProject(scope, projection.thread.projectId);
-    const projectCwd = project.workspaceRoot;
+    const projectCwd = threadWorkspaceRoot(projection.thread, project.workspaceRoot);
 
     const localStatus = yield* gitWorkflow
       .localStatus({ cwd: projectCwd })
@@ -345,7 +346,7 @@ const make = Effect.gen(function* () {
               worktreePath,
               project: {
                 id: project.id,
-                workspaceRoot: project.workspaceRoot,
+                workspaceRoot: projectCwd,
                 scripts: project.scripts,
               },
             })
@@ -421,7 +422,7 @@ const make = Effect.gen(function* () {
         attached: projection.thread.worktreePath !== null,
         worktreePath: projection.thread.worktreePath,
         branch: projection.thread.branch,
-        projectWorkspaceRoot: project.workspaceRoot,
+        projectWorkspaceRoot: threadWorkspaceRoot(projection.thread, project.workspaceRoot),
         defaultStartFromOrigin,
       };
       return result;

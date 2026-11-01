@@ -41,6 +41,7 @@ vi.mock(import("../state/entities"), async (original) => ({
   ...(await original()),
   useProject: (() => ({ id: "project", workspaceRoot: "/tmp/project" })) as never,
   useThreadShellsForProjectRefs: () => [],
+  useThreadShell: (() => ({ codespaceName: state.codespaceName })) as never,
 }));
 
 vi.mock(import("../composerDraftStore"), async () => {
@@ -50,7 +51,11 @@ vi.mock(import("../composerDraftStore"), async () => {
     DraftId: Schema.String.pipe(Schema.brand("DraftId")),
     useComposerDraftStore: Object.assign(
       (select: (store: unknown) => unknown) =>
-        select({ getDraftThreadByRef: () => null, setDraftThreadContext: vi.fn() }),
+        select({
+          getDraftThreadByRef: () => null,
+          getDraftThread: () => ({ codespaceName: state.codespaceName }),
+          setDraftThreadContext: vi.fn(),
+        }),
       {
         getState: () => ({
           getComposerDraft: () => ({ prompt: state.prompt }),
@@ -99,6 +104,7 @@ vi.mock(import("../state/query"), async (original) => ({
                 ? [
                     {
                       name: state.codespaceName,
+                      displayName: "Cloud computer",
                       repository: "owner/repo",
                       branch: "main",
                       state: "Available",
@@ -160,7 +166,7 @@ function render(
   );
 }
 
-it("keeps machine choices usable when the combined row's workspace is locked", async () => {
+it("keeps an existing thread on its creation environment", async () => {
   setup();
   const onEnvironmentChange = vi.fn();
   await using screen = await render({
@@ -187,8 +193,10 @@ it("keeps machine choices usable when the combined row's workspace is locked", a
   await expect
     .element(page.getByRole("menuitemradio", { name: "New worktree" }))
     .toHaveAttribute("aria-disabled", "true");
-  await userEvent.click(page.getByRole("menuitemradio", { name: "remote" }));
-  expect(onEnvironmentChange).toHaveBeenCalledWith("remote");
+  await expect
+    .element(page.getByRole("menuitemradio", { name: "remote" }))
+    .toHaveAttribute("aria-disabled", "true");
+  expect(onEnvironmentChange).not.toHaveBeenCalled();
 });
 
 it("shows a started thread's primary machine as a static label in the composer", async () => {
@@ -258,7 +266,7 @@ it("does not offer generic Codespace creation in a single-host picker", async ()
   expect(state.setPrompt).not.toHaveBeenCalled();
 });
 
-it("shows a paired client's bound target and locks worktrees without exposing lifecycle actions", async () => {
+it("lets a paired client choose worktrees without exposing lifecycle actions", async () => {
   setup();
   state.codespacesSupported = true;
   state.codespaceName = "project-space";
@@ -277,10 +285,16 @@ it("shows a paired client's bound target and locks worktrees without exposing li
     },
     { worktreePath: null },
   );
-  expect(screen.container.textContent).toContain("project-space");
-  expect(screen.container.querySelector("button")).toBeNull();
-  expect(document.querySelector('[role="dialog"]')).toBeNull();
-  expect(document.querySelector('[role="menu"]')).toBeNull();
+  expect(screen.container.textContent).toContain("Cloud computer");
+  await userEvent.click(screen.getByRole("button", { name: /^Run context:/ }));
+  await expect
+    .element(page.getByRole("menuitemradio", { name: "New worktree" }))
+    .not.toHaveAttribute("aria-disabled", "true");
+  expect(
+    [...document.querySelectorAll('[role="menuitem"]')].some((item) =>
+      item.textContent?.includes("Work locally"),
+    ),
+  ).toBe(false);
 });
 
 it.each([false, true])(
@@ -305,19 +319,12 @@ it.each([false, true])(
       },
       { worktreePath: null },
     );
-    expect(screen.container.textContent).toContain("project-space");
-    if (interactive) {
-      await userEvent.click(page.getByRole("button", { name: "Run on" }));
-      expect(
-        [...document.querySelectorAll('[role="menuitem"]')].some((entry) =>
-          entry.textContent?.includes("Codespace…"),
-        ),
-      ).toBe(false);
-    }
+    expect(screen.container.textContent).toContain("Cloud computer");
+    expect(screen.container.querySelector('button[aria-label="Run on"]')).toBeNull();
   },
 );
 
-it("shows the main checkout for an unstarted server thread bound to a Codespace", async () => {
+it("allows worktree selection for an unstarted server thread bound to a Codespace", async () => {
   setup();
   state.codespacesSupported = true;
   state.codespaceName = "project-space";
@@ -328,9 +335,9 @@ it("shows the main checkout for an unstarted server thread bound to a Codespace"
   await expect.element(screen.getByRole("button", { name: /^Run context:/ })).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: /^Run context:/ }));
   expect(document.querySelector('[role="menuitemradio"][aria-checked="true"]')?.textContent).toBe(
-    "Current checkout",
+    "New worktree",
   );
   await expect
     .element(page.getByRole("menuitemradio", { name: "New worktree" }))
-    .toHaveAttribute("aria-disabled", "true");
+    .not.toHaveAttribute("aria-disabled", "true");
 });

@@ -1,4 +1,10 @@
-import { linkOriginIsFenced, ProjectId, type ProjectScript, ThreadId } from "@t3tools/contracts";
+import {
+  linkOriginIsFenced,
+  threadWorkspaceRoot,
+  ProjectId,
+  type ProjectScript,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   projectScriptRuntimeEnv,
   projectScriptTerminalInput,
@@ -435,7 +441,12 @@ export const make = Effect.gen(function* () {
     const cwd = input.worktreePath;
     const env = {
       ...projectScriptRuntimeEnv({
-        project: { cwd: project.workspaceRoot },
+        project: {
+          cwd:
+            suppliedProject?.workspaceRoot ??
+            input.projectCwd ??
+            threadWorkspaceRoot(thread ?? {}, project.workspaceRoot),
+        },
         worktreePath: input.worktreePath,
       }),
       // Before client attachment, truecolor probes wait for terminal replies nobody can send.

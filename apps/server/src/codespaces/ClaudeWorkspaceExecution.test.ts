@@ -42,6 +42,7 @@ it.effect("separates read-only remote tools from writable execution", () =>
     const workspace = yield* CodespacesWorkspace.CodespacesWorkspace;
     const writable = yield* claudeWorkspaceExecution(workspace, "/project", false);
     const readOnly = yield* claudeWorkspaceExecution(workspace, "/project", true);
+    expect(writable?.cwd).toBe("/project");
     expect(writable?.toolAliases.Bash).toBe("mcp__t3-workspace__Bash");
     expect(readOnly?.toolAliases).not.toHaveProperty("Bash");
     expect(readOnly?.mcpServers["t3-workspace"].url).toMatch(

@@ -848,21 +848,42 @@ function makePendingRuntimeRequestEvents(input: {
   });
 }
 
-it.effect.each(["codex", "claudeAgent", "opencode"] as const)(
-  "ProviderSessionManagerV2 opens a connected Codespace only for supported driver %s",
-  (driver) =>
+it.effect.each([
+  { driver: "codex", worktree: false, host: false },
+  { driver: "claudeAgent", worktree: false, host: false },
+  { driver: "opencode", worktree: false, host: false },
+  { driver: "codex", worktree: true, host: false },
+  { driver: "claudeAgent", worktree: true, host: false },
+  { driver: "opencode", worktree: false, host: true },
+] as const)(
+  "ProviderSessionManagerV2 opens connected Codespace driver=$driver worktree=$worktree host=$host",
+  ({ driver, worktree, host }) =>
     Effect.gen(function* () {
       const state = yield* Ref.make(emptyState);
       const starts = yield* Ref.make(0);
       const projectId = ProjectId.make("bound-provider-project");
-      const binding = { projectId, localRoot: runtimePolicy.cwd, name: "space" };
+      const binding = {
+        projectId,
+        localRoot: runtimePolicy.cwd + "/.git/t3-codespaces/space",
+        hostRoot: runtimePolicy.cwd,
+        name: "space",
+      };
+      const policy = host
+        ? runtimePolicy
+        : {
+            ...runtimePolicy,
+            cwd: binding.localRoot + (worktree ? "/.git/t3-worktrees/feature" : ""),
+          };
       const workspaceLayer = Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
         bindings: Effect.succeed([binding]),
         acquireWork: () => Effect.void,
+        call: () => Effect.succeed({ kind: "directory" } as never),
         lookup: () =>
           Effect.succeed({
             ...binding,
-            remoteCwd: "/workspaces/project",
+            remoteCwd: worktree
+              ? "/workspaces/project/.git/t3-worktrees/feature"
+              : "/workspaces/project",
             executor: {
               name: "space",
               remoteRoot: "/workspaces/project",
@@ -879,17 +900,24 @@ it.effect.each(["codex", "claudeAgent", "opencode"] as const)(
         const threadId = ThreadId.make("bound-provider-thread");
         const now = yield* DateTime.now;
         yield* eventSink.write({
-          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, projectId, now })],
+          events: [
+            yield* makeThreadCreatedEvent({ idAllocator, threadId, projectId, now }).pipe(
+              Effect.map((event) => ({
+                ...event,
+                payload: { ...event.payload, codespaceName: host ? null : "space" },
+              })),
+            ),
+          ],
         });
         const providerSessionId = yield* idAllocator.allocate.providerSession({
           providerInstanceId: modelSelection.instanceId,
           threadId,
         });
         const result = yield* manager
-          .open({ threadId, providerSessionId, modelSelection, runtimePolicy })
+          .open({ threadId, providerSessionId, modelSelection, runtimePolicy: policy })
           .pipe(Effect.result);
-        expect(result._tag).toBe(driver === "opencode" ? "Failure" : "Success");
-        expect((yield* Ref.get(state)).openCount).toBe(driver === "opencode" ? 0 : 1);
+        expect(result._tag).toBe(driver === "opencode" && !host ? "Failure" : "Success");
+        expect((yield* Ref.get(state)).openCount).toBe(driver === "opencode" && !host ? 0 : 1);
         if (result._tag === "Success") {
           const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
           const runId = idAllocator.derive.run({ threadId, ordinal: 1 });
@@ -910,10 +938,10 @@ it.effect.each(["codex", "claudeAgent", "opencode"] as const)(
               attachments: [],
             },
             modelSelection,
-            runtimePolicy,
+            runtimePolicy: policy,
           });
         }
-        expect(yield* Ref.get(starts)).toBe(driver === "opencode" ? 0 : 1);
+        expect(yield* Ref.get(starts)).toBe(driver === "opencode" && !host ? 0 : 1);
       }).pipe(
         Effect.provide(
           layerTest({
@@ -933,10 +961,15 @@ it.effect.each([
   { driver: "codex", connected: false },
   { driver: "claudeAgent", connected: true },
   { driver: "claudeAgent", connected: false },
+  { driver: "codex", connected: true, nestedProject: true },
+  { driver: "claudeAgent", connected: true, nestedProject: true },
 ])(
   "ProviderSessionManagerV2 rejects outside-root Codespace worktrees with driver=$driver connected=$connected",
-  ({ driver, connected }) =>
+  (entry) =>
     Effect.gen(function* () {
+      const { driver, connected } = entry;
+      const nested = "nestedProject" in entry;
+      const policy = nested ? { ...runtimePolicy, cwd: "/other/project/nested" } : runtimePolicy;
       const state = yield* Ref.make(emptyState);
       const projectId = ProjectId.make("bound-project");
       const binding = { projectId, localRoot: "/other/project", name: "space" };
@@ -959,7 +992,20 @@ it.effect.each([
                     : null,
                   remoteCwd: connected ? "/workspaces/project" : null,
                 }
-              : null,
+              : nested
+                ? {
+                    ...binding,
+                    projectId: "another-project",
+                    executor: {
+                      name: "other",
+                      remoteRoot: "/workspaces/other",
+                      workerUrl: "http://localhost:3",
+                      execServerUrl: "ws://localhost:4",
+                      token: "fixture",
+                    },
+                    remoteCwd: "/workspaces/other",
+                  }
+                : null,
           ),
       });
       yield* Effect.gen(function* () {
@@ -976,11 +1022,11 @@ it.effect.each([
           threadId,
         });
         const result = yield* manager
-          .open({ threadId, providerSessionId, modelSelection, runtimePolicy })
+          .open({ threadId, providerSessionId, modelSelection, runtimePolicy: policy })
           .pipe(Effect.flip);
         expect(result._tag).toBe("ProviderSessionOpenError");
         expect(result.message).toContain(
-          connected ? "Select the main checkout" : "Resume the project's Codespace",
+          connected ? "outside the Codespace project" : "Resume the project's Codespace",
         );
         expect((yield* Ref.get(state)).openCount).toBe(0);
       }).pipe(

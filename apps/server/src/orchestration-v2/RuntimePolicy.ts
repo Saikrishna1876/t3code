@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import {
   ModelSelection,
   OrchestrationV2AppThread,
@@ -108,7 +109,8 @@ export const layerFromProjectStore: Layer.Layer<
                       cause: "Project not found.",
                     }),
                   ),
-                onSome: (project) => Effect.succeed(project.workspaceRoot),
+                onSome: (project) =>
+                  Effect.succeed(threadWorkspaceRoot(input.thread, project.workspaceRoot)),
               }),
             ),
           ));

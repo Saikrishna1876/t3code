@@ -1,3 +1,4 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import * as NodePath from "@effect/platform-node/NodePath";
 import {
   EDITORS,
@@ -485,6 +486,34 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
     return yield* new ExternalLauncherUnknownEditorError({ editor: input.editor });
   }
 
+  const workspace = Option.getOrUndefined(
+    yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+  );
+  const parsedTarget = parseTargetPathAndPosition(input.cwd);
+  const targetPath = Option.isSome(parsedTarget) ? parsedTarget.value.path : input.cwd;
+  const remote = workspace ? yield* workspace.lookup(targetPath) : null;
+  let remoteArgs: ReadonlyArray<string> | undefined;
+  if (remote && workspace) {
+    const unsupported = () => new ExternalLauncherUnsupportedTargetError({ editor: input.editor });
+    if (
+      !remote.executor ||
+      !remote.remoteCwd ||
+      (input.editor !== "vscode" && input.editor !== "vscode-insiders")
+    )
+      return yield* unsupported();
+    const uri = `vscode-remote://codespaces+${encodeURIComponent(remote.name)}${remote.remoteCwd.split("/").map(encodeURIComponent).join("/")}`;
+    if (Option.isSome(parsedTarget)) {
+      const { line, column } = parsedTarget.value;
+      remoteArgs = ["--goto", `${uri}:${line}${Option.isSome(column) ? `:${column.value}` : ""}`];
+    } else {
+      const metadata = yield* workspace
+        .call<{ type: string } | null>(targetPath, "worktrees", "metadata", [targetPath])
+        .pipe(Effect.mapError(unsupported));
+      if (!metadata) return yield* unsupported();
+      remoteArgs = [metadata.type === "Directory" ? "--folder-uri" : "--file-uri", uri];
+    }
+  }
+
   if (editorDef.commands) {
     const { command, baseArgs } = Option.getOrElse(
       yield* resolveEditorCommand(editorDef, env),
@@ -497,7 +526,7 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
       editor: editorDef.id,
       target: input.cwd,
       command,
-      args: [...baseArgs, ...resolveCommandEditorArgs(editorDef, input.cwd)],
+      args: [...baseArgs, ...(remoteArgs ?? resolveCommandEditorArgs(editorDef, input.cwd))],
     };
   }
 

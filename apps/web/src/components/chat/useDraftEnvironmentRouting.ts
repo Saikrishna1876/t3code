@@ -150,6 +150,7 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
     setDraftThreadContext(draftId, {
       environmentSelection: "auto",
       loadBalancedEnvironmentId: null,
+      codespaceName: null,
       branch: null,
       worktreePath: null,
     });

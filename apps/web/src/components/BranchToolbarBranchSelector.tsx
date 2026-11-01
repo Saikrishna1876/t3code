@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import { ComposerContextLabel } from "./ComposerContextLabel";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
@@ -155,7 +156,9 @@ export function BranchToolbarBranchSelector({
   const activeWorktreePath = forceNewWorktree
     ? null
     : (serverThread?.worktreePath ?? draftThread?.worktreePath ?? null);
-  const activeProjectCwd = activeProject?.workspaceRoot ?? null;
+  const activeProjectCwd = activeProject
+    ? threadWorkspaceRoot(serverThread ?? draftThread ?? {}, activeProject.workspaceRoot)
+    : null;
   const branchCwd = activeWorktreePath ?? activeProjectCwd;
   const hasServerThread = serverThread !== null;
   const canUpdateThreadBranch = !hasServerThread || canOperateThread;

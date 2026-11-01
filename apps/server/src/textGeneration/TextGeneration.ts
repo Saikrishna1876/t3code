@@ -21,6 +21,7 @@ import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as ThreadTitleLinks from "./ThreadTitleLinks.ts";
+import { makeHostWorkspaceCwd } from "../codespaces/CodespacesWorkspace.ts";
 
 export type {
   BranchNameGenerationInput,
@@ -72,12 +73,15 @@ export const make = Effect.gen(function* () {
   const registry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
   const sourceControl = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const hostWorkspaceCwd = yield* makeHostWorkspaceCwd;
   const generate = Effect.fn("TextGeneration.generate")(function* <A>(
     operation: TextGenerationOp,
     selection: ModelSelection,
+    cwd: string,
     invoke: (
       service: ProviderTextGeneration,
       modelSelection: ModelSelection,
+      cwd: string,
     ) => Effect.Effect<A, TextGenerationError>,
   ) {
     const snapshots = yield* registry.listInstances.pipe(
@@ -122,36 +126,54 @@ export const make = Effect.gen(function* () {
           { includeConfiguredInstances: true },
         ) ?? selection;
     }
+    // Review guides investigate the selected checkout; metadata generation stays on the host.
+    const generationCwd = operation === "generateReviewGuide" ? cwd : yield* hostWorkspaceCwd(cwd);
     return yield* resolveInstance(registry, operation, selection.instanceId).pipe(
-      Effect.flatMap((service) => invoke(service, selection)),
+      Effect.flatMap((service) => invoke(service, selection, generationCwd)),
     );
   });
   return TextGeneration.of({
     generateCommitMessage: Effect.fn("TextGeneration.generateCommitMessage")(function (input) {
-      return generate("generateCommitMessage", input.modelSelection, (service, modelSelection) =>
-        service.generateCommitMessage({ ...input, modelSelection }),
+      return generate(
+        "generateCommitMessage",
+        input.modelSelection,
+        input.cwd,
+        (service, modelSelection, cwd) =>
+          service.generateCommitMessage({ ...input, modelSelection, cwd }),
       );
     }),
     generatePrContent: Effect.fn("TextGeneration.generatePrContent")(function (input) {
-      return generate("generatePrContent", input.modelSelection, (service, modelSelection) =>
-        service.generatePrContent({ ...input, modelSelection }),
+      return generate(
+        "generatePrContent",
+        input.modelSelection,
+        input.cwd,
+        (service, modelSelection, cwd) =>
+          service.generatePrContent({ ...input, modelSelection, cwd }),
       );
     }),
     generateBranchName: Effect.fn("TextGeneration.generateBranchName")(function (input) {
-      return generate("generateBranchName", input.modelSelection, (service, modelSelection) =>
-        service.generateBranchName({ ...input, modelSelection }),
+      return generate(
+        "generateBranchName",
+        input.modelSelection,
+        input.cwd,
+        (service, modelSelection, cwd) =>
+          service.generateBranchName({ ...input, modelSelection, cwd }),
       );
     }),
     generateReviewGuide: Effect.fn("TextGeneration.generateReviewGuide")(function (input) {
-      return generate("generateReviewGuide", input.modelSelection, (service, modelSelection) =>
-        service.generateReviewGuide({ ...input, modelSelection }),
+      return generate(
+        "generateReviewGuide",
+        input.modelSelection,
+        input.cwd,
+        (service, modelSelection) => service.generateReviewGuide({ ...input, modelSelection }),
       );
     }),
     generateThreadTitle: Effect.fn("TextGeneration.generateThreadTitle")(function (input) {
       return generate(
         "generateThreadTitle",
         input.modelSelection,
-        (textGeneration, modelSelection) =>
+        input.cwd,
+        (textGeneration, modelSelection, cwd) =>
           Effect.gen(function* () {
             const linkedContext =
               input.linkedContext ??
@@ -163,6 +185,7 @@ export const make = Effect.gen(function* () {
               ));
             return yield* textGeneration.generateThreadTitle({
               ...input,
+              cwd,
               linkedContext,
               modelSelection,
             });

@@ -1,3 +1,5 @@
+import { codespaceWorkspaceRoot } from "@t3tools/contracts";
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import type {
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -746,9 +748,71 @@ const make = Effect.gen(function* () {
     }
   };
 
+  const workspaceService = Option.getOrUndefined(
+    yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+  );
+  const validateThreadTarget = Effect.fn("ThreadManagement.validateThreadTarget")(function* (
+    command: OrchestrationV2ServerCommand,
+  ) {
+    if (command.type !== "thread.create" && command.type !== "thread.metadata.update") return;
+    if (
+      command.type === "thread.metadata.update" &&
+      !command.worktreePath &&
+      command.codespaceName === undefined
+    )
+      return;
+    const thread =
+      command.type === "thread.create"
+        ? command
+        : (yield* orchestrator.getThreadRecords(command.threadId, [])).thread;
+    const name = thread.codespaceName ?? null;
+    const bindings = workspaceService ? yield* workspaceService.bindings : [];
+    const binding = bindings.find(
+      (entry) => entry.projectId === thread.projectId && entry.name === name && entry.hostRoot,
+    );
+    const reject = (cause: string) =>
+      new Orchestrator.OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause,
+      });
+    if (
+      command.type === "thread.metadata.update" &&
+      command.codespaceName !== undefined &&
+      command.codespaceName !== name
+    ) {
+      return yield* reject("A thread's execution location is fixed after creation.");
+    }
+    if (command.type === "thread.create" && name) {
+      const target =
+        binding && workspaceService ? yield* workspaceService.lookup(binding.localRoot) : null;
+      if (
+        !binding?.hostRoot ||
+        !target?.executor ||
+        binding.localRoot !== codespaceWorkspaceRoot(binding.hostRoot, name)
+      ) {
+        return yield* reject(
+          "Connect this Codespace and add the project before creating a thread there.",
+        );
+      }
+    }
+    if (command.worktreePath) {
+      const target = workspaceService ? yield* workspaceService.lookup(command.worktreePath) : null;
+      if (
+        name
+          ? !binding ||
+            !CodespacesWorkspace.isWorkspacePath(command.worktreePath, binding.localRoot)
+          : target !== null
+      ) {
+        return yield* reject("The worktree must belong to the thread's execution location.");
+      }
+    }
+  });
+
   const dispatch: ThreadManagementServiceShape["dispatch"] = (command) =>
     ensureCommandTranscripts(command).pipe(
       Effect.andThen(assertDispatchTargetEnabled(command)),
+      Effect.andThen(validateThreadTarget(command)),
       Effect.andThen(orchestrator.dispatch(command)),
     );
 

@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import * as Dialog from "../components/ui/Dialog";
 import {
@@ -998,26 +999,19 @@ export function createThreadOutboxDelivery(): {
       currentConfig.providers,
     );
     if (!hasAccess()) return true;
-    let codespaceBound = false;
     if (currentConfig.environment.capabilities.codespaces === true) {
       const binding = await executeAtomQuery(
         appAtomRegistry,
         codespacesEnvironment.project({
           environmentId: queuedMessage.environmentId,
-          input: { projectId: creation.projectId },
+          input: { projectId: creation.projectId, name: creation.codespaceName ?? null },
         }),
         { refresh: true, reportFailure: false },
       );
       if (binding._tag === "Failure") return false;
-      codespaceBound = Boolean(binding.value.name);
     }
     if (!hasAccess()) return true;
     if (!isQueuedMessagePayloadCurrent(persistedMessage, deliveryRevision)) return true;
-    if (codespaceBound && creation.pullRequestReference)
-      return restoreQueuedMessage(
-        persistedMessage,
-        "Pull request worktrees are unavailable while this project uses a Codespace. Return to local work first.",
-      );
     let workspace = creation;
     if (creation.pullRequestReference) {
       const checkout = await runDeliveryCommand(gitEnvironment.preparePullRequestThread, {
@@ -1053,6 +1047,7 @@ export function createThreadOutboxDelivery(): {
       environmentId: queuedMessage.environmentId,
       input: buildProjectThreadStartTurnInput({
         projectId: creation.projectId,
+        codespaceName: creation.codespaceName ?? null,
         projectCwd,
         threadId: queuedMessage.threadId,
         commandId: queuedMessage.commandId,
@@ -1071,10 +1066,10 @@ export function createThreadOutboxDelivery(): {
         modelSelection: sendSettings.modelSelection,
         runtimeMode: sendSettings.runtimeMode,
         interactionMode: sendSettings.interactionMode,
-        workspaceMode: codespaceBound ? "local" : workspace.workspaceMode,
-        branch: codespaceBound ? null : workspace.branch,
-        worktreePath: codespaceBound ? null : workspace.worktreePath,
-        startFromOrigin: !codespaceBound && (workspace.startFromOrigin ?? false),
+        workspaceMode: workspace.workspaceMode,
+        branch: workspace.branch,
+        worktreePath: workspace.worktreePath,
+        startFromOrigin: workspace.startFromOrigin ?? false,
         worktreeBranchName: buildTemporaryWorktreeBranchName(randomHex),
       }),
     });
@@ -1299,9 +1294,12 @@ export function createThreadOutboxDelivery(): {
       }
       const creationProjectCwd =
         creation !== undefined
-          ? (findCreationProject(projects, nextQueuedMessage)?.workspaceRoot ??
-            creation.projectCwd ??
-            null)
+          ? findCreationProject(projects, nextQueuedMessage)
+            ? threadWorkspaceRoot(
+                creation,
+                findCreationProject(projects, nextQueuedMessage)!.workspaceRoot,
+              )
+            : (creation.projectCwd ?? null)
           : null;
       if (deliveryAction === "send" && creation !== undefined) {
         if (!isQueuedThreadCreationSendable(nextQueuedMessage)) {
