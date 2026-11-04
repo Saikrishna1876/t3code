@@ -1,5 +1,6 @@
 import * as CodespacesWorkspace from "./CodespacesWorkspace.ts";
 import { describe, expect, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,
@@ -228,7 +229,7 @@ const harness = Effect.gen(function* () {
         ),
       ),
     ),
-    Layer.provide(NodeServices.layer),
+    Layer.provide(Layer.merge(NodeServices.layer, NodeCrypto.layer)),
   );
   return {
     layer,

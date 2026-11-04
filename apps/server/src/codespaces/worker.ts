@@ -8,6 +8,7 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as NodeCrypto from "node:crypto";
 import { NodeServices } from "@effect/platform-node";
+import * as EffectNodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import {
@@ -68,7 +69,7 @@ export async function startWorker(root: string, token: string, port = 0) {
     ).pipe(
       Layer.provide(VcsProcess.layer),
       Layer.provide(ServerConfig.layerTest(workspaceRoot, { prefix: "t3-codespaces-worker-" })),
-      Layer.provide(NodeServices.layer),
+      Layer.provide(Layer.merge(NodeServices.layer, EffectNodeCrypto.layer)),
     ),
   );
   const gitCore = await runtime.runPromise(GitVcsDriver.GitVcsDriver);

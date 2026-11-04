@@ -18,7 +18,7 @@ Keep project Codespaces work available with the user's existing local provider l
 
 ## Baseline
 
-- Fork/main integrated upstream baseline: stable `v0.1.3`, `d2c440312e5f39d59827ed466838a623516454d6`, merged from fork/main `4aee051124d59bbd401d20a47332e25f7f0cb7fb`. Automated verification is recorded under Latest attempt; hardware acceptance remains separate.
+- Fork/main integrated upstream baseline: stable `v0.1.6`, `2359643cffa6ba9ee84d6f2694b935de54a8013e`, landed through PR #9 at fork/main `4bc7fce0ee`. The v0.1.7 candidate below remains stacked above PR #11 until both PRs merge. Hardware acceptance remains separate.
 - Previous integrated upstream baseline: stable `v0.1.2`, `044f07257c9684ae4543bd1e1ebf9c394e9e3830`, integrated from fork/main `fc69cb1d3db3ec59ffd38b6a6e36b45a7abbe62d`. The previous local release includes P009's staged dependency fix.
 - Compatibility patches, including PR #2, are committed. Superseded local Codespaces drafts were stashed before the 2026-10-13 integration; see Previous update, 2026-10-18.
 - Last behaviorally verified baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda` (release `0.0.42` built locally on 2026-09-18 with Electron `43.6.0` was extracted and interactively confirmed working by the user on the target Intel Mac macOS 15 system).
@@ -27,7 +27,7 @@ Keep project Codespaces work available with the user's existing local provider l
 
 - Status: active. Version observed in the user's existing patch, runtime result not independently verified.
 - Required behavior: preserve desktop usability on the target Intel Mac. Retain exact Electron `43.6.0` until another version is verified on that machine and the constraint is deliberately revised.
-- Implementation hints: `apps/desktop/package.json` pins Electron to `43.6.0` instead of upstream's `44.10.0`; `pnpm-workspace.yaml` aligns the minimum-release-age exception; `pnpm-lock.yaml` resolves the desktop importer and affected peer snapshots to `43.6.0`.
+- Implementation hints: `apps/desktop/package.json` pins Electron to `43.6.0` instead of upstream stable v0.1.7's `44.10.1`; `pnpm-workspace.yaml` aligns the minimum-release-age exception; `pnpm-lock.yaml` resolves the desktop importer and affected peer snapshots to `43.6.0`.
 - Regenerate the lockfile through the current package manager when dependencies change. Check the desktop importer directly; peer snapshots or other importers do not establish the active desktop runtime.
 - Verification: confirm the desktop manifest, resolved importer, installed Electron binary, and packaged runtime agree. On the target machine, inspect Electron GPU feature status and renderer information, then check representative scrolling, chat rendering, and CPU use against the user's working baseline. Do not claim acceleration based only on compilation or a version number.
 - Retirement: a newer runtime satisfies these hardware checks, or the user changes the hardware requirement. If upstream requires incompatible APIs, adapt those call sites or report the concrete blocker; do not silently upgrade Electron.
@@ -123,6 +123,13 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Prior successful release: 2026-10-07, version `0.0.45`, source `49b07dc3cb8e105c69ed93885ba0e6e80990762b`. DMG and ZIP integrity, packaged Electron `43.6.0`, x64 architecture, and fork feed checks passed. CodeRabbit had zero findings; Greptile's merged review was unavailable because reviews were disabled for the organization.
 
 ## Latest attempt
+
+- Date: 2026-11-04. Prepared stable `v0.1.7`, exact commit `322f6544dfad0a3c8a0c8cbecf2c7f7874b14268`, published at 06:39:38 UTC. The live release API and fetched tag agree. Starting head and rollback reference: `19d168c34c`, the reviewed PR #11 head with long-running Git transport support. Previous upstream baseline: `v0.1.6`, `2359643cffa6ba9ee84d6f2694b935de54a8013e`; ancestry verified.
+- Integration branch: `chore/stable-v0.1.7-stacked`, sibling worktree `t3-stable-v0.1.7-stacked`. Stack order is PR #11, then this stable integration into fork/main. Original feature checkout stays on PR #11. This task does not merge PRs or publish a release.
+- Resolved 25 conflicts while preserving P001 through P009 and per-thread Codespaces execution. Adapted fork randomness to Effect 4.1.2's separate SecureRandom and NodeCrypto services. Upstream missing-worktree fallbacks use remote-aware existence checks. Claude keeps host MCP with upstream context-window lookup; Codex keeps remote executors with upstream thread identity. Upstream policy, analytics, child approvals and filesystem short-read changes remain intact.
+- Dependencies installed and lockfile regenerated. Desktop manifest, release-age exception and lockfile importer retain Electron `43.6.0`. Focused verification and personal CodeRabbit review are pending. Hardware graphics, native clipboard, packaged runtime and native mobile acceptance remain pending; the last behaviorally verified baseline is unchanged.
+
+## Previous stable integration, 2026-10-31
 
 - Date: 2026-10-31. Committed release merge `7002e4198d` with review follow-ups for stacked PR #9 on `chore/stable-v0.1.5-stacked` in the adjacent `t3-stable-v0.1.5-stack-20261029` worktree. Starting PR head and rollback reference: `e955784cef924ede3d494b6d3c4848da09af11fa`. The original feature checkout remains untouched at `092c3ee5fb5d8028e027a730e394ca46531af6e7`.
 - Exact target: stable `v0.1.6`, `2359643cffa6ba9ee84d6f2694b935de54a8013e`, published 2026-10-31 at 10:52:24 UTC. The live upstream release API identifies it as latest, neither draft nor prerelease. The fetched tag matches that commit. Newer upstream/main commits are excluded under the stable-only policy.

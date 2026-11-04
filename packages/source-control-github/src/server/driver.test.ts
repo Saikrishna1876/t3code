@@ -9,6 +9,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
 import * as GitHubCredentials from "./GitHubCredentials.ts";
+import { makeIsRepositoryStarred, makeStarRepository } from "./driver.ts";
 import * as GitHubRequestPolicy from "./GitHubRequestPolicy.ts";
 import * as GitHubRest from "./GitHubRest.ts";
 import { makeWithSharedServices, makeIsRepositoryStarred } from "./driver.ts";
@@ -80,13 +81,13 @@ it.effect(
   },
 );
 
-describe("makeIsRepositoryStarred", () => {
-  it.effect("is true only when GitHub answers 204 for the repository", () => {
+describe("starred", () => {
+  it.effect("checks and stars only a valid repository, true only on 204", () => {
     const paths: Array<string> = [];
     const starred = new Set(["user/starred/pingdotgg/t3code"]);
     const api = Layer.mock(GitHubRest.GitHubRest)({
       rest: (input) => {
-        paths.push(input.path);
+        paths.push(`${input.method ?? "GET"} ${input.path}`);
         return starred.has(input.path)
           ? Effect.succeed({
               status: 204,
@@ -105,12 +106,20 @@ describe("makeIsRepositoryStarred", () => {
     });
     return Effect.gen(function* () {
       const isStarred = yield* makeIsRepositoryStarred;
+      const star = yield* makeStarRepository;
       assert.isTrue(yield* isStarred("github.com", "pingdotgg/t3code"));
       assert.isFalse(yield* isStarred("github.com", "pingdotgg/uploadthing"));
       assert.isFalse(yield* isStarred("github.com", "pingdotgg/t3code/../../user"));
+      assert.isFalse(yield* isStarred("github.com", "../repos"));
+      assert.isTrue(yield* star("github.com", "pingdotgg/t3code"));
+      assert.isFalse(yield* star("github.com", "pingdotgg/uploadthing"));
+      assert.isFalse(yield* star("github.com", "pingdotgg/t3code/../../user"));
+      assert.isFalse(yield* star("github.com", "../repos"));
       assert.deepStrictEqual(paths, [
-        "user/starred/pingdotgg/t3code",
-        "user/starred/pingdotgg/uploadthing",
+        "GET user/starred/pingdotgg/t3code",
+        "GET user/starred/pingdotgg/uploadthing",
+        "PUT user/starred/pingdotgg/t3code",
+        "PUT user/starred/pingdotgg/uploadthing",
       ]);
     }).pipe(Effect.provide(api));
   });
