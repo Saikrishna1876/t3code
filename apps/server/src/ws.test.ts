@@ -3,6 +3,10 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   AuthSessionId,
+  CommandId,
+  WsRpcGroup,
+  RpcScopeAuthorization,
+  ORCHESTRATION_V2_WS_METHODS,
   EnvironmentId,
   ProjectId,
   ThreadId,
@@ -732,6 +736,93 @@ it.effect(
       ),
       Effect.scoped,
     ),
+);
+
+it.effect("thread launch RPC preserves the selected computer for every workspace strategy", () =>
+  Effect.gen(function* () {
+    const launches = yield* Queue.unbounded<ThreadLaunchService.ThreadLaunchInput>();
+    const services = Layer.mergeAll(
+      layerUnusedConfigRpcServices,
+      Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+      Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+      Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/projects" }),
+      Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+      Layer.mock(ServerRuntimeStartup.ServerRuntimeStartup)({ enqueueCommand: (effect) => effect }),
+      Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+        launch: (input) => Queue.offer(launches, input).pipe(Effect.andThen(Effect.never)),
+      }),
+    );
+    const server = yield* RpcServer.makeNoSerialization(
+      RpcGroup.make(
+        ...Array.from(WsRpcGroup.requests.values()).filter(
+          (rpc) => rpc._tag === ORCHESTRATION_V2_WS_METHODS.launchThread,
+        ),
+      ),
+      { ...WS_RPC_SERVER_OPTIONS, onFromServer: () => Effect.void },
+    ).pipe(
+      Effect.provide(
+        layerWsRpc(
+          {
+            sessionId: AuthSessionId.make("launch-test"),
+            subject: "launch-test",
+            method: "browser-session-cookie",
+            scopes: [],
+          },
+          {},
+          yield* ServerBrowser.ServerBrowser,
+          () => Effect.void,
+        ).pipe(Layer.provide(services)),
+      ),
+      Effect.provideService(RpcScopeAuthorization, (effect) => effect),
+    );
+    const strategies: ReadonlyArray<ThreadLaunchService.ThreadLaunchWorkspaceStrategy> = [
+      { type: "root" },
+      { type: "existing_worktree", worktreePath: "/workspace/worktree" },
+      { type: "worktree", baseRef: "main" },
+    ];
+    for (const workspaceStrategy of strategies) {
+      for (const codespaceName of [undefined, null, "cloud-computer"] as const) {
+        const id = RpcMessage.RequestId(`${workspaceStrategy.type}-${codespaceName}`);
+        yield* server.write(0, {
+          _tag: "Request",
+          id,
+          tag: ORCHESTRATION_V2_WS_METHODS.launchThread,
+          payload: {
+            commandId: CommandId.make(String(id)),
+            projectId: ProjectId.make("project"),
+            title: "Task",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5.3-codex",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            workspaceStrategy,
+            ...(codespaceName === undefined ? {} : { codespaceName }),
+          },
+          headers: Headers.empty,
+        });
+        const launch = yield* Queue.take(launches);
+        assert.equal(launch.codespaceName, codespaceName);
+        assert.deepEqual(launch.workspaceStrategy, workspaceStrategy);
+        yield* server.write(0, { _tag: "Interrupt", requestId: id, interruptors: [] });
+      }
+    }
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
+    ),
+    Effect.scoped,
+  ),
 );
 
 it.effect("on-demand clients get provider config without workspace snapshots", () =>
