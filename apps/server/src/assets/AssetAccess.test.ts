@@ -282,6 +282,26 @@ describe("AssetAccess", () => {
       expect((yield* read((yield* resolve(absolute.relativeUrl))!)).bytes.toString()).toContain(
         "remote",
       );
+      for (const name of ["archive.zip", "download.html", "no-extension"]) {
+        yield* fs.writeFileString(path.join(remote, name), "remote download bytes");
+        const issued = yield* issueAssetUrl({
+          workspaceRoot: local,
+          resource: {
+            _tag: "media-file",
+            threadId: ThreadId.make("asset-thread"),
+            path: path.join(remote, name),
+            disposition: "attachment",
+          },
+        });
+        const asset = yield* resolve(issued.relativeUrl);
+        expect(asset).toMatchObject({ kind: "file", download: true, fileName: name });
+        const downloaded = yield* read(asset!);
+        expect(downloaded.headers.get("content-disposition")).toContain("attachment;");
+        expect(downloaded.headers.get("content-type")).toBe("application/octet-stream");
+        expect(downloaded.bytes.toString()).toBe("remote download bytes");
+        expect(yield* resolve(issued.relativeUrl, "shot.png")).toBeNull();
+      }
+      yield* workspace.bind({ projectId: "asset-project", name: null });
       yield* workspace.bind({ projectId: "asset-project", localRoot: local, name: "other-space" });
       expect(yield* resolve(index.relativeUrl)).toBeNull();
       yield* workspace.bind({ projectId: "asset-project", localRoot: local, name: "asset-space" });

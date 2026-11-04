@@ -1514,13 +1514,8 @@ function OpenCommandPaletteDialog(props: {
       icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
         void navigate({
-          to: "/settings/projects",
-          search: {
-            project: contextualProjectRef
-              ? `${contextualProjectRef.environmentId}\u0000${contextualProjectRef.projectId}`
-              : undefined,
-            machine: undefined,
-          },
+          to: "/settings/connections",
+          hash: "connections-codespaces",
         });
       },
     });

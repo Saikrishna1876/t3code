@@ -136,7 +136,7 @@ describe("Codespaces project status", () => {
           Layer.mock(ConnectionOnboarding)({}),
           Layer.succeed(
             SecureRandom.SecureRandom,
-            SecureRandom.make((size) => Effect.succeed(new Uint8Array(size))),
+            SecureRandom.make((size) => new Uint8Array(size)),
           ),
         ),
       );

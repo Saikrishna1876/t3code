@@ -4,6 +4,7 @@ import { FetchHttpClient } from "effect/http";
 import * as CodespacesWorkspace from "./codespaces/CodespacesWorkspace.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import { startWorker } from "./codespaces/worker.ts";
+import type * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -639,6 +640,7 @@ const runCleanupTest = <A, E>(
   effect: Effect.Effect<
     A,
     E,
+    | Digest.Digest
     | FileSystem.FileSystem
     | ServerConfig.ServerConfig
     | GitVcsDriver.GitVcsDriver

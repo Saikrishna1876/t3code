@@ -258,6 +258,7 @@ describe.each([
       environmentId: "environment-ssh",
       promotedTo: null,
       threadId: "thread-existing",
+      codespaceName: "remembered-space",
     },
   ],
 ])("useNewThreadHandler with a %s draft", (_, draft) => {
@@ -292,6 +293,12 @@ describe.each([
       opened?.draftId,
       "Read the playbook. ",
     );
+    if (draft) {
+      expect(testState.draftStore.setDraftThreadContext).toHaveBeenCalledWith(
+        draft.draftId,
+        expect.objectContaining({ codespaceName: null }),
+      );
+    }
     expect(testState.draftStore.setPrompt.mock.invocationCallOrder[0]).toBeLessThan(
       testState.router.navigate.mock.invocationCallOrder[0] ?? 0,
     );

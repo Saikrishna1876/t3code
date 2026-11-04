@@ -910,7 +910,7 @@ describe("ClaudeAdapterV2 Codespaces", () => {
             attachmentsDir,
             fileSystem,
             path: yield* Path.Path,
-            crypto: yield* Crypto.Crypto,
+            random: yield* SecureRandom.SecureRandom,
             idAllocator: yield* IdAllocator.IdAllocatorV2,
             queryRunner: {
               allocateSessionId: Effect.succeed("native-claude-codespace"),
@@ -994,6 +994,7 @@ describe("ClaudeAdapterV2 Codespaces", () => {
             McpProviderSessions.layer,
             IdAllocator.layer,
             NodeServices.layer,
+            NodeCrypto.layer,
           ),
         ),
       ),
@@ -3522,7 +3523,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
       ),
     ),
   );

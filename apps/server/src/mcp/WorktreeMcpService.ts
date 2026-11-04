@@ -2,6 +2,8 @@ import { threadWorkspaceRoot } from "@t3tools/contracts";
 import {
   CommandId,
   type GitCommandError,
+  type CodespacesError,
+  type VcsError,
   MessageId,
   type ProjectId,
   WorktreeMcpFailure,
@@ -47,7 +49,10 @@ export class WorktreeMcpService extends Context.Service<
         readonly worktreePath: string | null;
         readonly workspaceRoot: string;
       },
-    ) => Effect.Effect<VcsListRefsResult, GitCommandError | PlatformError.PlatformError>;
+    ) => Effect.Effect<
+      VcsListRefsResult,
+      GitCommandError | PlatformError.PlatformError | CodespacesError | VcsError
+    >;
   }
 >()("t3/mcp/WorktreeMcpService") {}
 

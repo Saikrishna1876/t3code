@@ -103,7 +103,10 @@ const harness = Effect.gen(function* () {
   const spawner = ChildProcessSpawner.make((command) =>
     Effect.gen(function* () {
       if (command._tag === "StandardCommand")
-        spawned.push({ command: command.command, args: command.args });
+        spawned.push({
+          command: command.command,
+          args: command.args.map((arg) => (typeof arg === "string" ? arg : Redacted.value(arg))),
+        });
       forwards++;
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {

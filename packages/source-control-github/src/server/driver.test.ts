@@ -1,4 +1,5 @@
 import { assert, describe, expect, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
@@ -9,10 +10,9 @@ import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
 import * as GitHubCredentials from "./GitHubCredentials.ts";
-import { makeIsRepositoryStarred, makeStarRepository } from "./driver.ts";
 import * as GitHubRequestPolicy from "./GitHubRequestPolicy.ts";
 import * as GitHubRest from "./GitHubRest.ts";
-import { makeWithSharedServices, makeIsRepositoryStarred } from "./driver.ts";
+import { makeWithSharedServices, makeIsRepositoryStarred, makeStarRepository } from "./driver.ts";
 
 it.effect(
   "shares Codespaces quota observations and credential invalidation with the driver",
@@ -50,7 +50,7 @@ it.effect(
           },
         }),
       ),
-      Layer.provide(NodeServices.layer),
+      Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
 
     return Effect.gen(function* () {

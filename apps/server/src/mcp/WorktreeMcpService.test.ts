@@ -22,6 +22,9 @@ import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { HttpClient, HttpClientResponse } from "effect/http";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ServerConfig from "../config.ts";
@@ -745,6 +748,60 @@ describe("t3_worktree_list", () => {
       expect(harness.listRefs.mock.calls.map(([input]) => input.cwd)).toEqual([
         worktreePath,
         workspaceRoot,
+      ]);
+      const cloudRoot = `${workspaceRoot}/.git/t3-codespaces/cloud`;
+      const cloudWorktree = `${cloudRoot}/.git/t3-worktrees/feature`;
+      const remoteLayer = CodespacesWorkspace.layer.pipe(
+        Layer.provide(
+          Layer.mock(ServerSecretStore.ServerSecretStore)({
+            get: () => Effect.succeedNone,
+            set: () => Effect.void,
+          }),
+        ),
+        Layer.provide(
+          Layer.succeed(
+            HttpClient.HttpClient,
+            HttpClient.make((request) => {
+              const payload =
+                request.body._tag === "Uint8Array"
+                  ? (JSON.parse(new TextDecoder().decode(request.body.body)) as {
+                      args: [{ relativePath: string }];
+                    })
+                  : null;
+              return Effect.succeed(
+                HttpClientResponse.fromWeb(
+                  request,
+                  new Response(
+                    JSON.stringify({
+                      value: payload?.args[0]?.relativePath.endsWith("/removed")
+                        ? null
+                        : { kind: "directory" },
+                    }),
+                  ),
+                ),
+              );
+            }),
+          ),
+        ),
+      );
+      yield* Effect.gen(function* () {
+        const remote = yield* CodespacesWorkspace.CodespacesWorkspace;
+        yield* remote.bind({ projectId, localRoot: cloudRoot, name: "cloud" });
+        yield* remote.register({
+          name: "cloud",
+          remoteRoot: "/workspaces/project",
+          workerUrl: "http://localhost:1",
+          execServerUrl: "ws://localhost:2",
+          token: "test-token",
+        });
+        const service = yield* WorktreeMcpService.WorktreeMcpService;
+        for (const worktreePath of [cloudWorktree, `${cloudWorktree}/removed`]) {
+          yield* service.listRefs({ worktreePath, workspaceRoot: cloudRoot });
+        }
+      }).pipe(Effect.provide(harness.layer.pipe(Layer.provideMerge(remoteLayer))));
+      expect(harness.listRefs.mock.calls.slice(2).map(([input]) => input.cwd)).toEqual([
+        cloudWorktree,
+        cloudRoot,
       ]);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );

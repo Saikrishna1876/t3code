@@ -25,6 +25,7 @@ import * as Stream from "effect/Stream";
 import * as Socket from "effect/socket/Socket";
 import * as Schedule from "effect/Schedule";
 import * as SubscriptionRef from "effect/SubscriptionRef";
+import * as Digest from "effect/crypto/Digest";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
@@ -213,6 +214,7 @@ const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const client = yield* HttpClient.HttpClient;
   const random = yield* SecureRandom.SecureRandom;
+  const digest = yield* Digest.Digest;
   const webSocket = yield* Socket.WebSocketConstructor;
   // A live PID can hide a stalled exec-server, so a reattached executor must finish a handshake.
   const executorReady = (port: number, token: string) =>
@@ -484,8 +486,8 @@ const make = Effect.gen(function* () {
   ) {
     const worker = yield* getWorkerSource;
     const fingerprint = Hex.encode(
-      yield* crypto
-        .digest("SHA-256", new TextEncoder().encode(launcherScript("", worker)))
+      yield* digest
+        .digest(Digest.sha256, new TextEncoder().encode(launcherScript("", worker)))
         .pipe(Effect.orDie),
     );
     const executorId = `${account}-${space.id}`;
