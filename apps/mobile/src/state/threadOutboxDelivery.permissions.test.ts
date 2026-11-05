@@ -271,16 +271,18 @@ describe("queued PR checkout", () => {
     isOnPullRequestHead: true,
   };
 
-  it("restores a bound project's PR draft before creating a local worktree", async () => {
+  it("starts a bound project PR draft in its remote worktree", async () => {
     setOperateGrant("secondary", true);
     state.config.environment.capabilities = { codespaces: true };
     state.binding.mockResolvedValue({ name: "space" });
+    state.checkout.mockResolvedValue(AsyncResult.success(preparedCheckout));
     await state.manager.enqueue(queuedPullRequest());
     await runDrain();
-    expect(state.checkout).not.toHaveBeenCalled();
-    expect(state.start).not.toHaveBeenCalled();
+    expect(state.checkout).toHaveBeenCalledOnce();
+    expect(state.start.mock.calls[0]?.[0].input.bootstrap.createThread.worktreePath).toBe(
+      preparedCheckout.worktreePath,
+    );
     expect(remaining()).toEqual([]);
-    expect(state.draftText).toContain("Keep this queued");
   });
 
   it("waits for the provider's PR checkout and launches in that worktree", async () => {
@@ -357,7 +359,7 @@ afterEach(() => {
 
 describe("queued creation workspace delivery", () => {
   it.each([false, true])(
-    "refreshes a queued worktree selection against current binding, bound: %s",
+    "preserves queued Codespace worktree target after binding changes, bound: %s",
     async (bound) => {
       setOperateGrant("secondary", true);
       state.config.environment.capabilities = { codespaces: true };
@@ -366,7 +368,8 @@ describe("queued creation workspace delivery", () => {
         modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
         creation: {
           projectId: ProjectId.make("project"),
-          projectCwd: "/repo",
+          projectCwd: "/repo/.git/t3-codespaces/saved-space",
+          codespaceName: "saved-space",
           workspaceMode: "worktree",
           branch: "feature/saved",
           worktreePath: "/old/worktree",
@@ -388,17 +391,14 @@ describe("queued creation workspace delivery", () => {
       await runDrain();
       expect(state.binding).toHaveBeenCalledTimes(2);
       const input = state.start.mock.calls[0]![0].input;
+      expect(input.bootstrap.createThread.codespaceName).toBe("saved-space");
       expect(input.bootstrap.createThread.worktreePath).toBeNull();
-      expect(input.bootstrap.createThread.branch).toBe(bound ? null : "feature/saved");
-      if (bound) {
-        expect(input.bootstrap.prepareWorktree).toBeUndefined();
-        expect(input.bootstrap.runSetupScript).toBeUndefined();
-      } else {
-        expect(input.bootstrap.prepareWorktree).toMatchObject({
-          baseBranch: "feature/saved",
-          startFromOrigin: true,
-        });
-      }
+      expect(input.bootstrap.createThread.branch).toBe("feature/saved");
+      expect(input.bootstrap.prepareWorktree).toMatchObject({
+        projectCwd: "/repo/.git/t3-codespaces/saved-space",
+        baseBranch: "feature/saved",
+        startFromOrigin: true,
+      });
       expect(remaining()).toEqual([]);
     },
   );

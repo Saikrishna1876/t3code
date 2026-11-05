@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import { ActiveNewTaskContext } from "../../state/active-new-task";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import { useNowMinuteMs } from "../../lib/clock";
@@ -137,11 +138,13 @@ type NewTaskFlowContextValue = {
   readonly projectScopes: ReadonlyArray<HomeProjectScope>;
   readonly selectedEnvironmentId: EnvironmentId | null;
   readonly selectedProjectKey: string | null;
+  readonly codespaceName: string | null;
+  readonly selectCodespace: (name: string | null) => void;
   readonly selectedModelKey: string | null;
   readonly workspaceMode: WorkspaceMode;
   readonly isGitRepo: boolean;
   readonly isGitRepoKnown: boolean;
-  /** Workspace selection stays locked until binding status is known; bound projects use the main checkout. */
+  /** Workspace selection stays locked until binding status is known. */
   readonly canChooseWorkspace: boolean;
   readonly workspaceLocationBlockReason: string | null;
   readonly selectedBranchName: string | null;
@@ -368,13 +371,24 @@ export function NewTaskFlowProvider(
           : null;
   const activeNewTask = props.active === false ? null : { pendingKey: activePendingKey };
   const selectedProjectDraft = useComposerDraft(selectedProjectDraftKey);
+  const codespaceName = selectedProjectDraft.codespaceName ?? null;
+  const projectCwd = selectedProject
+    ? threadWorkspaceRoot({ codespaceName }, selectedProject.workspaceRoot)
+    : null;
+  const selectCodespace = (name: string | null) => {
+    if (!selectedProjectDraftKey) return;
+    updateComposerDraftSettings(selectedProjectDraftKey, {
+      codespaceName: name,
+      workspaceSelection: { mode: "local", branch: null, worktreePath: null },
+    });
+  };
   const prompt = selectedProjectDraft.text;
   const attachments = selectedProjectDraft.attachments;
   const projectGitStatus = useEnvironmentQuery(
     selectedProject !== null && selectedProject.workspaceRoot !== ""
       ? vcsEnvironment.status({
           environmentId: selectedProject.environmentId,
-          input: { cwd: selectedProject.workspaceRoot },
+          input: { cwd: projectCwd! },
         })
       : null,
   );
@@ -382,33 +396,34 @@ export function NewTaskFlowProvider(
   // The unfiltered ref list also provides repository capability while offline.
   const projectBranches = useBranches({
     environmentId: selectedProject?.environmentId ?? null,
-    cwd: selectedProject?.workspaceRoot || null,
+    cwd: projectCwd,
   });
   const knownIsGitRepo = projectGitStatus.data?.isRepo ?? projectBranches.data?.isRepo ?? null;
   const isGitRepo = knownIsGitRepo ?? true;
   const projectSettings = projectDefaults.projectSettings;
   const codespace = useEnvironmentQuery(
-    selectedProject && selectedEnvironmentServerConfig?.environment.capabilities.codespaces
+    selectedProject &&
+      codespaceName &&
+      selectedEnvironmentServerConfig?.environment.capabilities.codespaces
       ? codespacesEnvironment.project({
           environmentId: selectedProject.environmentId,
-          input: { projectId: selectedProject.id },
+          input: { projectId: selectedProject.id, name: codespaceName },
         })
       : null,
   );
   const workspaceLocationBlockReason = codespacesProjectSendBlockReason(
-    selectedProject
+    selectedProject && codespaceName
       ? selectedEnvironmentServerConfig?.environment.capabilities
       : { codespaces: false },
     codespace,
   );
-  const canChooseWorkspace =
-    !isScratchDraft && workspaceLocationBlockReason === null && !codespace.data?.name;
+  const canChooseWorkspace = !isScratchDraft && workspaceLocationBlockReason === null;
   const defaultWorkspaceMode: WorkspaceMode = canChooseWorkspace
     ? projectDefaults.defaultWorkspaceMode
     : "local";
   const branchState = usePaginatedBranches({
     environmentId: selectedProject?.environmentId ?? null,
-    cwd: selectedProject?.workspaceRoot || null,
+    cwd: projectCwd,
   });
   const branchesLoading = branchState.isPending && branchState.data === null;
   const allBranchRefs = branchState.refs;
@@ -425,7 +440,7 @@ export function NewTaskFlowProvider(
       defaultModeSettled: projectDefaults.defaultWorkspaceModeSettled,
       isGitRepo,
       branches: allBranchRefs,
-      projectCwd: selectedProject?.workspaceRoot ?? null,
+      projectCwd,
     });
   const workspaceSelection = resolveWorkspaceSelection(selectedProjectDraft.workspaceSelection);
   const workspaceMode = workspaceSelection.mode;
@@ -660,7 +675,7 @@ export function NewTaskFlowProvider(
     }
     const localSelection = resolveNewTaskLocalWorkspaceSelection({
       branches: availableBranches,
-      projectCwd: selectedProject.workspaceRoot,
+      projectCwd: projectCwd!,
     });
     updateComposerDraftSettings(selectedProjectDraftKey, {
       workspaceSelection: {
@@ -687,7 +702,7 @@ export function NewTaskFlowProvider(
         branch: branch.name,
         worktreePath: resolveNewTaskBranchWorktreePath({
           workspaceMode,
-          projectCwd: selectedProject.workspaceRoot,
+          projectCwd: projectCwd!,
           branchWorktreePath: branch.worktreePath,
         }),
         ...(draftStartFromOrigin !== undefined ? { startFromOrigin: draftStartFromOrigin } : {}),
@@ -783,9 +798,10 @@ export function NewTaskFlowProvider(
         ),
       }),
       creation: {
+        codespaceName,
         projectId: selectedProject.id,
         projectTitle: selectedProject.title,
-        projectCwd: selectedProject.workspaceRoot,
+        projectCwd: projectCwd!,
         workspaceMode: mode,
         ...(mode === "worktree" && workspaceSelection?.pullRequestReference
           ? { pullRequestReference: workspaceSelection.pullRequestReference }
@@ -871,6 +887,8 @@ export function NewTaskFlowProvider(
     projectScopes,
     selectedEnvironmentId,
     selectedProjectKey,
+    codespaceName,
+    selectCodespace,
     selectedModelKey,
     workspaceMode,
     isGitRepo,

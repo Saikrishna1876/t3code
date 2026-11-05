@@ -4,6 +4,18 @@ import { EnvironmentId, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.t
 export const CodespaceName = Schema.String.check(
   Schema.isPattern(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$/),
 );
+
+export function codespaceWorkspaceRoot(hostRoot: string, name: string): string {
+  const separator = /^[a-zA-Z]:[\\/]|^\\\\/.test(hostRoot) ? "\\" : "/";
+  return [hostRoot.replace(/[\\/]+$/, ""), ".git", "t3-codespaces", name].join(separator);
+}
+
+export function threadWorkspaceRoot(
+  thread: { readonly codespaceName?: string | null | undefined },
+  hostRoot: string,
+): string {
+  return thread.codespaceName ? codespaceWorkspaceRoot(hostRoot, thread.codespaceName) : hostRoot;
+}
 export const CodespaceRepository = Schema.String.check(Schema.isPattern(/^[\w.-]+\/[\w.-]+$/));
 export const CODESPACES_BLANK_REPOSITORY = "github/codespaces-blank";
 export const CodespacesRequestId = Schema.String.check(
@@ -154,7 +166,10 @@ export const CodespacesPairResult = Schema.Struct({
 
 export type CodespacesPairResult = typeof CodespacesPairResult.Type;
 
-export const CodespacesProjectInput = Schema.Struct({ projectId: ProjectId });
+export const CodespacesProjectInput = Schema.Struct({
+  projectId: ProjectId,
+  name: Schema.optionalKey(Schema.NullOr(CodespaceName)),
+});
 export const CodespacesBindInput = Schema.Struct({
   projectId: ProjectId,
   name: Schema.NullOr(CodespaceName),
@@ -170,6 +185,7 @@ export const CodespacesProject = Schema.Struct({
   name: Schema.NullOr(CodespaceName),
   connected: Schema.Boolean,
   workspacePath: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  workspaceRoot: Schema.optionalKey(Schema.String),
   setupWarning: Schema.optionalKey(Schema.NullOr(Schema.String)),
   setupWarningDismissed: Schema.optionalKey(Schema.Boolean),
 });

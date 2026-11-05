@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import { useServerConfigs } from "../../state/entities";
 import { CodespacesPickerRows } from "../connection/CodespacesSettings";
 import { NativeScrollView } from "../../native/NativeScrollViewMarker";
@@ -227,11 +228,19 @@ export function NewTaskEnvironmentPickerRouteScreen() {
                 disabled={flow.switchingToEnvironmentId !== null}
                 onPress={() => {
                   void Haptics.selectionAsync();
+                  if (environment.environmentId === flow.selectedEnvironmentId) {
+                    flow.selectCodespace(null);
+                    navigation.goBack();
+                    return;
+                  }
                   void flow.switchEnvironment(environment.environmentId).then((switched) => {
                     if (switched) navigation.goBack();
                   });
                 }}
-                selected={flow.selectedEnvironmentId === environment.environmentId}
+                selected={
+                  flow.codespaceName === null &&
+                  flow.selectedEnvironmentId === environment.environmentId
+                }
                 title={environment.environmentLabel}
               />
             ))}
@@ -242,6 +251,8 @@ export function NewTaskEnvironmentPickerRouteScreen() {
                 key={`${project.environmentId}:${project.id}`}
                 environmentId={project.environmentId}
                 projectId={project.id}
+                codespaceName={flow.codespaceName}
+                onCodespaceChange={flow.selectCodespace}
               />
             </View>
           ) : null}
@@ -267,7 +278,9 @@ export function NewTaskBranchPickerRouteScreen() {
   const debouncedBranchQuery = useDebouncedValue(branchSearchQuery, BRANCH_SEARCH_DEBOUNCE_MS);
   const branchState = usePaginatedBranches({
     environmentId: flow.selectedProject?.environmentId ?? null,
-    cwd: flow.selectedProject?.workspaceRoot || null,
+    cwd: flow.selectedProject
+      ? threadWorkspaceRoot(flow, flow.selectedProject.workspaceRoot)
+      : null,
     query: debouncedBranchQuery,
   });
   const branchesLoading =
@@ -304,7 +317,7 @@ export function NewTaskBranchPickerRouteScreen() {
     });
     const result = await checkoutNewTaskBranch({
       branch,
-      project,
+      project: { ...project, workspaceRoot: threadWorkspaceRoot(flow, project.workspaceRoot) },
       workspaceMode: flow.workspaceMode,
       readRefs,
       switchRef,

@@ -1,3 +1,5 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
+import { makeWorkspacePathExists } from "../codespaces/CodespacesWorkspace.ts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 import {
@@ -148,9 +150,9 @@ export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
     const eventSink = yield* EventSink.EventSinkV2;
+    const workspacePathExists = yield* makeWorkspacePathExists;
     const contextHandoffService = yield* ContextHandoffService.ContextHandoffServiceV2;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
-    const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
     const projects = yield* ProjectService.ProjectService;
@@ -625,9 +627,9 @@ export const layer: Layer.Layer<
       }
       const { worktreePath, branch } = projection.thread;
       if (worktreePath !== null && branch !== null) {
-        const exists = yield* fileSystem
-          .exists(worktreePath)
-          .pipe(Effect.orElseSucceed(() => true));
+        const exists = yield* workspacePathExists(worktreePath).pipe(
+          Effect.orElseSucceed(() => true),
+        );
         if (!exists && (yield* isManagedWorktreePath(worktreePath))) {
           const project = yield* projects.getById(projection.thread.projectId).pipe(
             Effect.map(Option.getOrUndefined),
@@ -641,7 +643,7 @@ export const layer: Layer.Layer<
             });
             const recreateResult = yield* Effect.result(
               recreateMissingWorktree({
-                cwd: project.workspaceRoot,
+                cwd: threadWorkspaceRoot(projection.thread, project.workspaceRoot),
                 worktreePath,
                 branch,
               }).pipe(

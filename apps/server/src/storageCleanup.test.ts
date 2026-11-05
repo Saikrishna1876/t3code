@@ -1,4 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { FetchHttpClient } from "effect/http";
+import * as CodespacesWorkspace from "./codespaces/CodespacesWorkspace.ts";
+import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
+import { startWorker } from "./codespaces/worker.ts";
 import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -315,12 +319,13 @@ const cleanupFixture = (
     worktreeAfterDays: 8,
     worktreeOnDelete: true,
   },
+  remote = false,
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const config = yield* ServerConfig.ServerConfig;
     const git = yield* GitVcsDriver.GitVcsDriver;
-    const repo = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "cleanup-repo-" }));
+    let repo = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "cleanup-repo-" }));
     const command = (cwd: string, args: string[]) =>
       git.execute({ operation: "cleanup-test", cwd, args });
     yield* command(repo, ["init", "-b", "main"]);
@@ -331,8 +336,52 @@ const cleanupFixture = (
     yield* command(repo, ["add", "."]);
     yield* command(repo, ["commit", "-m", "initial"]);
     yield* fs.makeDirectory(config.worktreesDir, { recursive: true });
-    const worktree = `${config.worktreesDir}/feature`;
+    let worktree = `${config.worktreesDir}/feature`;
     yield* command(repo, ["worktree", "add", "-b", "feature", worktree]);
+    const physicalRepo = repo;
+    let physicalWorktree = worktree;
+    const workspaceContext = yield* Layer.build(
+      CodespacesWorkspace.layer.pipe(
+        Layer.provide(
+          Layer.mock(ServerSecretStore.ServerSecretStore)({
+            get: () => Effect.succeedNone,
+            set: () => Effect.void,
+          }),
+        ),
+        Layer.provide(FetchHttpClient.layer),
+        Layer.provide(NodeServices.layer),
+      ),
+    );
+    if (remote) {
+      physicalWorktree = `${repo}/.git/t3-worktrees/project/feature`;
+      yield* fs.makeDirectory(`${repo}/.git/t3-worktrees/project`, { recursive: true });
+      yield* command(repo, ["worktree", "move", worktree, physicalWorktree]);
+      const worker = yield* Effect.acquireRelease(
+        Effect.promise(() => startWorker(physicalRepo, "cleanup-test")),
+        (worker) =>
+          Effect.promise(async () => {
+            await new Promise<void>((resolve) => worker.server.close(() => resolve()));
+            await worker.runtime.dispose();
+          }),
+      );
+      repo = `${physicalRepo}-host`;
+      worktree = `${repo}/.git/t3-worktrees/project/feature`;
+      const workspace = Context.get(workspaceContext, CodespacesWorkspace.CodespacesWorkspace);
+      yield* workspace.bind({ projectId: "project-1", localRoot: repo, name: "space" });
+      yield* workspace.register({
+        name: "space",
+        remoteRoot: physicalRepo,
+        workerUrl: `http://127.0.0.1:${worker.port}`,
+        execServerUrl: "ws://localhost:1",
+        token: "cleanup-test",
+      });
+    }
+    const workspaceGit = remote
+      ? yield* GitVcsDriver.make.pipe(
+          Effect.provideContext(workspaceContext),
+          Effect.provide(NodeServices.layer),
+        )
+      : git;
     let settings: import("@t3tools/contracts").ServerSettings = {
       ...DEFAULT_SERVER_SETTINGS,
       storageCleanup,
@@ -353,7 +402,7 @@ const cleanupFixture = (
     const activated = yield* Deferred.make<void>();
     const context = yield* Layer.build(StorageCleanup.layer).pipe(
       Effect.provideService(GitVcsDriver.GitVcsDriver, {
-        ...git,
+        ...workspaceGit,
         execute: (input) =>
           Effect.gen(function* () {
             // Before Git's own clean check: inside `git worktree remove`, or on
@@ -363,7 +412,7 @@ const cleanupFixture = (
               (input.args.includes("remove") || input.args.includes("--porcelain"))
             )
               yield* fs.writeFileString(`${worktree}/tracked.txt`, "late edit\n");
-            return yield* git.execute(input);
+            return yield* workspaceGit.execute(input);
           }),
         statusDetailsLocal: (...args) => {
           fullStatusCalls++;
@@ -466,6 +515,7 @@ const cleanupFixture = (
           }),
       } as unknown as TerminalManager.TerminalManager["Service"]),
       Effect.provideService(ServerActivation, Deferred.await(activated)),
+      Effect.provideContext(workspaceContext),
     );
     return {
       service: Context.get(context, StorageCleanup.StorageCleanup),
@@ -477,6 +527,8 @@ const cleanupFixture = (
       },
       fs,
       worktree,
+      physicalRepo,
+      physicalWorktree,
       config,
       command,
       enableFiles: () => {
@@ -617,6 +669,31 @@ const submoduleCleanupFixture = () =>
     yield* recordSubmodules();
     return { ...fixture, submodule, child, recordSubmodules };
   });
+
+it.live("cleans Codespace worktrees using remote files while preserving local changes", () =>
+  runCleanupTest(
+    Effect.gen(function* () {
+      const fixture = yield* cleanupFixture(undefined, true);
+      const { fs, service, physicalWorktree, worktree } = fixture;
+      yield* fs.writeFileString(`${physicalWorktree}/tracked.txt`, "remote edit\n");
+      expect(
+        (yield* service.runNow).entries.find((entry) => entry.path === worktree),
+      ).toMatchObject({
+        outcome: "kept",
+        reason: "Has uncommitted changes (1 file)",
+      });
+      yield* fs.writeFileString(`${physicalWorktree}/tracked.txt`, "original\n");
+      expect(
+        (yield* service.runNow).entries.find((entry) => entry.path === worktree),
+      ).toMatchObject({
+        outcome: "removed",
+      });
+      expect(yield* fs.exists(physicalWorktree)).toBe(false);
+      expect(yield* fs.readFileString(`${fixture.physicalRepo}/tracked.txt`)).toBe("original\n");
+      expect(yield* fs.exists(fixture.repo)).toBe(false);
+    }),
+  ),
+);
 
 it.live("removes clean submodules recursively, including deinitialized repositories", () =>
   runCleanupTest(

@@ -96,13 +96,19 @@ export function ProjectCodespacesControl({
 export function CodespacesPickerRows({
   environmentId,
   projectId,
+  codespaceName,
+  onCodespaceChange,
 }: {
   environmentId: EnvironmentId;
   projectId: ProjectId;
+  codespaceName?: string | null;
+  onCodespaceChange?: (name: string | null) => void;
 }) {
+  const [inspectedName, setInspectedName] = useState<string | null>(null);
+  const name = codespaceName === undefined ? inspectedName : codespaceName;
   const canManage = useAtomValue(codespacesEnvironment.run.permissionAtom(environmentId));
   const project = useEnvironmentQuery(
-    codespacesEnvironment.project({ environmentId, input: { projectId } }),
+    codespacesEnvironment.project({ environmentId, input: { projectId, name } }),
   );
   const inventory = useEnvironmentQuery(codespacesEnvironment.list({ environmentId, input: {} }));
   const state = useEnvironmentQuery(
@@ -143,6 +149,15 @@ export function CodespacesPickerRows({
     project.refresh();
   };
   const select = async (name: string, stopped: boolean) => {
+    setInspectedName(name);
+    onCodespaceChange?.(name);
+    if (
+      !stopped &&
+      state.data?.environments.some((entry) => entry.name === name && entry.connected)
+    ) {
+      await save(name);
+      return;
+    }
     setPending(true);
     setError(null);
     const result = await run({
@@ -204,7 +219,13 @@ export function CodespacesPickerRows({
             </Text>
           </View>
           <Button
-            label={space.state === "Shutdown" ? "Start" : "Use computer"}
+            label={
+              space.state === "Shutdown"
+                ? "Start"
+                : onCodespaceChange
+                  ? "Select"
+                  : "Prepare project"
+            }
             disabled={busy || !canManage || (!info?.eligible && !info?.name)}
             onPress={() => void select(space.name, space.state === "Shutdown")}
           />
@@ -212,14 +233,6 @@ export function CodespacesPickerRows({
       ))}
       {!spaces.length ? (
         <Text className="text-sm text-foreground-muted">No computers added yet.</Text>
-      ) : null}
-      {info?.name ? (
-        <Button
-          fullWidth
-          label="Work locally"
-          disabled={busy || !canManage}
-          onPress={() => void save(null)}
-        />
       ) : null}
       {feedback ? (
         <View className="gap-1">

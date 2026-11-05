@@ -1,3 +1,4 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -424,6 +425,38 @@ it.layer(
       assert.equal(third.threadId, "thread-1");
       expect(ptyAdapter.spawnInputs).toHaveLength(1);
     }),
+  );
+
+  it.effect.each([true, false])(
+    "checks remote worktree directories on the computer, exists=%s",
+    (exists) =>
+      Effect.gen(function* () {
+        const { manager, ptyAdapter } = yield* createManager();
+        const cwd = "/host/project/.git/t3-worktrees/project/feature";
+        const result = yield* manager.open(openInput({ cwd })).pipe(Effect.result);
+        assert.equal(result._tag, exists ? "Success" : "Failure");
+        assert.equal(ptyAdapter.spawnInputs.length, exists ? 1 : 0);
+        if (exists) {
+          assert.equal(
+            yield* manager.getShell({ threadId: "thread-1", terminalId: DEFAULT_TERMINAL_ID }),
+            "bash",
+          );
+        }
+      }).pipe(
+        Effect.provide(
+          Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+            lookup: () =>
+              Effect.succeed({
+                projectId: "project",
+                name: "space",
+                localRoot: "/host/project",
+                executor: null,
+                remoteCwd: null,
+              }),
+            call: () => Effect.succeed((exists ? { kind: "directory" } : null) as never),
+          }),
+        ),
+      ),
   );
 
   it.effect("keeps attach streams live when a terminal id is closed and reopened", () =>

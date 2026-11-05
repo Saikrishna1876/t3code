@@ -1,3 +1,4 @@
+import { CodespacesError } from "@t3tools/contracts";
 import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
@@ -342,10 +343,10 @@ export const layerWithOptions = (
     ProviderSessionManagerV2,
     Effect.gen(function* () {
       const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
+      const workspacePathExists = yield* CodespacesWorkspace.makeWorkspacePathExists;
       const workspaceService = Option.getOrUndefined(
         yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
       );
-      const fileSystem = yield* FileSystem.FileSystem;
       const mcpSessionRegistry = yield* McpSessionRegistry.McpSessionRegistry;
       const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
       /** Unreadable settings must preserve explicit browser-access opt-outs. */
@@ -454,22 +455,33 @@ export const layerWithOptions = (
       ) {
         if (!workspaceService) return null;
         const thread = yield* projectionStore.getThreadShell(threadId);
+        if (thread?.codespaceName === null) return null;
         const binding = thread
-          ? (yield* workspaceService.bindings).find((entry) => entry.projectId === thread.projectId)
+          ? (yield* workspaceService.bindings).find(
+              (entry) =>
+                entry.projectId === thread.projectId &&
+                (thread.codespaceName ? entry.name === thread.codespaceName : !entry.hostRoot),
+            )
           : undefined;
         if (binding) {
           const cwdTarget = cwd ? yield* workspaceService.lookup(cwd) : null;
-          return cwdTarget?.projectId === binding.projectId
-            ? cwdTarget
-            : yield* workspaceService.lookup(binding.localRoot);
+          if (cwdTarget?.projectId === binding.projectId && cwdTarget.name === binding.name)
+            return cwdTarget;
+          const target = yield* workspaceService.lookup(binding.localRoot);
+          return target ? { ...target, remoteCwd: null } : null;
         }
+        if (thread?.codespaceName)
+          return yield* new CodespacesError({
+            code: "conflict",
+            message: "Reconnect this thread's Codespace before starting work.",
+          });
         return cwd ? yield* workspaceService.lookup(cwd) : null;
       });
       const acquireWorkspaceWork = Effect.fn("ProviderSessionManager.acquireWorkspaceWork")(
         function* (threadId: ThreadId) {
           if (!workspaceService) return;
           const thread = yield* projectionStore.getThreadShell(threadId);
-          if (thread) yield* workspaceService.acquireWork(thread.projectId);
+          if (thread) yield* workspaceService.acquireWork(thread.projectId, thread.codespaceName);
         },
       );
 
@@ -491,21 +503,6 @@ export const layerWithOptions = (
                 const capabilities = new Set<
                   import("../mcp/McpInvocationContext.ts").McpCapability
                 >(["orchestration", "worktree", "pull-requests"]);
-                if (workspaceService && Option.isSome(projectService)) {
-                  const remoteBound = yield* projectionStore.getThreadShell(threadId).pipe(
-                    Effect.flatMap((thread) =>
-                      thread ? projectService.value.getById(thread.projectId) : Effect.succeedNone,
-                    ),
-                    Effect.flatMap((project) =>
-                      Option.isSome(project)
-                        ? workspaceService.lookup(project.value.workspaceRoot)
-                        : Effect.succeed(null),
-                    ),
-                    Effect.map((target) => target !== null),
-                    Effect.orElseSucceed(() => true),
-                  );
-                  if (remoteBound) capabilities.delete("worktree");
-                }
                 if (browserToolsAvailable) capabilities.add("preview");
                 if (deviceToolsAvailable) capabilities.add("device");
                 const subagent = yield* projectionStore.getThread(threadId).pipe(
@@ -1883,7 +1880,12 @@ export const layerWithOptions = (
                     target &&
                     (!codespacesDrivers.has(runtime.driver) ||
                       !target.executor ||
-                      input.runtimePolicy.cwd !== target.localRoot)
+                      !target.remoteCwd ||
+                      !input.runtimePolicy.cwd ||
+                      !CodespacesWorkspace.isWorkspacePath(
+                        input.runtimePolicy.cwd,
+                        target.localRoot,
+                      ))
                   )
                     return yield* new ProviderAdapter.ProviderAdapterTurnStartError({
                       driver: runtime.driver,
@@ -1891,7 +1893,7 @@ export const layerWithOptions = (
                       providerThreadId: input.providerThread.id,
                       runId: input.runId,
                       cause:
-                        "Resume the Codespace and use Codex or Claude from the project's main checkout before starting work.",
+                        "Resume the Codespace and use Codex or Claude from this project's checkout or worktrees before starting work.",
                     });
                 }).pipe(
                   Effect.mapError((cause) =>
@@ -2227,18 +2229,6 @@ export const layerWithOptions = (
             input.providerSessionId,
             Effect.gen(function* () {
               const cwd = input.runtimePolicy.cwd;
-              if (cwd !== null) {
-                const workspaceIsDirectory = yield* fileSystem.stat(cwd).pipe(
-                  Effect.map((stat) => stat.type === "Directory"),
-                  Effect.catch((error) => Effect.succeed(error.reason._tag !== "NotFound")),
-                );
-                if (!workspaceIsDirectory) {
-                  return yield* new ProviderWorkspaceMissingError({
-                    threadId: input.threadId,
-                    cwd,
-                  });
-                }
-              }
               yield* acquireWorkspaceWork(input.threadId).pipe(
                 Effect.mapError(
                   (cause) =>
@@ -2273,7 +2263,9 @@ export const layerWithOptions = (
                 if (
                   !codespacesDrivers.has(selected.driver) ||
                   !target.executor ||
-                  cwd !== target.localRoot
+                  !target.remoteCwd ||
+                  !cwd ||
+                  !CodespacesWorkspace.isWorkspacePath(cwd, target.localRoot)
                 )
                   return yield* new ProviderSessionOpenError({
                     instanceId: input.modelSelection.instanceId,
@@ -2282,8 +2274,19 @@ export const layerWithOptions = (
                       ? "Codespaces require Codex 0.160.1 or later, or Claude. Provider login stays local."
                       : !target.executor
                         ? "Resume the project's Codespace before starting work."
-                        : "Codespaces currently use the project root. Select the main checkout.",
+                        : "This worktree is outside the Codespace project. Create a worktree on the selected computer.",
                   });
+              }
+              if (cwd !== null) {
+                const workspaceIsDirectory = yield* workspacePathExists(cwd, true).pipe(
+                  Effect.orElseSucceed(() => true),
+                );
+                if (!workspaceIsDirectory) {
+                  return yield* new ProviderWorkspaceMissingError({
+                    threadId: input.threadId,
+                    cwd,
+                  });
+                }
               }
               const key = sessionKey(input.providerSessionId);
               const existing = (yield* Ref.get(sessions)).get(key);

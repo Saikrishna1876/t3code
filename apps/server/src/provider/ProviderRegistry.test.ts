@@ -1,3 +1,4 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import { vi } from "vite-plus/test";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -1498,6 +1499,7 @@ it.layer(
           const scanStarted = yield* Deferred.make<void>();
           const releaseScan = yield* Deferred.make<void>();
           const scans = yield* Ref.make(0);
+          const scannedCwds: string[] = [];
           const instance: ProviderInstance = {
             instanceId,
             driverKind: driver,
@@ -1517,8 +1519,9 @@ it.layer(
               streamChanges: Stream.empty,
               applyUsageLimits: () => Effect.void,
             },
-            snapshotForCwd: () =>
-              Ref.update(scans, (count) => count + 1).pipe(
+            snapshotForCwd: (cwd) =>
+              Effect.sync(() => scannedCwds.push(cwd)).pipe(
+                Effect.andThen(Ref.update(scans, (count) => count + 1)),
                 Effect.andThen(Deferred.succeed(scanStarted, undefined)),
                 Effect.andThen(Deferred.await(releaseScan)),
                 Effect.as(provider),
@@ -1541,6 +1544,18 @@ it.layer(
           yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
           const runtimeServices = yield* Layer.build(
             ProviderRegistry.layer.pipe(
+              Layer.provide(
+                Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+                  lookup: () =>
+                    Effect.succeed({
+                      projectId: "proof",
+                      name: "space",
+                      localRoot: "/host/project",
+                      remoteCwd: "/workspaces/proof/.git/t3-worktrees/proof/branch",
+                      executor: null,
+                    }),
+                }),
+              ),
               Layer.provide(layerUnusedMutator),
               Layer.provideMerge(layerInstanceRegistry),
               Layer.provideMerge(
@@ -1554,7 +1569,8 @@ it.layer(
 
           yield* Effect.gen(function* () {
             const registry = yield* ProviderRegistry.ProviderRegistry;
-            const refresh = registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace" });
+            const cwd = "/host/project/.git/t3-worktrees/project/branch";
+            const refresh = registry.refreshWorkspaceSnapshot({ instanceId, cwd });
             const first = yield* Effect.forkChild(refresh);
             yield* Deferred.await(scanStarted);
             const second = yield* Effect.forkChild(refresh, { startImmediately: true });
@@ -1562,9 +1578,10 @@ it.layer(
             yield* Deferred.succeed(releaseScan, undefined);
             assert.deepStrictEqual(
               (yield* Fiber.join(second))[0]?.workspaceSnapshots?.map((snapshot) => snapshot.cwd),
-              ["/workspace"],
+              [cwd],
             );
             assert.strictEqual(yield* Ref.get(scans), 1);
+            assert.deepStrictEqual(scannedCwds, ["/host/project"]);
           }).pipe(Effect.provide(runtimeServices));
         }),
     );

@@ -2,6 +2,8 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Option from "effect/Option";
+import * as CodespacesWorkspace from "./codespaces/CodespacesWorkspace.ts";
 
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 
@@ -47,6 +49,7 @@ export function managedWorktreesDirectories(
 // Client paths/branches are untrusted; recreate only real paths matching managed-folder/repo/branch.
 export const makeIsManagedWorktreePath = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
+  const workspace = yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace);
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig.ServerConfig;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
@@ -67,6 +70,19 @@ export const makeIsManagedWorktreePath = Effect.gen(function* () {
     if (!path.isAbsolute(worktreePath)) return false;
     // Require normalized paths; Git and realPath disagree on .. after symlink traversal.
     if (path.resolve(worktreePath) !== worktreePath) return false;
+    const target = Option.isSome(workspace) ? yield* workspace.value.lookup(worktreePath) : null;
+    if (target) {
+      const relative = path.relative(
+        path.join(target.localRoot, ".git", "t3-worktrees"),
+        worktreePath,
+      );
+      const segments = relative.split(path.sep);
+      return (
+        !path.isAbsolute(relative) &&
+        segments.length === 2 &&
+        segments.every((segment) => segment !== "" && segment !== ".." && segment !== ".")
+      );
+    }
     const settings = yield* serverSettings.getSettings.pipe(
       Effect.orElseSucceed(() => ({
         worktreesDirectory: "",

@@ -51,7 +51,6 @@ import {
   deriveComposerSendState,
   deriveLockedProvider,
   hasServerAcknowledgedLocalDispatch,
-  resolveCodespaceDraftWorkspace,
   waitForRevertedMessage,
 } from "./ChatView.logic";
 
@@ -126,43 +125,6 @@ describe("deriveComposerSendState", () => {
     expect(state.trimmedPrompt).toBe("yoo  waddup");
     expect(state.expiredTerminalContextCount).toBe(1);
     expect(state.hasSendableContent).toBe(true);
-  });
-});
-
-describe("resolveSendEnvMode", () => {
-  it.each([null, "/repo/worktrees/old"])(
-    "forces bound drafts onto the main checkout with saved path %s",
-    (worktreePath) => {
-      expect(
-        resolveCodespaceDraftWorkspace({
-          codespaceBound: true,
-          isUnstarted: true,
-          envMode: "worktree",
-          branch: "old",
-          worktreePath,
-          startFromOrigin: true,
-          currentCheckoutBranch: "main",
-        }),
-      ).toEqual({ envMode: "local", branch: "main", worktreePath: null, startFromOrigin: false });
-    },
-  );
-  it("preserves started worktree threads so provider guards can reject them", () => {
-    expect(
-      resolveCodespaceDraftWorkspace({
-        codespaceBound: true,
-        isUnstarted: false,
-        envMode: "worktree",
-        branch: "old",
-        worktreePath: "/worktree",
-        startFromOrigin: true,
-        currentCheckoutBranch: "main",
-      }),
-    ).toEqual({
-      envMode: "worktree",
-      branch: "old",
-      worktreePath: "/worktree",
-      startFromOrigin: true,
-    });
   });
 });
 

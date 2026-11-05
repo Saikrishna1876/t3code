@@ -7,6 +7,7 @@ import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
+import * as Stream from "effect/Stream";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as Workspace from "./CodespacesWorkspace.ts";
 import * as Scope from "effect/Scope";
@@ -226,14 +227,35 @@ describe("project workspace binding", () => {
     });
   });
 
-  it.effect("bounds asset requests when the worker never sends headers", () =>
+  it.effect.each([
+    { progress: false, cancel: false },
+    { progress: true, cancel: false },
+    { progress: true, cancel: true },
+  ])("keeps long Git requests cancellable with %o", ({ progress, cancel }) =>
     Effect.gen(function* () {
-      const requested = yield* Deferred.make<void>();
+      const received = yield* Deferred.make<void>();
+      const finished = yield* Deferred.make<void>();
+      const interrupted = yield* Deferred.make<void>();
+      const body = Deferred.succeed(received, undefined).pipe(
+        Effect.andThen(Deferred.await(finished)),
+        Effect.as({ value: { worktree: { path: "/workspaces/project/tree" } } }),
+        Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)),
+      );
       const layer = fixture(
         Layer.succeed(
           HttpClient.HttpClient,
-          HttpClient.make(() =>
-            Deferred.succeed(requested, undefined).pipe(Effect.andThen(Effect.never)),
+          HttpClient.make((request) =>
+            Effect.succeed(
+              Object.defineProperties(HttpClientResponse.fromWeb(request, new Response(null)), {
+                json: { value: body },
+                stream: {
+                  value: Stream.fromEffect(body).pipe(
+                    Stream.map((value) => JSON.stringify(value) + "\n"),
+                    Stream.encodeText,
+                  ),
+                },
+              }),
+            ),
           ),
         ),
       );
@@ -248,52 +270,123 @@ describe("project workspace binding", () => {
           token: "private",
         });
         const pending = yield* service
-          .openAsset({
-            cwd: "/local/project",
-            relativePath: "index.html",
-            name: "space",
-            offset: 0,
-            size: 100,
-          })
-          .pipe(Effect.flip, Effect.forkScoped);
-        yield* Deferred.await(requested);
-        yield* TestClock.adjust("30 seconds");
-        expect((yield* Fiber.join(pending)).code).toBe("bootstrap");
+          .call("/local/project", "git", "createWorktree", [
+            { cwd: "/local/project", refName: "main" },
+            ...(progress ? [{ progress: { onWorktreeClaimed: () => Effect.void } }] : []),
+          ])
+          .pipe(Effect.forkScoped);
+        yield* Deferred.await(received);
+        yield* TestClock.adjust("6 minutes");
+        if (cancel) {
+          yield* Fiber.interrupt(pending);
+          expect(Exit.hasInterrupts(yield* Fiber.await(pending))).toBe(true);
+          yield* Deferred.await(interrupted);
+        } else {
+          yield* Deferred.succeed(finished, undefined);
+          expect(yield* Fiber.join(pending)).toEqual({
+            worktree: { path: "/local/project/tree" },
+          });
+        }
       }).pipe(Effect.provide(layer), Effect.scoped);
     }),
   );
-  it.effect("reserves shared projects and both targets until lifecycle cleanup", () =>
+
+  it.effect.each(["asset", "files", "git"] as const)(
+    "bounds %s requests when the worker never sends headers",
+    (kind) =>
+      Effect.gen(function* () {
+        const requested = yield* Deferred.make<void>();
+        const layer = fixture(
+          Layer.succeed(
+            HttpClient.HttpClient,
+            HttpClient.make(() =>
+              Deferred.succeed(requested, undefined).pipe(Effect.andThen(Effect.never)),
+            ),
+          ),
+        );
+        yield* Effect.gen(function* () {
+          const service = yield* Workspace.CodespacesWorkspace;
+          yield* service.bind({ projectId: "one", localRoot: "/local/project", name: "space" });
+          yield* service.register({
+            name: "space",
+            remoteRoot: "/workspaces/project",
+            workerUrl: "http://localhost:1",
+            execServerUrl: "ws://localhost:2",
+            token: "private",
+          });
+          const request =
+            kind === "asset"
+              ? service
+                  .openAsset({
+                    cwd: "/local/project",
+                    relativePath: "index.html",
+                    name: "space",
+                    offset: 0,
+                    size: 100,
+                  })
+                  .pipe(Effect.asVoid)
+              : service
+                  .call<string>(
+                    "/local/project",
+                    kind,
+                    kind === "git" ? "createWorktree" : "readFile",
+                    [{ cwd: "/local/project", relativePath: "index.html" }],
+                  )
+                  .pipe(Effect.asVoid);
+          const pending = yield* request.pipe(Effect.flip, Effect.forkScoped);
+          yield* Deferred.await(requested);
+          yield* TestClock.adjust(kind === "asset" ? "30 seconds" : "5 minutes");
+          expect(yield* Fiber.join(pending)).toMatchObject({ code: "bootstrap" });
+        }).pipe(Effect.provide(layer), Effect.scoped);
+      }),
+  );
+  it.effect("reserves one computer while host and other computer work continue", () =>
     Effect.gen(function* () {
       const service = yield* Workspace.CodespacesWorkspace;
-      yield* service.bind({ projectId: "one", localRoot: "/local/one", name: "shared" });
-      yield* service.bind({ projectId: "two", localRoot: "/local/two", name: "shared" });
+      yield* service.bind({
+        projectId: "one",
+        localRoot: "/local/one/.git/t3-codespaces/shared",
+        hostRoot: "/local/one",
+        name: "shared",
+        remoteRoot: "/workspaces/one",
+      });
+      yield* service.bind({
+        projectId: "one",
+        localRoot: "/local/one/.git/t3-codespaces/next",
+        hostRoot: "/local/one",
+        name: "next",
+        remoteRoot: "/workspaces/one",
+      });
+      yield* service.bind({
+        projectId: "two",
+        localRoot: "/local/two/.git/t3-codespaces/shared",
+        hostRoot: "/local/two",
+        name: "shared",
+        remoteRoot: "/workspaces/two",
+      });
+      expect(yield* service.lookup("/local/one")).toBeNull();
+      expect(yield* service.bindings).toHaveLength(3);
       const operationScope = yield* Scope.make();
       yield* service
-        .reserve({ id: "switch", projectId: "one", name: "next" })
+        .reserve({ id: "stop", name: "shared" })
         .pipe(Effect.provideService(Scope.Scope, operationScope));
       for (const projectId of ["one", "two"]) {
-        expect((yield* service.acquireWork(projectId).pipe(Effect.scoped, Effect.flip)).code).toBe(
-          "busy",
-        );
-        expect((yield* service.bind({ projectId, name: null }).pipe(Effect.flip)).code).toBe(
-          "busy",
-        );
+        expect(
+          (yield* service.acquireWork(projectId, "shared").pipe(Effect.scoped, Effect.flip)).code,
+        ).toBe("busy");
+        yield* service.acquireWork(projectId).pipe(Effect.scoped);
       }
+      yield* service.acquireWork("one", "next").pipe(Effect.scoped);
       expect(
         (yield* service
-          .bind({ projectId: "third", localRoot: "/local/three", name: "next" })
+          .bind({ projectId: "third", localRoot: "/local/three", name: "shared" })
           .pipe(Effect.flip)).code,
       ).toBe("busy");
-      expect(
-        (yield* service
-          .reserve({ id: "other", projectId: "one", name: "different" })
-          .pipe(Effect.scoped, Effect.flip)).code,
-      ).toBe("busy");
-      yield* service.bind({ projectId: "one", localRoot: "/local/one", name: "next" }, "switch");
       yield* Scope.close(operationScope, Exit.void);
-      yield* service.acquireWork("one").pipe(Effect.scoped);
-      yield* service.acquireWork("two").pipe(Effect.scoped);
-      yield* service.bind({ projectId: "one", name: null });
+      yield* service.acquireWork("one", "shared").pipe(Effect.scoped);
+      yield* service.disconnect("shared");
+      expect((yield* service.lookup("/local/one/.git/t3-codespaces/shared"))?.executor).toBeNull();
+      expect(yield* service.lookup("/local/one")).toBeNull();
     }).pipe(Effect.provide(fixture())),
   );
 

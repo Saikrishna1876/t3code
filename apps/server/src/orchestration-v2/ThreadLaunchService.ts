@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
@@ -78,6 +79,7 @@ export interface ThreadLaunchInitialMessage {
 }
 
 export interface ThreadLaunchInput {
+  readonly codespaceName?: string | null;
   readonly commandId: CommandId;
   readonly threadId?: ThreadId;
   readonly reuseExistingThread?: boolean;
@@ -107,7 +109,7 @@ export interface ThreadLaunchInput {
 
 type PreparationInput = Pick<
   ThreadLaunchInput,
-  "commandId" | "projectId" | "workspaceStrategy" | "initialMessage"
+  "commandId" | "projectId" | "workspaceStrategy" | "initialMessage" | "codespaceName"
 > & {
   readonly reusedWorktree?: { readonly baseRef: string };
 };
@@ -177,7 +179,7 @@ export class ThreadLaunchService extends Context.Service<
     >;
     /** Check before creation for early errors; launch otherwise accepts and reports base failures inside the thread. */
     readonly checkWorktreeBase: (
-      input: Pick<ThreadLaunchInput, "projectId" | "workspaceStrategy">,
+      input: Pick<ThreadLaunchInput, "projectId" | "workspaceStrategy" | "codespaceName">,
     ) => Effect.Effect<void, ThreadLaunchBaseRefError>;
     readonly retryPreparation: (
       input: ThreadLaunchPreparationInput,
@@ -244,6 +246,7 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError(mapError(input, "update-thread", threadId)));
     if (
       projection.thread.projectId !== input.projectId ||
+      (projection.thread.codespaceName ?? null) !== (input.codespaceName ?? null) ||
       projection.thread.archivedAt !== null ||
       projection.thread.deletedAt !== null ||
       (yield* threads
@@ -269,7 +272,7 @@ const make = Effect.gen(function* () {
     const unresolved = yield* Effect.gen(function* () {
       const project = Option.getOrUndefined(yield* projects.getById(input.projectId));
       if (project === undefined) return undefined;
-      const cwd = project.workspaceRoot;
+      const cwd = threadWorkspaceRoot(input, project.workspaceRoot);
       // `git worktree add` reads `-` as the previous checkout.
       if (yield* git.hasCommit({ cwd, refName: baseRef === "-" ? "@{-1}" : baseRef }))
         return undefined;
@@ -296,7 +299,7 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
     runId: RunId | null,
   ) {
-    const project = yield* projects.getById(input.projectId).pipe(
+    const hostProject = yield* projects.getById(input.projectId).pipe(
       Effect.mapError(mapError(input, "resolve-project", threadId)),
       Effect.flatMap(
         Option.match({
@@ -306,6 +309,11 @@ const make = Effect.gen(function* () {
         }),
       ),
     );
+
+    const project = {
+      ...hostProject,
+      workspaceRoot: threadWorkspaceRoot(input, hostProject.workspaceRoot),
+    };
 
     const reused = input.reusedWorktree;
     const tracked = input.workspaceStrategy.type === "worktree" || reused !== undefined;
@@ -913,6 +921,7 @@ const make = Effect.gen(function* () {
                 interactionMode: input.interactionMode,
                 branch: initialBranch,
                 worktreePath: initialWorktreePath,
+                codespaceName: input.codespaceName ?? null,
                 ...(input.importedNativeThread === undefined
                   ? {}
                   : { importedNativeThread: input.importedNativeThread }),
@@ -1033,7 +1042,11 @@ const make = Effect.gen(function* () {
                     );
               if (preparationStillRequired) {
                 yield* schedulePreparation(
-                  { ...input, workspaceStrategy: preparationStrategy },
+                  {
+                    ...input,
+                    codespaceName: projection.thread.codespaceName ?? null,
+                    workspaceStrategy: preparationStrategy,
+                  },
                   threadId,
                   runId,
                 );
@@ -1119,6 +1132,7 @@ const make = Effect.gen(function* () {
       {
         commandId: input.commandId,
         projectId: thread.projectId,
+        codespaceName: thread.codespaceName ?? null,
         workspaceStrategy: reuse?.strategy ?? workspacePreparation,
         ...(reuse === null ? {} : { reusedWorktree: reuse.reusedWorktree }),
         ...(message === undefined

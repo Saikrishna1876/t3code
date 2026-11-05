@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- integration test owns real temporary repositories and HTTP boundaries.
-import { afterEach, describe, expect, it } from "@effect/vitest";
+import { afterEach, describe, expect, it, vi } from "@effect/vitest";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeUtil from "node:util";
@@ -81,6 +81,63 @@ async function fixture() {
   return { local, remote, call, request, worker };
 }
 describe("Codespace workspace worker", () => {
+  it.each(["application/json", "application/x-ndjson"])(
+    "acknowledges Git and keeps quiet jobs alive with %s",
+    async (accept) => {
+      const test = await fixture();
+      const entered = Promise.withResolvers<void>();
+      const released = Promise.withResolvers<void>();
+      cleanups.push(async () => released.resolve());
+      const run = test.worker.runtime.runPromise;
+      using _run = vi
+        .spyOn(test.worker.runtime, "runPromise")
+        .mockImplementation(async (...args) => {
+          entered.resolve();
+          await released.promise;
+          return run(...args);
+        });
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      try {
+        const pending = test.request("/call", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer executor-token",
+            "content-type": "application/json",
+            accept,
+          },
+          body: JSON.stringify({
+            group: "git",
+            method: "execute",
+            args: [
+              { operation: "test", cwd: test.remote, args: ["rev-parse", "--is-inside-work-tree"] },
+            ],
+          }),
+        });
+        await entered.promise;
+        const response = await pending;
+        expect(response.status).toBe(200);
+        expect(response.headers.get("content-type")).toBe(accept);
+        const reader = response.body!.getReader();
+        const heartbeat = reader.read();
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(new TextDecoder().decode((await heartbeat).value)).toBe("\n");
+        released.resolve();
+        const decoder = new TextDecoder();
+        let body = "";
+        for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+          body += decoder.decode(chunk.value, { stream: true });
+        }
+        body += decoder.decode();
+        expect(JSON.parse(body.trim().split("\n").at(-1)!)).toMatchObject({
+          value: { stdout: "true\n" },
+        });
+      } finally {
+        released.resolve();
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("loads the deployed bundle with only its provisioned native search dependency", async () => {
     const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-worker-bundle-"));
     cleanups.push(() => NodeFSP.rm(root, { recursive: true, force: true }));
@@ -694,6 +751,149 @@ describe("Codespace workspace worker", () => {
       "baseline\n",
     );
   });
+  it.effect(
+    "creates, edits, checkpoints and removes remote worktrees without host directories",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* Effect.promise(fixture);
+        const layer = CodespacesWorkspace.layer.pipe(
+          Layer.provide(
+            Layer.mock(ServerSecretStore.ServerSecretStore)({
+              get: () => Effect.succeedNone,
+              set: () => Effect.void,
+            }),
+          ),
+          Layer.provide(FetchHttpClient.layer),
+          Layer.provide(NodeServices.layer),
+        );
+        yield* Effect.gen(function* () {
+          const workspace = yield* CodespacesWorkspace.CodespacesWorkspace;
+          const exists = yield* CodespacesWorkspace.makeWorkspacePathExists;
+          yield* workspace.bind({ projectId: "worktree", localRoot: test.local, name: "space" });
+          const executor = {
+            name: "space",
+            remoteRoot: test.remote,
+            workerUrl: `http://127.0.0.1:${test.worker.port}`,
+            execServerUrl: "ws://localhost:1",
+            token: "executor-token",
+          };
+          yield* workspace.register(executor);
+          const invalid = yield* workspace
+            .call(test.local, "git", "createWorktree", [
+              {
+                cwd: test.local,
+                refName: "HEAD",
+                newRefName: "feature/invalid",
+                path: NodePath.join(test.local, "tracked-worktree"),
+              },
+            ])
+            .pipe(Effect.result);
+          expect(invalid._tag).toBe("Failure");
+          let claimedPath: string | null = null;
+          const created = yield* workspace.call<{ worktree: { path: string } }>(
+            test.local,
+            "git",
+            "createWorktree",
+            [
+              { cwd: test.local, refName: "HEAD", newRefName: "feature/remote", path: null },
+              {
+                worktreesDirectory: NodePath.join(test.local, "host-worktrees"),
+                progress: {
+                  onWorktreeClaimed: (path: string) =>
+                    Effect.sync(() => {
+                      claimedPath = path;
+                    }),
+                },
+              },
+            ],
+          );
+          const worktree = created.worktree.path;
+          expect(claimedPath).toBe(worktree);
+          let output = "";
+          yield* workspace.call(worktree, "git", "execute", [
+            {
+              operation: "test",
+              cwd: worktree,
+              args: ["log", "-1", "--format=%s"],
+              progress: {
+                onStdoutLine: (line: string) =>
+                  Effect.sync(() => {
+                    output += line;
+                  }),
+              },
+            },
+          ]);
+          expect(output).toBe("initial");
+          expect(
+            worktree.startsWith(NodePath.join(test.local, ".git", "t3-worktrees") + NodePath.sep),
+          ).toBe(true);
+          expect(yield* exists(worktree, true)).toBe(true);
+          yield* Effect.promise(async () => {
+            await expect(NodeFSP.stat(worktree)).rejects.toThrow();
+            await expect(
+              NodeFSP.stat(NodePath.join(test.local, "host-worktrees")),
+            ).rejects.toThrow();
+          });
+          yield* workspace.call(worktree, "files", "writeFile", [
+            { cwd: worktree, relativePath: "AGENTS.md", contents: "Use worktree conventions.\n" },
+          ]);
+          expect(
+            yield* workspace.call(worktree, "files", "readRepositoryInstructions", [
+              { cwd: worktree, fileName: "AGENTS.md" },
+            ]),
+          ).toBe("Use worktree conventions.");
+          yield* Effect.promise(() =>
+            NodeFSP.rm(
+              CodespacesWorkspace.mapWorkspacePath(worktree, test.local, test.remote) +
+                "/AGENTS.md",
+            ),
+          );
+          const baseline = "refs/t3/orchestration-v2/checkpoints/worktree/baseline";
+          yield* workspace.call(worktree, "checkpoints", "captureCheckpoint", [
+            { cwd: worktree, checkpointRef: baseline },
+          ]);
+          yield* workspace.call(worktree, "files", "writeFile", [
+            { cwd: worktree, relativePath: "proof.txt", contents: "worktree only\n" },
+          ]);
+          expect(
+            yield* workspace.call(worktree, "files", "readFile", [
+              { cwd: worktree, relativePath: "proof.txt" },
+            ]),
+          ).toMatchObject({ contents: "worktree only\n" });
+          yield* Effect.promise(async () => {
+            for (const cwd of [test.local, test.remote])
+              expect(await NodeFSP.readFile(NodePath.join(cwd, "proof.txt"), "utf8")).toBe(
+                "baseline\n",
+              );
+          });
+          yield* workspace.disconnect("space");
+          expect((yield* Effect.result(exists(worktree)))._tag).toBe("Failure");
+          yield* workspace.register(executor);
+          expect(yield* exists(worktree)).toBe(true);
+          yield* workspace.call(worktree, "checkpoints", "restoreCheckpoint", [
+            { cwd: worktree, checkpointRef: baseline },
+          ]);
+          expect(
+            yield* workspace.call(worktree, "files", "readFile", [
+              { cwd: worktree, relativePath: "proof.txt" },
+            ]),
+          ).toMatchObject({ contents: "baseline\n" });
+          yield* workspace.call(test.local, "git", "removeWorktree", [
+            { cwd: test.local, path: worktree, force: true },
+          ]);
+          expect(yield* exists(worktree)).toBe(false);
+          const recreated = yield* workspace.call<{ worktree: { path: string } }>(
+            test.local,
+            "git",
+            "createWorktree",
+            [{ cwd: test.local, refName: "feature/remote", path: worktree }],
+          );
+          expect(recreated.worktree.path).toBe(worktree);
+          expect(yield* exists(worktree)).toBe(true);
+        }).pipe(Effect.provide(Layer.mergeAll(layer, NodeServices.layer)));
+      }),
+  );
+
   it("lists and reads remote workspace files", async () => {
     const test = await fixture();
     await NodeFSP.writeFile(NodePath.join(test.remote, "only-remote.txt"), "hello remote");

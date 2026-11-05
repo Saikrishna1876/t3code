@@ -70,6 +70,7 @@ export interface DeleteProjectInput extends CommandMetadata {
 }
 
 export interface CreateThreadInput extends CommandMetadata {
+  readonly codespaceName?: string | null;
   readonly threadId: ThreadId;
   readonly projectId: ProjectId;
   readonly title: string;
@@ -148,6 +149,7 @@ export interface SetThreadInteractionModeInput extends ThreadCommandInput {
 interface StartThreadBootstrap {
   readonly createThread?: {
     readonly projectId: ProjectId;
+    readonly codespaceName?: string | null;
     readonly title: string;
     readonly modelSelection: ModelSelection;
     readonly runtimeMode: RuntimeMode;
@@ -409,6 +411,7 @@ export const createThread = Effect.fn("EnvironmentCommands.createThread")(functi
     interactionMode: input.interactionMode,
     branch: input.branch,
     worktreePath: input.worktreePath,
+    codespaceName: input.codespaceName ?? null,
   });
 });
 
@@ -715,6 +718,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       threadId: input.threadId,
       ...(bootstrap === undefined ? { reuseExistingThread: true } : {}),
       projectId: thread.projectId,
+      codespaceName: thread.codespaceName ?? null,
       title: input.titleSeed ?? thread.title,
       generateTitle: input.titleSeed !== undefined,
       modelSelection: input.modelSelection ?? thread.modelSelection,

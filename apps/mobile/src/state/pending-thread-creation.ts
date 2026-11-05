@@ -144,6 +144,7 @@ export function pendingThreadCreationShell(
   return presentThreadShell(message.environmentId, {
     id: message.threadId,
     projectId: creation.projectId,
+    codespaceName: creation.codespaceName ?? null,
     title: deriveThreadTitleFromPrompt(message.text),
     providerInstanceId: message.modelSelection.instanceId,
     modelSelection: message.modelSelection,

@@ -1,6 +1,6 @@
+import { codespaceWorkspaceRoot } from "@t3tools/contracts";
 import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
-import * as TerminalManager from "../terminal/Manager.ts";
 import * as FileSystem from "effect/FileSystem";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -45,6 +45,7 @@ export class Codespaces extends Context.Service<
       cancel: boolean;
     }) => Effect.Effect<import("@t3tools/contracts").CodespacesAuthorization, CodespacesError>;
     readonly project: (input: {
+      name?: string | null;
       projectId: ProjectId;
     }) => Effect.Effect<CodespacesProject, CodespacesError>;
     readonly bind: (input: {
@@ -202,26 +203,10 @@ const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const workspaces = yield* CodespacesWorkspace.CodespacesWorkspace;
   const fs = yield* FileSystem.FileSystem;
-  const terminals = Option.getOrUndefined(
-    yield* Effect.serviceOption(TerminalManager.TerminalManager),
-  );
-  const closeProjectTerminals = Effect.fn("Codespaces.closeProjectTerminals")(function* (
-    projectId: ProjectId,
-  ) {
-    if (!terminals) return;
-    const snapshot = yield* projections
-      .getShellSnapshot()
-      .pipe(Effect.mapError(() => error("storage", "Could not inspect project terminals.")));
-    for (const thread of snapshot.threads)
-      if (thread.projectId === projectId)
-        yield* terminals
-          .close({ threadId: thread.id })
-          .pipe(
-            Effect.mapError(() =>
-              error("conflict", "Close project terminals before switching its execution target."),
-            ),
-          );
-  });
+  const preparedProjects = new Map<
+    string,
+    { credentialFingerprint: string; binding: CodespacesWorkspace.WorkspaceBinding }
+  >();
   const exists = (path: string) =>
     fs
       .exists(path)
@@ -241,13 +226,14 @@ const make = Effect.gen(function* () {
         }),
       ),
     );
-  const assertIdle = (projectId: ProjectId) =>
+  const assertIdle = (projectId: ProjectId, name?: string) =>
     projections.getShellSnapshot().pipe(
       Effect.mapError(() => error("storage", "Could not inspect project work.")),
       Effect.flatMap((snapshot) =>
         snapshot.threads.some(
           (thread) =>
             thread.projectId === projectId &&
+            (name === undefined || thread.codespaceName === name) &&
             (["running", "waiting"].includes(thread.status) ||
               ["running", "preparing", "starting", "waiting"].includes(
                 thread.activityRunStatus ?? "",
@@ -257,13 +243,16 @@ const make = Effect.gen(function* () {
           ? Effect.fail(
               error(
                 "conflict",
-                "Stop active turns in this project before switching or stopping its Codespace.",
+                "Stop active turns on this Codespace before changing its lifecycle.",
               ),
             )
           : Effect.void,
       ),
     );
-  const project = Effect.fn("Codespaces.project")(function* (input: { projectId: ProjectId }) {
+  const project = Effect.fn("Codespaces.project")(function* (input: {
+    projectId: ProjectId;
+    name?: string | null;
+  }) {
     const root = yield* projectRoot(input.projectId);
     const folder = root + "/.devcontainer";
     const paths: string[] = [];
@@ -296,7 +285,9 @@ const make = Effect.gen(function* () {
       [
         git(["remote", "get-url", "origin"]),
         git(["symbolic-ref", "--short", "HEAD"]),
-        workspaces.lookup(root),
+        input.name
+          ? workspaces.lookup(codespaceWorkspaceRoot(root, input.name))
+          : Effect.succeed(null),
         git(["rev-parse", "--verify", "HEAD"]),
       ],
       { concurrency: 3 },
@@ -311,9 +302,11 @@ const make = Effect.gen(function* () {
       repository,
       ref,
       devcontainerPaths: paths,
-      name: target?.name ?? null,
+      name: input.name ?? target?.name ?? null,
       connected: target?.executor !== null && target?.executor !== undefined,
       workspacePath: target?.remoteRoot ?? null,
+      workspaceRoot:
+        target?.localRoot ?? (input.name ? codespaceWorkspaceRoot(root, input.name) : root),
       setupWarning: target?.setupWarning ?? null,
       setupWarningDismissed: target
         ? ((yield* SubscriptionRef.get(state)).setupWarningDismissals?.[input.projectId] ??
@@ -346,14 +339,23 @@ const make = Effect.gen(function* () {
       }));
       return yield* project(input);
     }
-    const reservationId = `bind:${input.projectId}`;
-    yield* workspaces.reserve({
-      id: reservationId,
-      projectId: input.projectId,
-      ...(input.name ? { name: input.name } : {}),
-    });
-    yield* assertIdle(input.projectId);
-    yield* projectRoot(input.projectId);
+    if (input.name === null) return yield* project(input);
+    const localRoot = yield* projectRoot(input.projectId);
+    const prepared = preparedProjects.get(`${input.projectId}\0${input.name}`);
+    const credential = yield* pinned(GitHubRequestPolicy.PinnedGitHubCredential);
+    const connected = (yield* SubscriptionRef.get(state)).environments.some(
+      (entry) => entry.name === input.name && entry.connected,
+    );
+    if (
+      connected &&
+      prepared &&
+      prepared.credentialFingerprint === credential?.credentialFingerprint &&
+      prepared.binding.hostRoot === localRoot
+    ) {
+      return yield* project(input);
+    }
+    const reservationId = `bind:${input.projectId}:${input.name}`;
+    yield* workspaces.reserve({ id: reservationId, projectId: input.projectId, name: input.name });
     const saveBinding = (binding: Parameters<typeof workspaces.bind>[0]) =>
       mutex.withPermits(1)(
         workspaces.bind(binding, reservationId).pipe(
@@ -366,27 +368,18 @@ const make = Effect.gen(function* () {
           Effect.uninterruptible,
         ),
       );
-    if (input.name === null) {
-      yield* closeProjectTerminals(input.projectId);
-      yield* saveBinding({ projectId: input.projectId, name: null });
-    } else {
-      const inventory = yield* pinned(list);
-      if (!inventory.codespaces.some((space) => space.name === input.name))
-        return yield* error("configuration", "Codespace no longer exists in this GitHub account.");
-      const environment = (yield* SubscriptionRef.get(state)).environments.find(
-        (entry) =>
-          entry.name === input.name && entry.account === inventory.account && entry.connected,
-      );
-      if (!environment)
-        return yield* error(
-          "conflict",
-          "Start and connect this Codespace before adding a project.",
-        );
-      const binding = yield* prepareProject(input.projectId, input.name);
-      yield* closeProjectTerminals(input.projectId);
-      yield* saveBinding(binding);
-    }
-    return yield* project(input);
+    const inventory = yield* pinned(list);
+    if (!inventory.codespaces.some((space) => space.name === input.name))
+      return yield* error("configuration", "Codespace no longer exists in this GitHub account.");
+    const environment = (yield* SubscriptionRef.get(state)).environments.find(
+      (entry) =>
+        entry.name === input.name && entry.account === inventory.account && entry.connected,
+    );
+    if (!environment)
+      return yield* error("conflict", "Start and connect this Codespace before adding a project.");
+    const binding = yield* pinned(prepareProject(input.projectId, input.name));
+    yield* saveBinding(binding);
+    return yield* project({ projectId: input.projectId, name: input.name });
   }, Effect.scoped);
   const api = yield* GitHubRest.GitHubRest;
   const credentials = yield* GitHubCredentials.GitHubCredentials;
@@ -617,7 +610,17 @@ const make = Effect.gen(function* () {
     projectId: ProjectId,
     name: string,
   ) {
-    const localRoot = yield* projectRoot(projectId);
+    const hostRoot = yield* projectRoot(projectId);
+    const localRoot = codespaceWorkspaceRoot(hostRoot, name);
+    const credential = yield* GitHubRequestPolicy.PinnedGitHubCredential;
+    const remember = (binding: CodespacesWorkspace.WorkspaceBinding) => {
+      if (credential)
+        preparedProjects.set(`${projectId}\0${name}`, {
+          credentialFingerprint: credential.credentialFingerprint,
+          binding,
+        });
+      return binding;
+    };
     const existing = (yield* workspaces.bindings).find(
       (binding) => binding.projectId === projectId && binding.name === name && binding.remoteRoot,
     );
@@ -631,24 +634,24 @@ const make = Effect.gen(function* () {
             error("bootstrap", "Could not check the remote project folder. Reconnect and retry."),
           ),
         );
-      if (metadata?.kind === "directory") return { ...existing, localRoot };
+      if (metadata?.kind === "directory") return remember({ ...existing, localRoot, hostRoot });
     }
     const info = yield* project({ projectId });
     if (!info.eligible) return yield* error("configuration", info.reason);
     const folder =
-      (localRoot.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) ?? "project")
+      (hostRoot.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) ?? "project")
         .replace(/[^a-zA-Z0-9._-]/g, "-")
         .replace(/^[^a-zA-Z0-9]+/, "")
         .slice(0, 100) || "project";
     const prepared = yield* host.prepareProject({
       name,
       projectId,
-      localRoot,
+      localRoot: hostRoot,
       folder,
       ref: info.ref,
       ...(info.devcontainerPaths[0] ? { devcontainerPath: info.devcontainerPaths[0] } : {}),
     });
-    return { projectId, localRoot, name, ...prepared };
+    return remember({ projectId, localRoot, hostRoot, name, ...prepared });
   });
   const perform = Effect.fn("Codespaces.perform")(function* (
     input: CodespacesRunInput,
@@ -656,7 +659,9 @@ const make = Effect.gen(function* () {
     configuration: CodespacesConfiguration,
   ) {
     let name = input.action === "create" ? "" : input.name;
-    if (input.projectId) yield* assertIdle(input.projectId);
+    for (const [key, prepared] of preparedProjects)
+      if (prepared.binding.name === name) preparedProjects.delete(key);
+    if (input.projectId) yield* assertIdle(input.projectId, name);
     if (input.action === "create") {
       yield* stage(input.clientRequestId, "creating", "Creating a Codespace in GitHub.");
       const repository = yield* rest(`repos/${CODESPACES_BLANK_REPOSITORY}`).pipe(
@@ -679,7 +684,7 @@ const make = Effect.gen(function* () {
       name = result.name;
       yield* stage(input.clientRequestId, "starting", "Waiting for the Codespace to start.", name);
       const affected = yield* workspaces.reserve({ id: input.clientRequestId, name, extend: true });
-      for (const projectId of affected) yield* assertIdle(ProjectId.make(projectId));
+      for (const projectId of affected) yield* assertIdle(ProjectId.make(projectId), name);
     }
     let space = yield* get(name);
     const previous = (yield* SubscriptionRef.get(state)).environments.find(
@@ -715,14 +720,6 @@ const make = Effect.gen(function* () {
           input.action === "delete" ? "DELETE" : "POST",
         );
       yield* host.disconnect(name);
-      if (input.action === "delete") {
-        for (const binding of yield* workspaces.bindings)
-          if (binding.name === name)
-            yield* workspaces.bind(
-              { projectId: binding.projectId, name: null },
-              input.clientRequestId,
-            );
-      }
       yield* update((value) => ({
         ...value,
         environments:
@@ -796,9 +793,8 @@ const make = Effect.gen(function* () {
       ],
     }));
     if (input.projectId) {
-      yield* assertIdle(input.projectId);
+      yield* assertIdle(input.projectId, name);
       const binding = yield* prepareProject(input.projectId, name);
-      yield* closeProjectTerminals(input.projectId);
       yield* workspaces.bind(binding, input.clientRequestId);
     }
   });
@@ -843,13 +839,17 @@ const make = Effect.gen(function* () {
       return previous;
     }
     if (input.projectId && ["create", "start", "connect", "rebuild"].includes(input.action)) {
-      const info = yield* project({ projectId: input.projectId });
+      const info = yield* project({
+        projectId: input.projectId,
+        ...("name" in input ? { name: input.name } : {}),
+      });
       if (!info.eligible && !info.name) return yield* error("configuration", info.reason);
-      yield* assertIdle(input.projectId);
+      if ("name" in input) yield* assertIdle(input.projectId, input.name);
     }
     if ("name" in input) {
       for (const binding of yield* workspaces.bindings)
-        if (binding.name === input.name) yield* assertIdle(ProjectId.make(binding.projectId));
+        if (binding.name === input.name)
+          yield* assertIdle(ProjectId.make(binding.projectId), input.name);
     }
     return yield* Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
@@ -902,7 +902,8 @@ const make = Effect.gen(function* () {
                 ...("name" in input ? { name: input.name } : {}),
               });
               // Reserve first so provider starts cannot pass the idle check during GitHub waits.
-              for (const projectId of affected) yield* assertIdle(ProjectId.make(projectId));
+              for (const projectId of affected)
+                if ("name" in input) yield* assertIdle(ProjectId.make(projectId), input.name);
               yield* persist({
                 ...current,
                 requests: { ...current.requests, [input.clientRequestId]: requestKey },

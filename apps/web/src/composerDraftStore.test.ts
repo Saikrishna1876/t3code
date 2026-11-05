@@ -1151,6 +1151,7 @@ describe("composerDraftStore project draft thread mapping", () => {
       threadId,
       branch: "main",
       worktreePath: "/tmp/main-worktree",
+      codespaceName: "cloud-computer",
     });
     const runtimeUndefinedOptions = {
       branch: undefined,
@@ -1166,7 +1167,37 @@ describe("composerDraftStore project draft thread mapping", () => {
       projectId,
       branch: "main",
       worktreePath: "/tmp/main-worktree",
+      codespaceName: "cloud-computer",
       envMode: "worktree",
+    });
+  });
+
+  it("clears workspace context only for the draft whose execution location changes", () => {
+    const store = useComposerDraftStore.getState();
+    const otherDraft = DraftId.make("other-computer-draft");
+    store.setProjectDraftThreadId(projectRef, draftId, {
+      threadId,
+      branch: "host-branch",
+      worktreePath: "/tmp/host-worktree",
+    });
+    store.setPrompt(draftId, "Host task");
+    store.setProjectDraftThreadId(projectRef, otherDraft, {
+      threadId: ThreadId.make("other-computer-thread"),
+      codespaceName: "other-computer",
+      branch: "cloud-branch",
+      worktreePath: "/tmp/cloud-worktree",
+    });
+    store.setDraftThreadContext(draftId, { codespaceName: "computer" });
+    store.setDraftThreadContext(otherDraft, { codespaceName: "other-computer" });
+    expect(store.getDraftThread(draftId)).toMatchObject({
+      codespaceName: "computer",
+      branch: null,
+      worktreePath: null,
+    });
+    expect(store.getDraftThread(otherDraft)).toMatchObject({
+      codespaceName: "other-computer",
+      branch: "cloud-branch",
+      worktreePath: "/tmp/cloud-worktree",
     });
   });
 
@@ -1175,6 +1206,7 @@ describe("composerDraftStore project draft thread mapping", () => {
     store.setProjectDraftThreadId(projectRef, draftId, {
       threadId,
       branch: "feature/local-only",
+      codespaceName: "cloud-computer",
       worktreePath: "/tmp/local-worktree",
       envMode: "worktree",
       startFromOrigin: true,
@@ -1188,6 +1220,7 @@ describe("composerDraftStore project draft thread mapping", () => {
       environmentId: OTHER_TEST_ENVIRONMENT_ID,
       projectId,
       branch: null,
+      codespaceName: null,
       worktreePath: null,
       envMode: "worktree",
       startFromOrigin: true,

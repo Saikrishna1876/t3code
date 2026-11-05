@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import { CodespacesError, type ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -75,7 +76,9 @@ export const layer = Layer.effect(
           ),
         );
         if (Option.isNone(project)) return input;
-        const target = yield* workspaces.lookup(project.value.workspaceRoot);
+        const target = yield* workspaces.lookup(
+          threadWorkspaceRoot(thread, project.value.workspaceRoot),
+        );
         if (!target) return input;
         if (!target.executor?.forwardPort)
           return yield* new CodespacesError({

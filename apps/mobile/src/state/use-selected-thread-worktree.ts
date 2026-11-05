@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 
@@ -18,7 +19,11 @@ export function useSelectedThreadWorktree() {
 
   return {
     selectedThreadWorktreePath,
-    selectedThreadCwd: selectedThreadWorktreePath ?? selectedThreadProject?.workspaceRoot ?? null,
+    selectedThreadCwd:
+      selectedThreadWorktreePath ??
+      (selectedThreadProject
+        ? threadWorkspaceRoot(selectedThread ?? {}, selectedThreadProject.workspaceRoot)
+        : null),
   };
 }
 
@@ -42,8 +47,6 @@ export function useThreadCwd(ref: ScopedThreadRef | null): string | null {
     resolvePreferredThreadWorktreePath({
       threadShellWorktreePath: shell?.worktreePath ?? null,
       threadDetailWorktreePath: detailWorktreePath,
-    }) ??
-    project?.workspaceRoot ??
-    null
+    }) ?? (project ? threadWorkspaceRoot(shell ?? detailThread ?? {}, project.workspaceRoot) : null)
   );
 }

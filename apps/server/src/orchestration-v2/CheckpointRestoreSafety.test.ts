@@ -1,6 +1,8 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
+  CodespacesError,
   CheckpointId,
   CheckpointScopeId,
   ProjectId,
@@ -34,6 +36,9 @@ it.effect.each([
   "sibling",
   "shared-provider",
   "conversation",
+  "offline-codespace",
+  "different-codespace",
+  "same-codespace",
 ] as const)("preserves overlapping workspace files, owner=%s", (owner) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -68,7 +73,7 @@ it.effect.each([
       worktreePath:
         owner === "ancestor" || owner === "conversation"
           ? parent
-          : owner === "nested"
+          : ["nested", "offline-codespace", "different-codespace", "same-codespace"].includes(owner)
             ? nested
             : sibling,
     };
@@ -91,10 +96,30 @@ it.effect.each([
       scope: { id: scopeId, cwd },
       runsToRollback: [{ id: "later-run", ordinal: 1, status: "completed", rootNodeId: null }],
     } as unknown as ProjectionCheckpointRollbackContext;
+    const workspaceLayer = Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+      lookup: (target) =>
+        Effect.succeed(
+          owner === "offline-codespace" && target === nested
+            ? ({ name: "offline" } as never)
+            : owner === "different-codespace" || owner === "same-codespace"
+              ? ({
+                  name:
+                    target === nested && owner === "different-codespace" ? "offline" : "current",
+                } as never)
+              : null,
+        ),
+      call: (target) =>
+        target === nested && owner !== "same-codespace"
+          ? (Effect.fail(
+              new CodespacesError({ code: "conflict", message: "Codespace is disconnected" }),
+            ) as never)
+          : (Effect.succeed({ path: target }) as never),
+    });
     const layerTest = CheckpointRollbackService.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
           NodeServices.layer,
+          workspaceLayer,
           Layer.mock(ServerConfig.ServerConfig)({ worktreesDir: "/synthetic-worktrees" } as never),
           ServerSettings.layerTest(),
           ThreadCommandExecutor.layer,
@@ -166,16 +191,24 @@ it.effect.each([
       Effect.provide(layerTest),
     );
     const restoreFiles = owner !== "conversation";
-    const rejected = !["sibling", "shared-provider", "conversation"].includes(owner);
+    const rejected = ![
+      "sibling",
+      "shared-provider",
+      "conversation",
+      "offline-codespace",
+      "different-codespace",
+    ].includes(owner);
     if (rejected) {
       const error = yield* service
         .execute({ threadId, providerThreadId, checkpointId, scopeId, restoreFiles })
-        .pipe(Effect.flip);
+        .pipe(Effect.flip, Effect.provide(workspaceLayer));
       assert.equal(error.reason, "shared-workspace");
       assert.deepEqual(calls, []);
       assert.equal(yield* fs.readFileString(otherFile), "other thread's uncommitted work");
     } else {
-      yield* service.execute({ threadId, providerThreadId, checkpointId, scopeId, restoreFiles });
+      yield* service
+        .execute({ threadId, providerThreadId, checkpointId, scopeId, restoreFiles })
+        .pipe(Effect.provide(workspaceLayer));
       assert.deepEqual(calls, restoreFiles ? ["provider", "files"] : ["provider"]);
       assert.equal(yield* fs.exists(otherFile), !restoreFiles);
     }
@@ -207,16 +240,24 @@ it.effect("lets rollback recreate a worktree storage cleanup removed", () =>
 it.effect.each([
   { sideChat: "answering questions", running: false, toolItems: 0, isolated: true },
   { sideChat: "running", running: true, toolItems: 0, isolated: false },
+  {
+    sideChat: "running in a Codespace",
+    running: true,
+    toolItems: 0,
+    isolated: false,
+    remote: true,
+  },
   { sideChat: "after running tools", running: false, toolItems: 1, isolated: false },
 ] as const)(
   "a side chat $sideChat shares the parent's worktree: $isolated",
-  ({ running, toolItems, isolated }) =>
+  ({ running, toolItems, isolated, remote = false }) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const worktreePath = yield* fileSystem.makeTempDirectoryScoped({
+      const parent = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-v2-restore-side-chat-",
       });
+      const worktreePath = remote ? path.join(parent, "remote-worktree") : parent;
       const parentId = ThreadId.make("restore-side-chat-parent");
       const sideChat = {
         id: ThreadId.make("restore-side-chat"),
@@ -248,6 +289,14 @@ it.effect.each([
           } as never,
           projects: {} as never,
         },
+      ).pipe(
+        Effect.provide(
+          Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+            lookup: () => Effect.succeed(remote ? ({} as never) : null),
+            call: (cwd) =>
+              Effect.succeed({ path: cwd, type: "Directory", modifiedAt: null }) as never,
+          }),
+        ),
       );
       assert.equal(result, isolated);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

@@ -47,6 +47,7 @@ import {
   latestProviderVersionCacheKeys,
 } from "@t3tools/provider-core/server/maintenanceResolver";
 import type { ProviderSnapshotSource } from "./builtInProviderCatalog.ts";
+import { makeHostWorkspaceCwd } from "../codespaces/CodespacesWorkspace.ts";
 
 export type ProviderMaintenanceActionKind = "update";
 
@@ -338,6 +339,7 @@ export const layer = Layer.effect(
   ProviderRegistry,
   Effect.gen(function* () {
     const instanceRegistry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
+    const hostWorkspaceCwd = yield* makeHostWorkspaceCwd;
     const instanceRegistryMutator =
       yield* ProviderInstanceRegistryMutator.ProviderInstanceRegistryMutator;
     const manifestService = yield* ModelManifest.ModelManifest;
@@ -959,7 +961,8 @@ export const layer = Layer.effect(
           )
         : Effect.void;
       const runScan = refreshMachineSnapshot.pipe(
-        Effect.andThen(instance.snapshotForCwd(input.cwd)),
+        Effect.andThen(hostWorkspaceCwd(input.cwd)),
+        Effect.flatMap(instance.snapshotForCwd),
         // Scans fail on error; returned inventory remains valid even when provider health reports an error.
         Effect.flatMap((scopedSnapshot) =>
           instanceRegistry.getInstance(input.instanceId).pipe(

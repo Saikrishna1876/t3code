@@ -34,6 +34,7 @@ export const claudeWorkspaceExecution = Effect.fn("claudeWorkspaceExecution")(fu
     ? ["Read", "Glob", "Grep"]
     : ["Read", "Glob", "Grep", "Write", "Edit", "Bash"];
   return {
+    cwd: target.hostRoot ?? target.localRoot,
     mcpServers: {
       "t3-workspace": {
         type: "http",
@@ -70,6 +71,12 @@ export const claudeWorkspaceExecution = Effect.fn("claudeWorkspaceExecution")(fu
     instructions: `\nWorkspace execution is in GitHub Codespace ${target.name}, rooted at ${target.remoteCwd}. Use t3-workspace MCP tools for workspace operations. Local project files are not the active workspace. Read the remote CLAUDE.md and AGENTS.md instructions before working. Native local workspace tools, the native Skill tool and subagents are unavailable for this target. Read all skills and their references from the host through T3 host_skills_list and host_skills_read; never read laptop skill paths through the remote shell. ${readOnly ? "This workspace is read-only. Use Read, Glob and Grep. Shell commands and file edits are unavailable." : "Use Bash for commands, including searches that need extra options. Background shell commands are unsupported; use the project terminal for persistent servers."}`,
   } satisfies Pick<
     Options,
-    "mcpServers" | "tools" | "disallowedTools" | "toolAliases" | "allowedTools" | "settingSources"
+    | "cwd"
+    | "mcpServers"
+    | "tools"
+    | "disallowedTools"
+    | "toolAliases"
+    | "allowedTools"
+    | "settingSources"
   > & { instructions: string };
 });

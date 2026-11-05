@@ -1,3 +1,4 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it, vi } from "vite-plus/test";
 import { it as effectIt } from "@effect/vitest";
@@ -78,6 +79,7 @@ function startWithMissingWorktree(
     [managedWorktreesDir]: managedWorktreesDir,
     [`${managedWorktreesDir}/project`]: `${managedWorktreesDir}/project`,
   },
+  remote = false,
 ) {
   const threadId = ThreadId.make("thread_provider_turn_start_projection_failure");
   const runId = RunId.make("run_provider_turn_start_projection_failure");
@@ -150,6 +152,21 @@ function startWithMissingWorktree(
                 ),
         } as never),
         layerWorktreeLocation(),
+        ...(remote
+          ? [
+              Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+                lookup: () =>
+                  Effect.succeed({
+                    projectId: "project",
+                    localRoot: "/remote-project",
+                    name: "space",
+                    executor: null,
+                    remoteCwd: null,
+                  }),
+                call: () => Effect.succeed(null as never),
+              }),
+            ]
+          : []),
         Layer.mock(GitWorkflow.GitWorkflowService)({
           pruneWorktrees,
           createWorktree,
@@ -259,8 +276,24 @@ it.each([
     recreated: false,
   },
   { label: "a relative path", worktreePath: "project/feature-restore", recreated: false },
+  {
+    label: "a remote managed worktree",
+    worktreePath: "/remote-project/.git/t3-worktrees/project/feature",
+    recreated: true,
+    remote: true,
+  },
+  {
+    label: "an arbitrary remote path",
+    worktreePath: "/remote-project/other/feature",
+    recreated: false,
+    remote: true,
+  },
 ])("recreates a missing worktree only at the managed location: $label", async (input) => {
-  const harness = startWithMissingWorktree(input.worktreePath, input.realPaths);
+  const harness = startWithMissingWorktree(
+    input.worktreePath,
+    input.realPaths,
+    "remote" in input && input.remote,
+  );
   await harness.start;
   expect(harness.createWorktree).toHaveBeenCalledTimes(input.recreated ? 1 : 0);
 });

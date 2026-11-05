@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import {
   type EnvironmentId,
   type ModelSelection,
@@ -113,6 +114,9 @@ export function useMultipleModelSend(input: MultipleModelSendInput) {
     /** False once a newer send from this composer started. */
     readonly isCurrentSend: () => boolean;
   }) => {
+    const executionTarget = useComposerDraftStore
+      .getState()
+      .getDraftThread(composerDraftTarget) ?? { codespaceName: null };
     const { attachments: attachmentsSnapshot, messageText } = sendSnapshot;
     const failedSelections: ModelSelection[] = [];
     let clearedDraft = false;
@@ -178,6 +182,7 @@ export function useMultipleModelSend(input: MultipleModelSendInput) {
                   bootstrap: {
                     createThread: {
                       projectId: project.id,
+                      codespaceName: executionTarget.codespaceName ?? null,
                       title,
                       modelSelection: target.selection,
                       runtimeMode,
@@ -187,7 +192,7 @@ export function useMultipleModelSend(input: MultipleModelSendInput) {
                       createdAt: createdAt,
                     },
                     prepareWorktree: {
-                      projectCwd: project.workspaceRoot,
+                      projectCwd: threadWorkspaceRoot(executionTarget, project.workspaceRoot),
                       baseBranch: branch,
                       requireWorktree: true,
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),

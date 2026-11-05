@@ -16,6 +16,7 @@ import { openPullRequestThreadDialog } from "./ChatOverlayHosts";
 interface PullRequestDraftThreadInput {
   readonly routeKind: "server" | "draft";
   readonly draftId: DraftId | null;
+  readonly codespaceName: string | null;
   readonly settings: UnifiedSettings;
   readonly projectGroupingSettings: ReturnType<typeof selectProjectGroupingSettings>;
   readonly activeProject: EnvironmentProject | null;
@@ -31,6 +32,7 @@ interface PullRequestDraftThreadInput {
 export function usePullRequestDraftThread(input: PullRequestDraftThreadInput) {
   const {
     routeKind,
+    codespaceName,
     draftId,
     settings,
     projectGroupingSettings,
@@ -61,6 +63,7 @@ export function usePullRequestDraftThread(input: PullRequestDraftThreadInput) {
   const openOrReuseProjectDraftThread = async (input: {
     branch: string;
     worktreePath: string | null;
+    codespaceName: string | null;
     envMode: DraftThreadEnvMode;
   }) => {
     if (!activeProject) {
@@ -129,6 +132,7 @@ export function usePullRequestDraftThread(input: PullRequestDraftThreadInput) {
     await openOrReuseProjectDraftThread({
       branch: input.branch,
       worktreePath: input.worktreePath,
+      codespaceName,
       envMode: input.worktreePath ? "worktree" : "local",
     });
   };

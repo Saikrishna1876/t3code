@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import { Button } from "./ui/button";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
@@ -344,7 +345,6 @@ import {
   resolveComposerProviderSelection,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
-  resolveCodespaceDraftWorkspace,
   startNewThreadForProject,
   codexArtifactTemplatePromptToAppend,
   shouldRefocusComposerOnWindowFocus,
@@ -1223,6 +1223,7 @@ export default function ChatView(props: ChatViewProps) {
 
   const { handlePreparedPullRequestThreadStable, openPullRequestDialogStable } =
     usePullRequestDraftThread({
+      codespaceName: activeThread?.codespaceName ?? null,
       routeKind,
       draftId,
       settings,
@@ -1236,13 +1237,19 @@ export default function ChatView(props: ChatViewProps) {
     ? (activeEnvironment?.serverConfig ?? null)
     : (primaryEnvironment?.serverConfig ?? null);
   const codespace = useEnvironmentQuery(
-    activeProject && serverConfig?.environment.capabilities.codespaces
-      ? codespacesEnvironment.project({ environmentId, input: { projectId: activeProject.id } })
+    activeProject &&
+      activeThread?.codespaceName &&
+      serverConfig?.environment.capabilities.codespaces
+      ? codespacesEnvironment.project({
+          environmentId,
+          input: { projectId: activeProject.id, name: activeThread?.codespaceName ?? null },
+        })
       : null,
   );
-  const codespaceBound = Boolean(codespace.data?.name);
   const workspaceLocationBlockReason = codespacesProjectSendBlockReason(
-    activeProject ? serverConfig?.environment.capabilities : { codespaces: false },
+    activeProject && activeThread?.codespaceName
+      ? serverConfig?.environment.capabilities
+      : { codespaces: false },
     codespace,
   );
   const providerEnvironmentId = (activeThread ? activeEnvironment : primaryEnvironment)
@@ -1283,15 +1290,7 @@ export default function ChatView(props: ChatViewProps) {
     activeThread.worktreePath === null &&
     !envLocked,
   );
-  const activeWorktreePath = resolveCodespaceDraftWorkspace({
-    codespaceBound,
-    isUnstarted: isLocalDraftThread || canOverrideServerThreadEnvMode,
-    envMode: draftThread?.envMode ?? "local",
-    branch: activeThread?.branch ?? null,
-    worktreePath: activeThread?.worktreePath ?? null,
-    startFromOrigin: false,
-    currentCheckoutBranch: null,
-  }).worktreePath;
+  const activeWorktreePath = activeThread?.worktreePath ?? null;
   // onEnvironmentChange only retargets an unsent draft. envLocked alone does not
   // rule out a started thread: one whose machine is offline never loads its
   // messages, so it would otherwise be offered a machine picker that does nothing.
@@ -1686,7 +1685,7 @@ export default function ChatView(props: ChatViewProps) {
 
   const gitCwd = activeProject
     ? projectScriptCwd({
-        project: { cwd: activeProject.workspaceRoot },
+        project: { cwd: threadWorkspaceRoot(activeThread ?? {}, activeProject.workspaceRoot) },
         worktreePath: activeWorktreePath,
       })
     : null;
@@ -1776,7 +1775,10 @@ export default function ChatView(props: ChatViewProps) {
     ? activeProviderStatus
     : null;
   const hasTimelineTopBanner = Boolean(timelineThreadError) || visibleProviderStatus !== null;
-  const activeProjectCwd = activeProject?.workspaceRoot ?? null;
+  const activeProjectCwd =
+    activeProject && activeThread
+      ? threadWorkspaceRoot(activeThread, activeProject.workspaceRoot)
+      : null;
   const activeThreadWorktreePath = activeWorktreePath;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
   const activeTerminalLaunchContext =
@@ -2290,15 +2292,12 @@ export default function ChatView(props: ChatViewProps) {
       ? (pendingServerThreadStartFromOriginByThreadId[activeThread?.id ?? ""] ??
         activeProjectSettings.settings.newWorktreesStartFromOrigin)
       : false;
-  const sendWorkspace = resolveCodespaceDraftWorkspace({
-    codespaceBound,
-    isUnstarted: isLocalDraftThread || canOverrideServerThreadEnvMode,
+  const sendWorkspace = {
     envMode,
     branch: activeThreadBranch,
     worktreePath: activeWorktreePath,
     startFromOrigin,
-    currentCheckoutBranch: gitStatusQuery.data?.refName ?? null,
-  });
+  };
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: sendWorkspace.envMode,
     isGitRepo,
@@ -2992,7 +2991,6 @@ export default function ChatView(props: ChatViewProps) {
     runtimeMode,
     sendEnvMode,
     sendWorktreePath: sendWorkspace.worktreePath,
-    codespaceBound,
     workspaceLocationBlockReason,
     startFromOrigin: sendWorkspace.startFromOrigin,
     localCheckoutBranchMismatch,
@@ -3991,7 +3989,7 @@ export default function ChatView(props: ChatViewProps) {
                   threadKey={activeThreadKey}
                   environmentId={activeThread.environmentId}
                   threadId={activeThread.id}
-                  cwd={activeProject?.workspaceRoot ?? null}
+                  cwd={activeProjectCwd}
                   onPrepared={handlePreparedPullRequestThreadStable}
                 />
               </>

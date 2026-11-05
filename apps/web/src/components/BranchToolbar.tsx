@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { CodespacesMenuItems } from "./ProjectCodespacesControl";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
@@ -31,7 +32,7 @@ import { flushSync } from "react-dom";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
-import { useProject, useThreadShellsForProjectRefs } from "../state/entities";
+import { useProject, useThreadShell, useThreadShellsForProjectRefs } from "../state/entities";
 import {
   ADD_TO_MACHINE_LABEL_CLASS,
   type EnvMode,
@@ -153,18 +154,21 @@ function showWorkspaceContextMenu(event: ReactMouseEvent, workspacePath: string)
 
 interface RunContextSelectorProps {
   displayMode?: "toolbar" | "panel";
-  workspaceRoot?: string;
+  workspaceRoot?: string | undefined;
   forceNewWorktree: boolean;
   autoEnvironmentLabel?: string | undefined;
   onAutoEnvironment?: (() => void) | undefined;
   envLocked: boolean;
   envModeLocked: boolean;
+  locationLocked: boolean;
   environmentId: EnvironmentId;
   availableEnvironments: readonly EnvironmentOption[] | undefined;
   showEnvironmentPicker: boolean;
   showEnvironmentIndicator: boolean;
   codespacesProjectId?: ProjectId | undefined;
   codespaceLabel?: string | undefined;
+  codespaceName?: string | null | undefined;
+  onCodespaceChange?: ((name: string | null) => void) | undefined;
   onEnvironmentChange: ((environmentId: EnvironmentId) => void) | undefined;
   effectiveEnvMode: EnvMode;
   activeWorktreePath: string | null;
@@ -184,12 +188,15 @@ const RunContextSelector = memo(function RunContextSelector({
   onAutoEnvironment,
   envLocked,
   envModeLocked,
+  locationLocked,
   environmentId,
   availableEnvironments,
   showEnvironmentPicker,
   showEnvironmentIndicator,
   codespacesProjectId,
   codespaceLabel,
+  codespaceName,
+  onCodespaceChange,
   onEnvironmentChange,
   effectiveEnvMode,
   activeWorktreePath,
@@ -217,8 +224,7 @@ const RunContextSelector = memo(function RunContextSelector({
         ? resolveEnvModeLabel("worktree")
         : resolveCurrentWorkspaceLabel(activeWorktreePath);
   const isPanel = displayMode === "panel";
-  const isLocked =
-    !codespacesProjectId && (envLocked || (envModeLocked && (!isPanel || !showEnvironmentPicker)));
+  const isLocked = envLocked || (envModeLocked && (!isPanel || !showEnvironmentPicker));
   const workspacePath =
     forceNewWorktree || (effectiveEnvMode === "worktree" && !activeWorktreePath)
       ? null
@@ -344,22 +350,27 @@ const RunContextSelector = memo(function RunContextSelector({
         {...(!isPanel ? composerFloatingLayerProps : {})}
       >
         {availableEnvironments &&
-        ((showEnvironmentPicker && onEnvironmentChange) || addTargets.length > 0) ? (
+        ((showEnvironmentPicker && (onEnvironmentChange || onCodespaceChange)) ||
+          addTargets.length > 0) ? (
           <>
             <MenuGroup>
               <MenuGroupLabel>Run on</MenuGroupLabel>
               <MenuRadioGroup
-                value={autoEnvironmentLabel ? "auto" : environmentId}
-                onValueChange={(value) =>
-                  value === "auto"
-                    ? onAutoEnvironment?.()
-                    : onEnvironmentChange?.(value as EnvironmentId)
-                }
+                value={codespaceName ? "" : autoEnvironmentLabel ? "auto" : environmentId}
+                onValueChange={(value) => {
+                  if (value === "auto") {
+                    onAutoEnvironment?.();
+                  } else if (value === environmentId) {
+                    onCodespaceChange?.(null);
+                  } else {
+                    onEnvironmentChange?.(value as EnvironmentId);
+                  }
+                }}
               >
                 {onAutoEnvironment && (
                   <MenuRadioItem
                     value="auto"
-                    disabled={envLocked}
+                    disabled={locationLocked}
                     closeOnClick
                     onClick={() => {
                       if (autoEnvironmentLabel) onAutoEnvironment?.();
@@ -377,7 +388,8 @@ const RunContextSelector = memo(function RunContextSelector({
                   <MenuRadioItem
                     key={env.environmentId}
                     disabled={
-                      envLocked || (!onEnvironmentChange && env.environmentId !== environmentId)
+                      locationLocked ||
+                      (!onEnvironmentChange && env.environmentId !== environmentId)
                     }
                     value={env.environmentId}
                     closeOnClick
@@ -417,7 +429,13 @@ const RunContextSelector = memo(function RunContextSelector({
           </>
         ) : null}
         {codespacesProjectId ? (
-          <CodespacesMenuItems environmentId={environmentId} projectId={codespacesProjectId} />
+          <CodespacesMenuItems
+            environmentId={environmentId}
+            projectId={codespacesProjectId}
+            codespaceName={codespaceName}
+            onCodespaceChange={onCodespaceChange}
+            locked={locationLocked}
+          />
         ) : null}
         <MenuGroup>
           <MenuGroupLabel>Workspace</MenuGroupLabel>
@@ -649,6 +667,18 @@ export const BranchToolbar = memo(function BranchToolbar({
 }: BranchToolbarProps) {
   const branchSelectorRef = useRef<BranchToolbarBranchSelectorHandle>(null);
   const threadRef = scopeThreadRef(environmentId, threadId);
+  const serverThread = useThreadShell(isServerThread ? threadRef : null);
+  const draftThread = useComposerDraftStore((store) => store.getDraftThread(draftId ?? threadRef));
+  const codespaceName =
+    (isServerThread ? serverThread?.codespaceName : draftThread?.codespaceName) ?? null;
+  const onCodespaceChange = (name: string | null) => {
+    if (isServerThread) return;
+    setDraftThreadContext(draftId ?? threadRef, {
+      codespaceName: name,
+      environmentSelection: "manual",
+      loadBalancedEnvironmentId: null,
+    });
+  };
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   // The composer retains resolved thread details while bootstrap cleanup can remove its shell.
   const activeProjectRef = scopeProjectRef(environmentId, projectId);
@@ -656,38 +686,49 @@ export const BranchToolbar = memo(function BranchToolbar({
   const environment = useEnvironment(environmentId);
   const canRunCodespaces = useAtomValue(codespacesEnvironment.run.permissionAtom(environmentId));
   const codespace = useEnvironmentQuery(
-    activeProjectRef && environment?.serverConfig?.environment.capabilities.codespaces
+    activeProjectRef &&
+      codespaceName &&
+      environment?.serverConfig?.environment.capabilities.codespaces
       ? codespacesEnvironment.project({
           environmentId,
-          input: { projectId: activeProjectRef.projectId },
+          input: { projectId: activeProjectRef.projectId, name: codespaceName },
         })
       : null,
   );
-  const codespaceBound = Boolean(codespace.data?.name);
+  const codespacesInventory = useEnvironmentQuery(
+    codespaceName && environment?.serverConfig?.environment.capabilities.codespaces
+      ? codespacesEnvironment.list({ environmentId, input: {} })
+      : null,
+  );
   const canManageCodespaces = Boolean(
     canRunCodespaces &&
     activeProjectRef &&
     environment?.serverConfig?.environment.capabilities.codespaces,
   );
-  const codespaceLabel = codespace.data?.name
-    ? codespace.data.connected
-      ? codespace.data.name
-      : `${codespace.data.name} unavailable`
+  const computerName =
+    codespacesInventory.data?.codespaces.find((entry) => entry.name === codespaceName)
+      ?.displayName || codespaceName;
+  const codespaceLabel = computerName
+    ? codespace.data?.connected
+      ? computerName
+      : `${computerName} unavailable`
+    : undefined;
+  const workspaceRoot = activeProject
+    ? threadWorkspaceRoot({ codespaceName }, activeProject.workspaceRoot)
     : undefined;
 
-  const codespaceDraft =
-    codespaceBound && (!isServerThread || (worktreePath === null && !envLocked));
-  const activeWorktreePath = forceNewWorktree || codespaceDraft ? null : worktreePath;
-  const effectiveEnvMode = codespaceDraft ? "local" : forceNewWorktree ? "worktree" : envMode;
-  const envModeLocked =
-    codespaceBound || envLocked || (isServerThread && activeWorktreePath !== null);
+  const activeWorktreePath = forceNewWorktree ? null : worktreePath;
+  const effectiveEnvMode = forceNewWorktree ? "worktree" : envMode;
+  const envModeLocked = envLocked || (isServerThread && activeWorktreePath !== null);
 
   const canUsePreviousWorktree = !isServerThread && !envModeLocked && !forceNewWorktree;
   const projectRefsForWorktreeLookup = canUsePreviousWorktree ? [activeProjectRef] : [];
   const projectThreads = useThreadShellsForProjectRefs(projectRefsForWorktreeLookup);
   const previousWorktreeSeed = canUsePreviousWorktree
     ? resolvePreviousWorktreeSeed({
-        threads: projectThreads,
+        threads: projectThreads.filter(
+          (thread) => (thread.codespaceName ?? null) === codespaceName,
+        ),
         currentWorktreePath: activeWorktreePath,
       })
     : null;
@@ -728,7 +769,8 @@ export const BranchToolbar = memo(function BranchToolbar({
     openAddProjectToMachine({ projectRef: activeProjectRef, targetEnvironmentId });
   // A project on one machine still gets the picker when it can be added to another.
   const hasMultipleEnvironments = (availableEnvironments?.length ?? 0) > 1 || addTargets.length > 0;
-  const showEnvironmentPicker = hasMultipleEnvironments && onEnvironmentChange !== undefined;
+  const showEnvironmentPicker =
+    canManageCodespaces || (hasMultipleEnvironments && onEnvironmentChange !== undefined);
   const activeEnvironmentOption =
     availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null;
   const showEnvironmentIndicator =
@@ -747,16 +789,19 @@ export const BranchToolbar = memo(function BranchToolbar({
         {panelSection !== "branch" ? (
           <RunContextSelector
             displayMode="panel"
-            workspaceRoot={activeProject.workspaceRoot}
+            workspaceRoot={workspaceRoot}
             forceNewWorktree={forceNewWorktree}
             autoEnvironmentLabel={autoEnvironmentLabel}
             onAutoEnvironment={onAutoEnvironment}
             envLocked={envLocked}
             envModeLocked={envModeLocked}
+            locationLocked={envLocked || isServerThread}
             environmentId={environmentId}
             availableEnvironments={availableEnvironments}
             codespacesProjectId={canManageCodespaces ? projectId : undefined}
             codespaceLabel={codespaceLabel}
+            codespaceName={codespaceName}
+            onCodespaceChange={onCodespaceChange}
             showEnvironmentPicker={showEnvironmentPicker}
             showEnvironmentIndicator={activeEnvironmentOption !== null}
             onEnvironmentChange={onEnvironmentChange}
@@ -800,14 +845,17 @@ export const BranchToolbar = memo(function BranchToolbar({
       {showGitControls ? (
         <div className="contents @xl/composer-surface:hidden">
           <RunContextSelector
-            workspaceRoot={activeProject.workspaceRoot}
+            workspaceRoot={workspaceRoot}
             codespacesProjectId={canManageCodespaces ? projectId : undefined}
             codespaceLabel={codespaceLabel}
+            codespaceName={codespaceName}
+            onCodespaceChange={onCodespaceChange}
             forceNewWorktree={forceNewWorktree}
             autoEnvironmentLabel={autoEnvironmentLabel}
             onAutoEnvironment={onAutoEnvironment}
             envLocked={envLocked}
             envModeLocked={envModeLocked}
+            locationLocked={envLocked || isServerThread}
             environmentId={environmentId}
             availableEnvironments={availableEnvironments}
             showEnvironmentPicker={showEnvironmentPicker}
@@ -837,9 +885,11 @@ export const BranchToolbar = memo(function BranchToolbar({
               <BranchToolbarEnvironmentSelector
                 codespacesProjectId={canManageCodespaces ? projectId : undefined}
                 codespaceLabel={codespaceLabel}
+                codespaceName={codespaceName}
+                onCodespaceChange={onCodespaceChange}
                 autoEnvironmentLabel={autoEnvironmentLabel}
                 onAutoEnvironment={onAutoEnvironment}
-                envLocked={envLocked}
+                envLocked={envLocked || isServerThread}
                 environmentId={environmentId}
                 availableEnvironments={availableEnvironments}
                 {...(showEnvironmentPicker ? { onEnvironmentChange } : {})}

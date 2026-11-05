@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import type {
   OrchestrationV2TurnItemStatus,
   OrchestrationV2ThreadShell,
@@ -52,11 +53,11 @@ export function resolveSubagentMetadata(input: {
   readonly model: string | null;
   readonly provider?: Pick<ServerProvider, "driver" | "models"> | null | undefined;
   readonly parentThread?:
-    | Pick<OrchestrationV2ThreadShell, "projectId" | "worktreePath">
+    | Pick<OrchestrationV2ThreadShell, "projectId" | "worktreePath" | "codespaceName">
     | null
     | undefined;
   readonly childThread?:
-    | Pick<OrchestrationV2ThreadShell, "branch" | "worktreePath">
+    | Pick<OrchestrationV2ThreadShell, "branch" | "worktreePath" | "codespaceName">
     | null
     | undefined;
   readonly parentProject?: Pick<OrchestrationProjectShell, "workspaceRoot"> | null | undefined;
@@ -87,8 +88,16 @@ export function resolveSubagentMetadata(input: {
         )
         .trim() || reportedLabel
     : reportedLabel;
-  const parentWorkspace = input.parentThread?.worktreePath ?? input.parentProject?.workspaceRoot;
-  const childWorkspace = input.childThread?.worktreePath ?? input.childProject?.workspaceRoot;
+  const parentWorkspace =
+    input.parentThread?.worktreePath ??
+    (input.parentProject
+      ? threadWorkspaceRoot(input.parentThread ?? {}, input.parentProject.workspaceRoot)
+      : undefined);
+  const childWorkspace =
+    input.childThread?.worktreePath ??
+    (input.childProject
+      ? threadWorkspaceRoot(input.childThread ?? {}, input.childProject.workspaceRoot)
+      : undefined);
   const workspace = [
     ...(input.parentThread &&
     input.childProject &&

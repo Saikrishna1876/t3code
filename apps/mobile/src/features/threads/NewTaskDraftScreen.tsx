@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import { CodespacesSetupWarning } from "../connection/CodespacesSettings";
 import { useEnvironmentQuery } from "../../state/query";
 import { codespacesEnvironment } from "../../state/codespaces";
@@ -201,11 +202,20 @@ export function NewTaskDraftScreen(props: {
     ),
   );
   const codespace = useEnvironmentQuery(
-    selectedProject && selectedEnvironmentServerConfig?.environment.capabilities.codespaces
+    selectedProject &&
+      flow.codespaceName &&
+      selectedEnvironmentServerConfig?.environment.capabilities.codespaces
       ? codespacesEnvironment.project({
           environmentId: selectedProject.environmentId,
-          input: { projectId: selectedProject.id },
+          input: { projectId: selectedProject.id, name: flow.codespaceName },
         })
+      : null,
+  );
+  const codespacesInventory = useEnvironmentQuery(
+    selectedProject &&
+      flow.codespaceName &&
+      selectedEnvironmentServerConfig?.environment.capabilities.codespaces
+      ? codespacesEnvironment.list({ environmentId: selectedProject.environmentId, input: {} })
       : null,
   );
   const canPickEnvironment =
@@ -385,8 +395,12 @@ export function NewTaskDraftScreen(props: {
   useHardwareKeyboardCommand(cycleEnvironmentCommands, cycleEnvironment);
   const composerWorkspaceCwd =
     (flow.workspaceMode === "worktree"
-      ? selectedProject?.workspaceRoot
-      : (flow.selectedWorktreePath ?? selectedProject?.workspaceRoot)) || null;
+      ? selectedProject
+        ? threadWorkspaceRoot(flow, selectedProject.workspaceRoot)
+        : null
+      : (flow.selectedWorktreePath ??
+        (selectedProject ? threadWorkspaceRoot(flow, selectedProject.workspaceRoot) : null))) ||
+    null;
   const preventRemove =
     (isIncomingShareHoldingRoute && !isProjectPickerReturnActive) || flow.submitting;
   usePreventRemove(preventRemove, () => undefined);
@@ -740,10 +754,13 @@ export function NewTaskDraftScreen(props: {
     navigation.navigate(routeName);
   };
 
-  const executionLocation = codespace.data?.name
-    ? codespace.data.connected
-      ? codespace.data.name
-      : `${codespace.data.name} unavailable`
+  const computerName =
+    codespacesInventory.data?.codespaces.find((entry) => entry.name === flow.codespaceName)
+      ?.displayName || flow.codespaceName;
+  const executionLocation = computerName
+    ? codespace.data?.connected
+      ? computerName
+      : `${computerName} unavailable`
     : selectedEnvironmentLabel;
   const environmentControl = (
     <DraftEnvironmentControl
@@ -914,6 +931,7 @@ export function NewTaskDraftScreen(props: {
     );
   }
   const thread = draftThreadShell({
+    codespaceName: flow.codespaceName,
     environmentId: selectedProject.environmentId,
     projectId: selectedProject.id,
     threadId: ThreadId.make(creationMetadata.threadId),
@@ -1023,7 +1041,7 @@ export function NewTaskDraftScreen(props: {
         isSavingQueuedEdit={false}
         onCancelQueuedRunEdit={() => {}}
         onRemoveQueuedEditAttachment={() => {}}
-        projectWorkspaceRoot={selectedProject.workspaceRoot}
+        projectWorkspaceRoot={threadWorkspaceRoot(flow, selectedProject.workspaceRoot)}
         threadCwd={composerWorkspaceCwd}
         selectedThreadQueueCount={0}
         queuedMessages={[]}

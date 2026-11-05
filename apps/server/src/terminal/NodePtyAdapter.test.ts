@@ -1,3 +1,10 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
+import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
+import * as Redacted from "effect/Redacted";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import * as Stream from "effect/Stream";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as NodeEvents from "node:events";
 import * as NodeNet from "node:net";
 
@@ -42,7 +49,7 @@ function makeNativeProcess(pid = 42) {
   };
 }
 
-const spawn = vi.fn(() => makeNativeProcess());
+const spawn = vi.fn((..._args: Parameters<typeof import("node-pty").spawn>) => makeNativeProcess());
 
 function preparePendingProcess() {
   const nativeProcess = makeNativeProcess(0);
@@ -196,4 +203,109 @@ it.effect("replays an exit to late subscribers and respects unsubscription", () 
     assert.deepEqual(late.mock.calls, [[{ exitCode: 7, signal: 2 }]]);
     assert.equal(nativeProcess.events.listenerCount("exit"), 0);
   }).pipe(Effect.provide(layerTest)),
+);
+
+it.live("starts a remote worktree terminal from an existing host directory", () =>
+  Effect.gen(function* () {
+    const adapter = yield* PtyAdapter.PtyAdapter;
+    const process = yield* adapter.spawn({
+      ...spawnInput,
+      cwd: "/host/project/.git/t3-codespaces/space/.git/t3-worktrees/project/feature",
+      env: {
+        T3CODE_PROJECT_ROOT: "/host/project/.git/t3-codespaces/space",
+        T3CODE_WORKTREE_PATH:
+          "/host/project/.git/t3-codespaces/space/.git/t3-worktrees/project/feature",
+        HOST_ONLY_SECRET: "must-stay-local",
+      },
+    });
+    const call = spawn.mock.calls.at(-1)!;
+    assert.equal(call[0], "gh");
+    assert.equal(call[2]?.cwd, "/host/project");
+    process.kill();
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-terminal-startup-" });
+    const checkout = path.join(root, "checkout");
+    const home = path.join(root, "home");
+    yield* fs.makeDirectory(checkout);
+    yield* fs.makeDirectory(home);
+    const startup = `cd '${home}'\n`;
+    yield* fs.writeFileString(
+      path.join(home, ".bash_profile"),
+      startup + "export T3_LOGIN_PROFILE=loaded\n",
+    );
+    yield* fs.writeFileString(path.join(home, ".bashrc"), startup);
+    const command = String(call[1]?.at(-1)).replaceAll(
+      "/workspaces/project/.git/t3-worktrees/project/feature",
+      checkout,
+    );
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const child = yield* spawner.spawn(
+      ChildProcess.make("sh", ["-c", command], {
+        env: { ...globalThis.process.env, HOME: home },
+        stdin: {
+          stream: Stream.encodeText(
+            Stream.make(
+              'printf "T3_CWD=%s\\nT3_ROOT=%s\\nT3_WORKTREE=%s\\nT3_SECRET=%s\\nT3_PROFILE=%s\\n" "$PWD" "$T3CODE_PROJECT_ROOT" "$T3CODE_WORKTREE_PATH" "$HOST_ONLY_SECRET" "$T3_LOGIN_PROFILE"\nexit\n',
+            ),
+          ),
+        },
+      }),
+    );
+    const [output, exitCode] = yield* Effect.all(
+      [
+        child.stdout.pipe(
+          Stream.decodeText(),
+          Stream.runFold(
+            () => "",
+            (text, chunk) => text + chunk,
+          ),
+        ),
+        child.exitCode,
+      ],
+      { concurrency: "unbounded" },
+    );
+    assert.equal(exitCode, 0);
+    assert.include(output, `T3_CWD=${checkout}`);
+    assert.include(output, "T3_ROOT=/workspaces/project");
+    assert.include(output, `T3_WORKTREE=${checkout}`);
+    assert.include(output, "T3_SECRET=\n");
+    assert.include(output, "T3_PROFILE=loaded\n");
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        NodeServices.layer,
+        layerTestFor("darwin").pipe(
+          Layer.provide(
+            Layer.mock(GitHubCredentials.GitHubCredentials)({
+              get: () =>
+                Effect.succeed({
+                  host: "github.com",
+                  token: Redacted.make("fixture"),
+                  source: "gh",
+                  fingerprint: "fixture",
+                }),
+            }),
+          ),
+        ),
+        Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+          lookup: () =>
+            Effect.succeed({
+              projectId: "project",
+              name: "space",
+              hostRoot: "/host/project",
+              localRoot: "/host/project/.git/t3-codespaces/space",
+              remoteCwd: "/workspaces/project/.git/t3-worktrees/project/feature",
+              executor: {
+                name: "space",
+                remoteRoot: "/workspaces/project",
+                workerUrl: "http://localhost:1",
+                execServerUrl: "ws://localhost:2",
+                token: "fixture",
+              },
+            }),
+        }),
+      ),
+    ),
+  ),
 );

@@ -1,3 +1,5 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import type { OrchestrationV2AppThread, OrchestrationV2CheckpointScope } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import type * as FileSystem from "effect/FileSystem";
@@ -22,6 +24,26 @@ export const isCheckpointRestoreIsolated = Effect.fn("orchestrationV2.isCheckpoi
     },
   ) {
     const { fileSystem, projections, projects, path } = dependencies;
+    const workspace = Option.getOrUndefined(
+      yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+    );
+    const canonical = Effect.fn("orchestrationV2.restoreWorkspacePath")(function* (target: string) {
+      if (workspace && (yield* workspace.lookup(target))) {
+        const metadata = yield* workspace.call<{ path: string } | null>(
+          target,
+          "worktrees",
+          "metadata",
+          [target],
+        );
+        return metadata?.path ?? null;
+      }
+      return yield* fileSystem.realPath(target).pipe(
+        Effect.catchIf(
+          (error) => error.reason._tag === "NotFound",
+          () => Effect.succeed(null),
+        ),
+      );
+    });
     const contains = (parent: string, child: string) => {
       const relative = path.relative(parent, child);
       return (
@@ -34,12 +56,8 @@ export const isCheckpointRestoreIsolated = Effect.fn("orchestrationV2.isCheckpoi
     if (!shared && worktreePath !== null) {
       // Storage cleanup may have removed the worktree; rollback recreates it.
       const resolve = (target: string) =>
-        fileSystem.realPath(target).pipe(
-          Effect.catchIf(
-            (error) => error.reason._tag === "NotFound",
-            (_error) => Effect.succeed(path.resolve(target)),
-          ),
-        );
+        canonical(target).pipe(Effect.map((value) => value ?? path.resolve(target)));
+      const restoreTarget = workspace ? yield* workspace.lookup(scope.cwd) : null;
       const cwd = yield* resolve(scope.cwd);
       const worktreeCwd = yield* resolve(worktreePath);
       shared = cwd !== worktreeCwd;
@@ -81,17 +99,14 @@ export const isCheckpointRestoreIsolated = Effect.fn("orchestrationV2.isCheckpoi
           if (otherThread.worktreePath === null) {
             const project = yield* projects.get(otherThread.projectId, { includeDeleted: true });
             if (Option.isNone(project)) return false;
-            paths.push(project.value.workspaceRoot);
+            paths.push(threadWorkspaceRoot(otherThread, project.value.workspaceRoot));
           }
           for (const candidate of paths) {
             if (checkedPaths.has(candidate)) continue;
             checkedPaths.add(candidate);
-            const otherCwd = yield* fileSystem.realPath(candidate).pipe(
-              Effect.catchIf(
-                (error) => error.reason._tag === "NotFound",
-                (_error) => Effect.succeed(null),
-              ),
-            );
+            const candidateTarget = workspace ? yield* workspace.lookup(candidate) : null;
+            if (candidateTarget?.name !== restoreTarget?.name) continue;
+            const otherCwd = yield* canonical(candidate);
             if (otherCwd !== null && (contains(cwd, otherCwd) || contains(otherCwd, cwd))) {
               shared = true;
               break;

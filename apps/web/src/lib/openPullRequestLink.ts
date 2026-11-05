@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
@@ -161,7 +162,9 @@ export function useOpenChangeRequestLink(
       void readDiffPreview({
         environmentId: resolvedThreadRef.environmentId,
         input: {
-          cwd: commitThread.worktreePath ?? commitProject.workspaceRoot,
+          cwd:
+            commitThread.worktreePath ??
+            threadWorkspaceRoot(commitThread, commitProject.workspaceRoot),
           ...(baseRef ? { baseRef } : {}),
           commitSha: commit.sha,
           ignoreWhitespace,

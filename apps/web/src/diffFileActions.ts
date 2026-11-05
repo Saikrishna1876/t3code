@@ -1,8 +1,33 @@
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import { threadWorkspaceRoot, type ScopedThreadRef } from "@t3tools/contracts";
 import { isWindowsAbsolutePath, normalizeProjectPathForComparison } from "@t3tools/shared/path";
 
 import { useRightPanelStore } from "./rightPanelStore";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
+
+export function resolveDiffWorkspace(
+  thread:
+    | {
+        readonly codespaceName?: string | null | undefined;
+        readonly worktreePath?: string | null | undefined;
+      }
+    | undefined,
+  project:
+    | {
+        readonly workspaceRoot: string;
+        readonly repositoryIdentity?: { readonly rootPath?: string } | null | undefined;
+      }
+    | undefined,
+) {
+  return {
+    activeCwd:
+      thread?.worktreePath ??
+      (project ? threadWorkspaceRoot(thread ?? {}, project.workspaceRoot) : undefined),
+    repositoryRoot:
+      thread?.worktreePath || thread?.codespaceName
+        ? undefined
+        : project?.repositoryIdentity?.rootPath,
+  };
+}
 
 interface OpenDiffFilePrimaryActionInput {
   readonly threadRef: ScopedThreadRef | null;

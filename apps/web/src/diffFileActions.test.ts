@@ -2,7 +2,11 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { openDiffFilePrimaryAction, resolveDiffPathForWorkspace } from "./diffFileActions";
+import {
+  openDiffFilePrimaryAction,
+  resolveDiffPathForWorkspace,
+  resolveDiffWorkspace,
+} from "./diffFileActions";
 import { selectThreadRightPanelState, useRightPanelStore } from "./rightPanelStore";
 
 const THREAD_REF = scopeThreadRef(
@@ -15,25 +19,36 @@ describe("openDiffFilePrimaryAction", () => {
     useRightPanelStore.setState({ byThreadKey: {}, threadPanelVisibilityByThreadKey: {} });
   });
 
-  it("opens repository-relative diff files from a nested project", () => {
-    const openInEditor = vi.fn();
+  it.each([
+    { codespaceName: null, filePath: "frontend/Dockerfile" },
+    { codespaceName: "space", filePath: "Dockerfile" },
+  ])(
+    "opens diff files in the selected workspace: $codespaceName",
+    ({ codespaceName, filePath }) => {
+      const openInEditor = vi.fn();
 
-    openDiffFilePrimaryAction({
-      threadRef: THREAD_REF,
-      filePath: "frontend/Dockerfile",
-      activeCwd: "/repo/frontend",
-      repositoryRoot: "/repo",
-      openInEditor,
-    });
+      openDiffFilePrimaryAction({
+        threadRef: THREAD_REF,
+        filePath,
+        ...resolveDiffWorkspace(
+          { codespaceName },
+          {
+            workspaceRoot: "/repo/frontend",
+            repositoryIdentity: { rootPath: "/repo" },
+          },
+        ),
+        openInEditor,
+      });
 
-    expect(
-      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
-    ).toMatchObject({
-      isOpen: true,
-      activeSurfaceId: "file:Dockerfile",
-    });
-    expect(openInEditor).not.toHaveBeenCalled();
-  });
+      expect(
+        selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+      ).toMatchObject({
+        isOpen: true,
+        activeSurfaceId: "file:Dockerfile",
+      });
+      expect(openInEditor).not.toHaveBeenCalled();
+    },
+  );
 
   it("preserves repository-relative paths in a separate worktree", () => {
     expect(

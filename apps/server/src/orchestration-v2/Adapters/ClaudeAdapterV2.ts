@@ -10312,6 +10312,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           const queryOptions = workspaceExecution
             ? {
                 ...baseQueryOptions,
+                cwd: workspaceExecution.cwd,
                 tools: workspaceExecution.tools,
                 disallowedTools: workspaceExecution.disallowedTools,
                 toolAliases: workspaceExecution.toolAliases,

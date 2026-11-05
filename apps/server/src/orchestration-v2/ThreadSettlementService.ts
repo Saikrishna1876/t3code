@@ -1,3 +1,5 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
+import { makeWorkspacePathExists } from "../codespaces/CodespacesWorkspace.ts";
 import {
   backgroundWorkHoldsCompletion,
   turnItemUpdateCanEndBackgroundWork,
@@ -18,7 +20,6 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FiberSet from "effect/FiberSet";
-import * as FileSystem from "effect/FileSystem";
 import * as Schedule from "effect/Schedule";
 import * as Semaphore from "effect/Semaphore";
 import type * as Scope from "effect/Scope";
@@ -296,7 +297,7 @@ export const make = Effect.gen(function* () {
   const git = yield* GitManager.GitManager;
   const pullRequests = yield* PullRequestService.PullRequestService;
   const crypto = yield* Crypto.Crypto;
-  const fileSystem = yield* FileSystem.FileSystem;
+  const workspacePathExists = yield* makeWorkspacePathExists;
   // A shell merge or close sends no event, and the branch lookup caches an open pull request for
   // a minute, so these threads' next lookup reads the host fresh.
   const shellClosedThreads = new Set<ThreadId>();
@@ -378,12 +379,14 @@ export const make = Effect.gen(function* () {
           if (project === undefined || thread.branch === null) return;
           const worktreeExists =
             thread.worktreePath !== null &&
-            (yield* fileSystem.exists(thread.worktreePath).pipe(Effect.orElseSucceed(() => false)));
+            (yield* workspacePathExists(thread.worktreePath).pipe(
+              Effect.orElseSucceed(() => false),
+            ));
           lookupCwdByThreadId.set(
             thread.id,
             worktreeExists && thread.worktreePath !== null
               ? thread.worktreePath
-              : project.workspaceRoot,
+              : threadWorkspaceRoot(thread, project.workspaceRoot),
           );
         }),
       { concurrency: 8, discard: true },
@@ -572,7 +575,7 @@ export const make = Effect.gen(function* () {
       if (settled.settledOverride !== "settled") return;
       yield* terminals.closeIdle({ threadId });
       const worktreePath = settled.worktreePath;
-      if (worktreePath === null || !(yield* fileSystem.exists(worktreePath))) return;
+      if (worktreePath === null || !(yield* workspacePathExists(worktreePath))) return;
       // Recheck after closing and worktree I/O; re-engaged threads must not be cleaned up.
       const thread = yield* projections.getThread(threadId);
       if (thread.settledOverride !== "settled") return;

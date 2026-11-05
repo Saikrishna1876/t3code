@@ -1,5 +1,15 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useId, useState } from "react";
+import {
+  InfoIcon,
+  LogInIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  Repeat2Icon,
+  SquareIcon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react";
 import type {
   CodespacesConfiguration,
   CodespacesOptions,
@@ -24,6 +34,7 @@ import { CodespacesLogHelp, ProjectCodespacesControl } from "../ProjectCodespace
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from "../ui/select";
 import {
   Dialog,
@@ -45,24 +56,27 @@ export function CodespacesSettings({
   );
   if (!supported.length) return null;
   return (
-    <SettingsSection id="connections-codespaces" title="Codespaces">
-      {supported.map((environment) => (
+    <div className="space-y-4">
+      {supported.map((environment, index) => (
         <CodespacesComputerSettings
           key={environment.environmentId}
           environmentId={environment.environmentId}
-          label={environment.label}
+          title={supported.length === 1 ? "Codespaces" : `Codespaces · ${environment.label}`}
+          id={index === 0 ? "connections-codespaces" : undefined}
         />
       ))}
-    </SettingsSection>
+    </div>
   );
 }
 
 function CodespacesComputerSettings({
   environmentId,
-  label,
+  title,
+  id,
 }: {
   environmentId: EnvironmentId;
-  label: string;
+  title: string;
+  id: string | undefined;
 }) {
   const inventory = useEnvironmentQuery(codespacesEnvironment.list({ environmentId, input: {} }));
   const state = useEnvironmentQuery(
@@ -116,47 +130,76 @@ function CodespacesComputerSettings({
     setPending(false);
   };
   return (
-    <div className="space-y-4 px-3 py-4 sm:px-4">
-      <div className="space-y-1">
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-sm text-muted-foreground">
-          Codespaces are cloud computers. Create one from a blank template, then add projects in
-          separate /workspaces folders.
-        </p>
-      </div>
+    <SettingsSection
+      id={id}
+      title={title}
+      titleAction={
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button size="icon-micro" variant="ghost-muted" aria-label="About Codespaces" />
+            }
+          >
+            <InfoIcon />
+          </TooltipTrigger>
+          <TooltipPopup>
+            Codespaces are cloud computers. Create one from a blank template, then add projects in
+            separate /workspaces folders.
+          </TooltipPopup>
+        </Tooltip>
+      }
+      headerAction={
+        <div className="flex items-center gap-2">
+          <Button
+            size="icon-sm"
+            variant="ghost-muted"
+            aria-label="Refresh status"
+            title="Refresh status"
+            disabled={pending}
+            onClick={refresh}
+          >
+            <RefreshCwIcon />
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label={authorizing ? "Cancel GitHub sign-in" : "Sign in for Codespaces access"}
+            title={authorizing ? "Cancel GitHub sign-in" : "Sign in for Codespaces access"}
+            disabled={pending || !canManage}
+            onClick={async () => {
+              setPending(true);
+              setError(null);
+              const result = await authorize({
+                environmentId,
+                input: { cancel: Boolean(authorizing) },
+              });
+              if (result._tag === "Failure") failure(result);
+              setPending(false);
+              refresh();
+            }}
+          >
+            {authorizing ? <XIcon /> : <LogInIcon />}
+            <span className="hidden sm:inline">{authorizing ? "Cancel sign-in" : "Sign in"}</span>
+          </Button>
+          <Button
+            size="sm"
+            aria-label="New Codespace"
+            disabled={busy || !canManage}
+            onClick={() => void setup()}
+          >
+            <PlusIcon />
+            New
+          </Button>
+        </div>
+      }
+    >
       {error || inventory.error || state.error ? (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="px-4 py-3 text-sm text-destructive">
           {error ?? inventory.error ?? state.error}
         </p>
       ) : null}
-      <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={pending || !canManage}
-          onClick={async () => {
-            setPending(true);
-            setError(null);
-            const result = await authorize({
-              environmentId,
-              input: { cancel: Boolean(authorizing) },
-            });
-            if (result._tag === "Failure") failure(result);
-            setPending(false);
-            refresh();
-          }}
-        >
-          {authorizing ? "Cancel GitHub sign-in" : "Sign in for Codespaces access"}
-        </Button>
-        <Button size="sm" variant="outline" disabled={pending} onClick={refresh}>
-          Refresh status
-        </Button>
-        <Button size="sm" disabled={busy || !canManage} onClick={() => void setup()}>
-          New Codespace
-        </Button>
-      </div>
       {authorization?.code ? (
-        <div className="space-y-2">
+        <div className="space-y-2 px-4 py-4">
           <p className="text-sm">
             GitHub code: <code className="select-all">{authorization.code}</code>
           </p>
@@ -176,12 +219,12 @@ function CodespacesComputerSettings({
         </div>
       ) : null}
       {authorization?.message ? (
-        <p role="status" className="text-xs text-muted-foreground">
+        <p role="status" className="px-4 py-3 text-xs text-muted-foreground">
           {authorization.message}
         </p>
       ) : null}
       {options ? (
-        <div className="space-y-3">
+        <div className="space-y-3 px-4 py-4">
           <label className="grid gap-1.5 text-sm">
             Computer name
             <Input value={displayName} onValueChange={setDisplayName} placeholder="Optional name" />
@@ -238,13 +281,22 @@ function CodespacesComputerSettings({
       {inventory.data?.codespaces.map((space) => {
         const managed = state.data?.environments.find((entry) => entry.name === space.name);
         return (
-          <div key={space.name} className="space-y-2 border-t pt-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="min-w-0 flex-1">
+          <div key={space.name} className="px-4 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-40 flex-1 space-y-1">
                 <p className="break-words text-sm font-medium">{space.displayName || space.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {codespaceStateLabel(space.state)}
-                  {managed?.connected ? " · Connected" : ""} · {space.machine}
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span
+                    aria-hidden="true"
+                    className={
+                      "size-1.5 shrink-0 rounded-full " +
+                      (space.state === "Available" ? "bg-success" : "bg-muted-foreground")
+                    }
+                  />
+                  <span className="break-words">
+                    {codespaceStateLabel(space.state)}
+                    {managed?.connected ? " · Connected" : ""} · {space.machine}
+                  </span>
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -260,12 +312,15 @@ function CodespacesComputerSettings({
                     })
                   }
                 >
+                  <Repeat2Icon />
                   {space.state === "Shutdown" ? "Start" : managed ? "Reconnect" : "Add computer"}
                 </Button>
                 {space.state === "Available" && managed ? (
                   <Button
-                    size="sm"
+                    size="icon-sm"
                     variant="outline"
+                    aria-label={`Stop ${space.displayName || space.name}`}
+                    title="Stop computer"
                     disabled={busy || !canManage}
                     onClick={() =>
                       void execute({
@@ -275,12 +330,14 @@ function CodespacesComputerSettings({
                       })
                     }
                   >
-                    Stop
+                    <SquareIcon />
                   </Button>
                 ) : null}
                 <Button
-                  size="sm"
-                  variant="ghost"
+                  size="icon-sm"
+                  variant="ghost-destructive"
+                  aria-label={`Delete ${space.displayName || space.name}`}
+                  title="Delete computer"
                   disabled={busy || !canManage}
                   onClick={() =>
                     setConfirmation({
@@ -290,7 +347,7 @@ function CodespacesComputerSettings({
                     })
                   }
                 >
-                  Delete
+                  <Trash2Icon />
                 </Button>
               </div>
             </div>
@@ -298,21 +355,26 @@ function CodespacesComputerSettings({
         );
       })}
       {!inventory.isPending && !inventory.error && !inventory.data?.codespaces.length ? (
-        <p className="text-sm text-muted-foreground">
+        <p className="px-4 py-4 text-sm text-muted-foreground">
           No Codespaces yet. Create a blank computer to get started.
         </p>
       ) : null}
       {feedback ? (
-        <div role={feedback.tone === "error" ? "alert" : "status"} className="space-y-1 text-sm">
+        <div
+          role={feedback.tone === "error" ? "alert" : "status"}
+          className="space-y-1 px-4 py-4 text-sm"
+        >
           <p>{feedback.label}</p>
           <p className="text-muted-foreground">{feedback.description}</p>
           <CodespacesLogHelp url={feedback.logHelpUrl} />
         </div>
       ) : null}
       {projects.length ? (
-        <div className="space-y-3 border-t pt-4">
+        <div className="space-y-3 px-4 py-4">
           <div className="grid gap-1.5 text-sm">
-            <label htmlFor={formId + "-project"}>Add or manage a project</label>
+            <label htmlFor={formId + "-project"} className="font-medium">
+              Project
+            </label>
             <Select
               value={projectId}
               onValueChange={(value) => setProjectId(value as ProjectId | null)}
@@ -339,7 +401,7 @@ function CodespacesComputerSettings({
           ) : null}
         </div>
       ) : (
-        <p className="text-xs text-muted-foreground">
+        <p className="px-4 py-4 text-xs text-muted-foreground">
           Add a project to this T3 host, then assign it to a computer here.
         </p>
       )}
@@ -390,7 +452,7 @@ function CodespacesComputerSettings({
           </DialogFooter>
         </DialogPopup>
       </Dialog>
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -435,13 +497,15 @@ function CodespacesAgentAccess({
     setSaving(false);
   };
   return (
-    <div aria-busy={saving}>
-      <label className="flex items-start justify-between gap-3">
+    <div aria-busy={saving} className="px-4 py-4">
+      <label className="flex items-center justify-between gap-4">
         <span>
-          <span id={id + "-label"}>Allow agents to manage Codespaces</span>
+          <span id={id + "-label"} className="text-sm font-medium">
+            Agent access
+          </span>
           <span id={id + "-description"} className="mt-1 block text-xs text-muted-foreground">
-            Applies to all projects on this T3 host. Full-access agents can create billable
-            workspaces and delete remote files.
+            Lets full-access agents create billable workspaces and delete remote files, across all
+            projects on this host.
           </span>
         </span>
         <Switch
@@ -455,7 +519,11 @@ function CodespacesAgentAccess({
       <p
         id={id + "-status"}
         role="status"
-        className={"min-h-5 pt-1 text-xs " + (error ? "text-destructive" : "text-muted-foreground")}
+        className={
+          saving || error
+            ? "pt-1 text-xs " + (error ? "text-destructive" : "text-muted-foreground")
+            : "sr-only"
+        }
       >
         {saving ? "Saving…" : error}
       </p>
