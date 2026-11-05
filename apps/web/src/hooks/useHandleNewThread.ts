@@ -280,6 +280,7 @@ export function createNewThreadHandler(router: AnyRouter) {
           workspaceContext = {
             branch: null,
             worktreePath: null,
+            codespaceName: null,
             envMode: defaultEnvMode,
             startFromOrigin: resolveNewDraftStartFromOrigin({
               envMode: defaultEnvMode,

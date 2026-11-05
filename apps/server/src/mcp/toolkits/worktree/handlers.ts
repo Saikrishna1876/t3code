@@ -1,7 +1,6 @@
 import { threadWorkspaceRoot } from "@t3tools/contracts";
 import { OrchestratorMcpFailure } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import * as GitWorkflow from "../../../git/GitWorkflowService.ts";
 import * as Project from "../../../project/ProjectService.ts";
 import { readThread, unavailable } from "../../threadAccess.ts";
 import * as Effect from "effect/Effect";
@@ -31,11 +30,12 @@ const handlers = {
           code: "invalid_request",
           message: "The project was not found.",
         });
-      const git = yield* GitWorkflow.GitWorkflowService;
-      return yield* git
+      const service = yield* WorktreeMcpService.WorktreeMcpService;
+      return yield* service
         .listRefs({
           ...refs,
-          cwd: thread.worktreePath ?? threadWorkspaceRoot(thread, project.value.workspaceRoot),
+          worktreePath: thread.worktreePath,
+          workspaceRoot: threadWorkspaceRoot(thread, project.value.workspaceRoot),
         })
         .pipe(Effect.mapError(unavailable));
     }),

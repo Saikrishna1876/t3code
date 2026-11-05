@@ -23,7 +23,7 @@ import {
 import * as CodespacesPreview from "../codespaces/CodespacesPreview.ts";
 import * as Option from "effect/Option";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -131,7 +131,7 @@ const currentIsoTimestamp = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
 /** @public */
 export const make = Effect.gen(function* PreviewManagerMake() {
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
   const remotePreview = Option.getOrUndefined(
     yield* Effect.serviceOption(CodespacesPreview.CodespacesPreview),
   );
@@ -152,7 +152,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     normalizeUrl(input.url).pipe(Effect.flatMap((url) => projectUrl(input.threadId, url)));
   const sourceUrl = (threadId: PreviewOpenInput["threadId"], url: string) =>
     remotePreview ? remotePreview.workspaceUrl(threadId, url) : Effect.succeed(url);
-  const serverEpoch = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
+  const serverEpoch = yield* random.uuidV4();
   const stateRef = yield* SynchronizedRef.make<ManagerState>(initialState);
   const eventsPubSub = yield* PubSub.unbounded<PreviewEvent>();
   const events: Stream.Stream<PreviewEvent> = Stream.fromPubSub(eventsPubSub);
@@ -577,7 +577,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
           ...session.snapshot,
           reveal: true,
           revealRequest: {
-            id: yield* crypto.randomUUIDv4().pipe(Effect.orDie),
+            id: yield* random.uuidV4(),
             force: input.force,
           },
           updatedAt: yield* currentIsoTimestamp,

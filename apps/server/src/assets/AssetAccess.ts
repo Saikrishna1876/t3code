@@ -42,7 +42,7 @@ import { isNetworkPath } from "@t3tools/shared/path";
 import { MAX_TOOL_OUTPUT_IMAGE_BASE64_LENGTH, toolOutputImages } from "@t3tools/shared/toolOutput";
 import * as DateTime from "effect/DateTime";
 import * as Clock from "effect/Clock";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
 import * as FileSystem from "effect/FileSystem";
@@ -124,6 +124,7 @@ const AssetClaimsSchema = Schema.Union([
   Schema.Struct({
     version: Schema.Literal(1),
     kind: Schema.Literal("workspace-file-exact"),
+    download: Schema.optionalKey(Schema.Boolean),
     codespaceName: Schema.optionalKey(Schema.String),
     workspaceRoot: Schema.String,
     relativePath: Schema.String,
@@ -481,12 +482,19 @@ const remoteWorkspaceAsset = Effect.fn("AssetAccess.remoteWorkspaceAsset")(funct
   return { name: target.name, info, remote };
 });
 const resolveWorkspaceAsset = Effect.fn("AssetAccess.resolveWorkspaceAsset")(
-  function* (workspaceRoot: string, relativePath: string, expectedName?: string) {
+  function* (workspaceRoot: string, relativePath: string, expectedName?: string, download = false) {
     const remote = yield* remoteWorkspaceAsset(workspaceRoot, relativePath, expectedName ?? null);
     if (remote) {
       return {
         kind: "file" as const,
         path: relativePath,
+        ...(download
+          ? {
+              download: true,
+              fileName: relativePath.split(/[\\/]/).at(-1)!,
+              mimeType: "application/octet-stream",
+            }
+          : {}),
         remoteFile: {
           info: {
             size: BigInt(remote.info.size),
@@ -566,6 +574,8 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
             }),
         ),
       );
+    const download =
+      input.resource._tag === "media-file" && input.resource.disposition === "attachment";
     const isDraftMedia =
       input.resource._tag === "draft-workspace-file" &&
       (isWorkspaceAudioPreviewPath(resolved.relativePath) ||
@@ -574,6 +584,7 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
       input.resource._tag === "media-file" ||
       (input.resource._tag === "draft-workspace-file" && path.isAbsolute(input.requestedPath));
     if (
+      !download &&
       !isDraftMedia &&
       !(allowsHostMedia
         ? hostPreviewMimeTypeFromExtension(path.extname(resolved.relativePath))
@@ -591,11 +602,13 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
     if (remote) {
       return {
         claims:
+          download ||
           isWorkspaceImagePreviewPath(resolved.relativePath) ||
           !isWorkspacePreviewEntryPath(resolved.relativePath)
             ? {
                 version: 1 as const,
                 kind: "workspace-file-exact" as const,
+                ...(download ? { download: true } : {}),
                 workspaceRoot: input.workspaceRoot,
                 relativePath: resolved.relativePath,
                 codespaceName: remote.name,
@@ -930,7 +943,7 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
               expiresAt,
             };
       if (sourceFaviconPath && canonicalFaviconPath) {
-        const crypto = yield* Crypto.Crypto;
+        const digest = yield* Digest.Digest;
         const faviconBytes = yield* fileSystem.readFile(canonicalFaviconPath).pipe(
           Effect.mapError(
             (cause) =>
@@ -940,7 +953,7 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
               }),
           ),
         );
-        const revision = yield* crypto.digest("SHA-256", faviconBytes).pipe(
+        const revision = yield* digest.digest(Digest.sha256, faviconBytes).pipe(
           Effect.map(Hex.encode),
           Effect.mapError(
             (cause) =>
@@ -1180,6 +1193,7 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
       claims.workspaceRoot,
       claims.relativePath,
       claims.codespaceName,
+      claims.download,
     );
   }
   const segments = decodedPath.split(/[\\/]/);
