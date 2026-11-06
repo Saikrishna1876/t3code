@@ -135,7 +135,7 @@ class TerminalSubprocessCheckError extends Schema.TaggedError<TerminalSubprocess
   "TerminalSubprocessCheckError",
   {
     cause: Schema.optional(Schema.Defect()),
-    command: Schema.Literals(["powershell", "ps", "resource-monitor"]),
+    command: Schema.Literals(["powershell", "ps", "resource-monitor", "remote workspace"]),
     exitCode: Schema.optional(Schema.NullOr(Schema.Number)),
     timedOut: Schema.optional(Schema.Boolean),
     stdoutTruncated: Schema.optional(Schema.Boolean),
@@ -1423,7 +1423,7 @@ function createTerminalSpawnEnv(
 }
 
 function normalizedRuntimeEnv(
-  env: Record<string, string> | undefined,
+  env: Readonly<Record<string, string>> | undefined,
 ): Record<string, string> | null {
   if (!env) return null;
   const entries = Object.entries(env);
@@ -1562,13 +1562,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const shellResolver = options.shellResolver ?? (() => defaultShellResolver(platform, baseEnv));
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const resolveLaunchInputEnvironment = Effect.fn("terminal.resolveLaunchInputEnvironment")(
-    function* <Input extends TerminalOpenInput | TerminalAttachInput>(
-      input: Input,
-    ): Effect.fn.Return<
-      Input & { readonly explicitEnv: Record<string, string> | undefined },
-      TerminalProviderInstanceNotFoundError | TerminalProviderEnvironmentError
-    > {
-      if (input.providerInstanceId === undefined) return { ...input, explicitEnv: input.env };
+    function* (input: TerminalOpenInput) {
+      const explicitEnv = input.env;
+      if (input.providerInstanceId === undefined) return { ...input, explicitEnv };
       const resolver = options.resolveProviderInstanceEnvironment;
       if (resolver === undefined) {
         return yield* new TerminalProviderInstanceNotFoundError({
@@ -1576,7 +1572,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         });
       }
       const env = yield* resolver(input.providerInstanceId, input.env);
-      return { ...input, env, explicitEnv: input.env };
+      return { ...input, env, explicitEnv };
     },
   );
   // Share one process table per poll; per-terminal scans can exhaust PIDs on busy hosts.
@@ -2897,7 +2893,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
 
   const openWithWorkspaceLease = Effect.fn("terminal.openLocked")(function* (
     requestedInput: TerminalOpenInput & {
-      readonly explicitEnv?: Record<string, string> | undefined;
+      readonly explicitEnv?: Readonly<Record<string, string>> | undefined;
     },
   ) {
     const terminalId = requestedInput.terminalId;
@@ -3033,7 +3029,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   });
 
   const openLocked = (
-    input: TerminalOpenInput & { readonly explicitEnv?: Record<string, string> | undefined },
+    input: TerminalOpenInput & {
+      readonly explicitEnv?: Readonly<Record<string, string>> | undefined;
+    },
   ) =>
     withWorkspaceLease(
       path.resolve(input.worktreePath ?? input.cwd),

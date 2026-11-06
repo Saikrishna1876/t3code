@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off -- Builds real procfs fixtures for the standalone worker.
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";

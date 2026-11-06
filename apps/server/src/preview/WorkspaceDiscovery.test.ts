@@ -7,12 +7,10 @@ import {
   type PreviewStopLocalServerInput,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import * as TestClock from "effect/testing/TestClock";
 import * as Workspace from "../codespaces/CodespacesWorkspace.ts";
 import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import * as Projects from "../orchestration-v2/ProjectStore.ts";
@@ -91,6 +89,7 @@ function fixture(input: {
         }),
     }),
     Layer.mock(PortScanner.PortDiscovery)({
+      trackAgent: () => () => undefined,
       retain: Effect.sync(() => {
         retained++;
       }),
@@ -123,11 +122,9 @@ it.effect(
         const test = fixture({ codespaceName: "cloud", ...(worktreePath ? { worktreePath } : {}) });
         yield* Effect.gen(function* () {
           const discovery = yield* Discovery.WorkspaceDiscovery;
-          const first = yield* discovery
+          const snapshot = yield* discovery
             .stream({ threadId, configuredUrls: ["https://localhost:3000/app"] })
-            .pipe(Stream.runHead, Effect.forkChild);
-          yield* TestClock.adjust("3 seconds");
-          const snapshot = yield* Fiber.join(first);
+            .pipe(Stream.runHead);
           expect(Option.getOrThrow(snapshot)).toMatchObject({ servers, codespaceName: "cloud" });
           expect(Option.getOrThrow(snapshot).configuredUrlProbing).toBeUndefined();
           yield* discovery.stop(stopInput);
@@ -150,9 +147,7 @@ it.effect(
     const test = fixture({ codespaceName: "cloud", disconnected: true });
     return Effect.gen(function* () {
       const discovery = yield* Discovery.WorkspaceDiscovery;
-      const first = yield* discovery.stream({ threadId }).pipe(Stream.runHead, Effect.forkChild);
-      yield* TestClock.adjust("3 seconds");
-      const snapshot = yield* Fiber.join(first);
+      const snapshot = yield* discovery.stream({ threadId }).pipe(Stream.runHead);
       expect(Option.getOrThrow(snapshot)).toMatchObject({
         servers: [],
         codespaceName: "cloud",

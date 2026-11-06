@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off -- Reads the Codespace worker's Linux process namespace.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off -- Standalone worker samples Linux processes outside the Effect runtime.
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -126,7 +126,7 @@ export function makeWorkspaceTelemetry(
       read(NodePath.join(cgroupRoot, "cpu.stat")),
       read(NodePath.join(procRoot, "meminfo")),
     ]);
-    const [quota, period] = cpuMax.trim().split(/\s+/).map(Number);
+    const [quota = Number.NaN, period = Number.NaN] = cpuMax.trim().split(/\s+/).map(Number);
     const cpuCount =
       Number.isFinite(quota) && quota > 0 && period && period > 0
         ? Math.max(1, Math.ceil(quota / period))

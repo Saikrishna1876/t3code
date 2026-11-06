@@ -39,12 +39,11 @@ const make = Effect.gen(function* () {
   const target = Effect.fn("WorkspaceDiscovery.target")(function* (threadId?: ThreadId) {
     if (!threadId) return null;
     const thread = yield* threads.getThreadShell(threadId);
-    if (!thread)
-      return yield* Effect.fail(new PreviewStopLocalServerError({ reason: "not-found" }));
+    if (!thread) return yield* new PreviewStopLocalServerError({ reason: "not-found" });
     if (!thread.codespaceName) return null;
     const project = yield* projects.get(thread.projectId);
     if (Option.isNone(project))
-      return yield* Effect.fail(new PreviewStopLocalServerError({ reason: "not-found" }));
+      return yield* new PreviewStopLocalServerError({ reason: "not-found" });
     return {
       name: thread.codespaceName,
       cwd: thread.worktreePath ?? threadWorkspaceRoot(thread, project.value.workspaceRoot),
@@ -96,14 +95,18 @@ const make = Effect.gen(function* () {
               })),
             );
         });
-        return Stream.repeatEffect(sample()).pipe(Stream.schedule(Schedule.spaced("3 seconds")));
+        return Stream.fromEffectSchedule(sample(), Schedule.spaced("3 seconds"));
       }).pipe(
         Effect.orElseSucceed(() =>
-          Stream.succeed({
-            servers: [],
-            scannedAt: new Date().toISOString(),
-            error: "disconnected" as const,
-          }),
+          Stream.fromEffect(
+            DateTime.now.pipe(
+              Effect.map((now) => ({
+                servers: [],
+                scannedAt: DateTime.formatIso(now),
+                error: "disconnected" as const,
+              })),
+            ),
+          ),
         ),
       ),
     );
