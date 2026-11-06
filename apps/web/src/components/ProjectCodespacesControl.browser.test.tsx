@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   snapshot: null as CodespacesSnapshot | null,
   project: null as CodespacesProject | null,
   inventoryMissing: false,
+  canManage: true,
   inventoryState: "Shutdown",
   run: vi.fn(),
   bind: vi.fn(),
@@ -59,7 +60,11 @@ vi.mock(import("~/composerDraftStore"), async () => {
 vi.mock(import("~/state/codespaces"), async () => {
   const { Atom } = await import("effect/reactivity");
   const allowed = Atom.make(true);
-  const command = (key: string) => ({ key, permissionAtom: () => allowed });
+  const denied = Atom.make(false);
+  const command = (key: string) => ({
+    key,
+    permissionAtom: () => (state.canManage ? allowed : denied),
+  });
   return {
     codespacesEnvironment: {
       run: command("run"),
@@ -133,6 +138,7 @@ const deferred = <T,>() => {
 };
 function setup() {
   state.inventoryMissing = false;
+  state.canManage = true;
   state.inventoryState = "Shutdown";
   for (const command of [
     state.run,
@@ -193,6 +199,7 @@ function setup() {
     AsyncResult.success({
       machines: [
         { name: "basicLinux32gb", displayName: "2 cores", cpus: 2, memoryBytes: 8000000000 },
+        { name: "standardLinux32gb", displayName: "4 cores", cpus: 4, memoryBytes: 16000000000 },
       ],
       devcontainers: [],
     }),
@@ -334,3 +341,79 @@ it("rolls back failed agent access saves and allows retry", async () => {
   expect(switchControl(screen.container).matches('[aria-disabled="true"]')).toBe(false);
   expect(screen.container.querySelector('[role="status"]')?.textContent).toBe("Permission denied");
 });
+
+it("management rebuild waits for confirmation and preserves cancellation", async () => {
+  setup();
+  await using screen = await render(view());
+  await userEvent.click(
+    screen.getByRole("button", { name: "Rebuild Cloud computer", exact: true }),
+  );
+  expect(state.run).not.toHaveBeenCalled();
+  await userEvent.click(page.getByRole("button", { name: "Cancel", exact: true }));
+  expect(state.run).not.toHaveBeenCalled();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Rebuild Cloud computer", exact: true }),
+  );
+  await userEvent.click(page.getByRole("button", { name: "Rebuild computer", exact: true }));
+  expect(state.run).toHaveBeenCalledWith({
+    environmentId: local,
+    input: expect.objectContaining({ action: "rebuild", name: "computer" }),
+  });
+  expect(state.run.mock.calls[0]![0].input).not.toHaveProperty("force");
+});
+
+it("management updates name and stopped machine without starting compute", async () => {
+  setup();
+  await using screen = await render(view());
+  await userEvent.click(screen.getByRole("button", { name: "Rename Cloud computer", exact: true }));
+  await userEvent.fill(
+    page.getByRole("textbox", { name: "Computer name", exact: true }),
+    "Build computer",
+  );
+  await userEvent.click(page.getByRole("button", { name: "Save name", exact: true }));
+  expect(state.run).toHaveBeenLastCalledWith({
+    environmentId: local,
+    input: expect.objectContaining({
+      action: "update",
+      name: "computer",
+      displayName: "Build computer",
+    }),
+  });
+  await userEvent.click(
+    screen.getByRole("button", { name: "Change machine for Cloud computer", exact: true }),
+  );
+  await userEvent.click(page.getByRole("combobox", { name: "Machine", exact: true }));
+  await userEvent.click(page.getByRole("option", { name: "4 cores", exact: true }));
+  expect(state.run).toHaveBeenCalledTimes(1);
+  await userEvent.click(page.getByRole("button", { name: "Change machine", exact: true }));
+  expect(state.run).toHaveBeenLastCalledWith({
+    environmentId: local,
+    input: expect.objectContaining({
+      action: "update",
+      name: "computer",
+      machine: "standardLinux32gb",
+    }),
+  });
+  expect(state.run.mock.calls.every(([call]) => call.input.action === "update")).toBe(true);
+});
+
+it.each([true, false])(
+  "management guards running machines with lifecycle access %s",
+  async (canManage) => {
+    setup();
+    state.canManage = canManage;
+    state.inventoryState = "Available";
+    await using screen = await render(view());
+    await expect
+      .element(
+        screen.getByRole("button", { name: "Change machine for Cloud computer", exact: true }),
+      )
+      .toBeDisabled();
+    if (!canManage) {
+      for (const name of ["Rename Cloud computer", "Rebuild Cloud computer"]) {
+        await expect.element(screen.getByRole("button", { name, exact: true })).toBeDisabled();
+      }
+    }
+    expect(state.run).not.toHaveBeenCalled();
+  },
+);

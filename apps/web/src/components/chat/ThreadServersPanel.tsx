@@ -16,7 +16,7 @@ import { type MouseEvent, useState } from "react";
 import { resolveDiscoveredServerUrl } from "../../browser/browserTargetResolver";
 import { readLocalApi } from "../../localApi";
 import { cn, isMacPlatform } from "../../lib/utils";
-import { useThreadDiscoveredPorts } from "../../portDiscoveryState";
+import { useDiscoveredPortsState } from "../../portDiscoveryState";
 import { useEnvironment } from "../../state/environments";
 import { previewEnvironment } from "../../state/preview";
 import { useEnvironmentScope } from "../../state/session";
@@ -35,21 +35,30 @@ export function ThreadServersPanel(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
 }) {
-  const servers = useThreadDiscoveredPorts(props);
+  const discovery = useDiscoveredPortsState(props.environmentId, undefined, props.threadId);
+  const servers = discovery.servers.filter(
+    (server) =>
+      (discovery.codespaceName !== undefined &&
+        server.terminal === null &&
+        server.agent === null) ||
+      server.terminal?.threadId === props.threadId ||
+      server.agent?.threadId === props.threadId,
+  );
   const canOpen = useEnvironmentScope(props.environmentId, AuthPreviewOperateScope);
   const canStop = useAtomValue(
     previewEnvironment.stopLocalServer.permissionAtom(props.environmentId),
   );
   const supportsStop =
     useEnvironment(props.environmentId)?.serverConfig?.environment.capabilities.localServerStop ===
-    true;
+      true || discovery.codespaceName !== undefined;
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
+  const resolveUrl = useAtomCommand(previewEnvironment.resolveUrl, { reportFailure: false });
   const stopServer = useAtomCommand(previewEnvironment.stopLocalServer, {
     label: "thread server stop",
   });
   const [stoppingKey, setStoppingKey] = useState<string | null>(null);
 
-  if (servers.length === 0) return null;
+  if (servers.length === 0 && !discovery.codespaceName) return null;
   const externalClickLabel = isMacPlatform(navigator.platform) ? "⌘-click" : "Ctrl-click";
   const threadRef = scopeThreadRef(props.environmentId, props.threadId);
 
@@ -68,7 +77,20 @@ export function ThreadServersPanel(props: {
     // Like links: modified and middle clicks go to the system browser.
     if (event.metaKey || event.ctrlKey || event.button === 1) {
       event.preventDefault();
-      const url = resolveDiscoveredServerUrl(props.environmentId, server.url);
+      let requestedUrl = server.url;
+      if (discovery.codespaceName !== undefined) {
+        const resolution = await resolveUrl({
+          environmentId: props.environmentId,
+          input: { threadId: props.threadId, url: server.url },
+        });
+        if (resolution._tag === "Failure") {
+          if (!isAtomCommandInterrupted(resolution))
+            reportFailure("Unable to open in browser", squashAtomCommandFailure(resolution));
+          return;
+        }
+        requestedUrl = resolution.value;
+      }
+      const url = resolveDiscoveredServerUrl(props.environmentId, requestedUrl);
       await readLocalApi()
         ?.shell.openExternal(url)
         .catch((error: unknown) => reportFailure("Unable to open in browser", error));
@@ -85,7 +107,12 @@ export function ThreadServersPanel(props: {
     setStoppingKey(serverKey(server));
     const result = await stopServer({
       environmentId: props.environmentId,
-      input: { pid: server.pid, port: server.port },
+      input: {
+        pid: server.pid,
+        port: server.port,
+        threadId: props.threadId,
+        ...(server.processStartTime ? { processStartTime: server.processStartTime } : {}),
+      },
     });
     setStoppingKey(null);
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
@@ -95,6 +122,15 @@ export function ThreadServersPanel(props: {
 
   return (
     <ThreadDetailsSection headingId="thread-details-servers-heading" title="Servers">
+      {discovery.codespaceName && (
+        <div className="px-2 py-1 text-2xs text-muted-foreground">
+          {discovery.error
+            ? "Codespace disconnected"
+            : discovery.resources
+              ? `Codespace · CPU ${discovery.resources.cpuUtilization === null ? "sampling" : `${Math.round(discovery.resources.cpuUtilization * 100)}%`} · RAM ${((discovery.resources.totalMemoryBytes - discovery.resources.availableMemoryBytes) / 1024 ** 3).toFixed(1)} / ${(discovery.resources.totalMemoryBytes / 1024 ** 3).toFixed(1)} GiB`
+              : "Reading Codespace resources"}
+        </div>
+      )}
       <ul className="m-0 list-none p-0">
         {servers.map((server) => {
           const key = serverKey(server);
@@ -123,7 +159,10 @@ export function ThreadServersPanel(props: {
                       localhost:{server.port}
                     </span>
                     <span className="truncate text-2xs font-normal leading-4 text-muted-foreground">
-                      {[server.terminal === null ? "Agent" : "Terminal", server.processName]
+                      {[
+                        server.terminal ? "Terminal" : server.agent ? "Agent" : "Workspace",
+                        server.processName,
+                      ]
                         .filter(Boolean)
                         .join(" · ")}
                     </span>

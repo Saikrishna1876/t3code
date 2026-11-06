@@ -24,6 +24,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import { isLiveCallerShell } from "./threadAccess.ts";
 
 interface HostToolsCaller {
@@ -73,20 +74,28 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const sessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
   const providers = yield* ProviderRegistry.ProviderRegistry;
+  const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
 
   const resolve = Effect.fn("HostTools.resolve")(function* (caller: HostToolsCaller) {
     const records = yield* threads
       .getThreadRecords(caller.threadId, ["providerThreads"])
       .pipe(Effect.mapError(unavailable));
+    const credential = yield* mcpSessions.read(caller.threadId);
     const providerThread = records.providerThreads.find(
       (entry) =>
-        entry.providerSessionId === caller.providerSessionId &&
+        entry.id === records.thread.activeProviderThreadId &&
         entry.providerInstanceId === caller.providerInstanceId,
     );
-    if (!providerThread || records.thread.deletedAt !== null)
+    if (
+      !providerThread ||
+      providerThread.providerSessionId === null ||
+      records.thread.deletedAt !== null ||
+      credential?.providerSessionId !== caller.providerSessionId ||
+      credential.providerInstanceId !== caller.providerInstanceId
+    )
       return yield* invalid("The calling provider no longer owns this thread.");
     const runtime = yield* sessions
-      .get(ProviderSessionId.make(caller.providerSessionId))
+      .get(ProviderSessionId.make(providerThread.providerSessionId))
       .pipe(Effect.mapError(unavailable));
     if (Option.isNone(runtime) || runtime.value.instanceId !== caller.providerInstanceId)
       return yield* invalid("The calling host provider session has stopped.");

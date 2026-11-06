@@ -1,3 +1,4 @@
+import { CodespacesPickerRows } from "../connection/CodespacesSettings";
 import * as Dialog from "../../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -767,6 +768,7 @@ function TaskForm({
       schedule,
       enabled: draft.enabled,
       threadId: draft.task?.threadId ?? null,
+      codespaceName: draft.task?.threadId ? null : draft.codespaceName,
       workspaceStrategy:
         draft.workspace === "root"
           ? { type: "root" }
@@ -878,6 +880,8 @@ function TaskForm({
               setDraft({
                 ...draft,
                 projectId: project.id,
+                codespaceName: null,
+                checkoutPath: "",
                 modelSelection: keepsExplicitModel
                   ? draft.modelSelection
                   : scheduledTaskDefaultModel(config, project),
@@ -901,6 +905,33 @@ function TaskForm({
             disabled={saving || dictationPending || environmentUnavailable}
           />
         </SettingsSection>
+
+        {!draft.task?.threadId && draft.projectId && config?.environment.capabilities.codespaces ? (
+          <SettingsSection title="Computer">
+            <SelectRow
+              label="Run on"
+              value={draft.codespaceName ?? "Host"}
+              actions={[
+                {
+                  id: "host",
+                  title: "Host",
+                  state: draft.codespaceName === null ? "on" : undefined,
+                },
+              ]}
+              onSelect={() => setDraft({ ...draft, codespaceName: null, checkoutPath: "" })}
+            />
+            <View pointerEvents={saving || dictationPending ? "none" : "auto"}>
+              <CodespacesPickerRows
+                environmentId={environmentId}
+                projectId={draft.projectId}
+                codespaceName={draft.codespaceName}
+                onCodespaceChange={(codespaceName) =>
+                  setDraft({ ...draft, codespaceName, checkoutPath: "" })
+                }
+              />
+            </View>
+          </SettingsSection>
+        ) : null}
 
         <SettingsSection title="Workspace">
           <SelectRow

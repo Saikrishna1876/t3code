@@ -1,4 +1,5 @@
 import * as Dialog from "../../components/ui/Dialog";
+import { terminalMatchesWorkspace } from "@t3tools/client-runtime/state/terminal";
 import {
   AuthTerminalReadScope,
   AuthTerminalOperateScope,
@@ -6,8 +7,8 @@ import {
   EnvironmentId,
   ThreadId,
   sessionGrantsScope,
+  threadWorkspaceRoot,
 } from "@t3tools/contracts";
-import { type KnownTerminalSession } from "@t3tools/client-runtime/state/terminal";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppBar } from "../../components/ui/AppBar";
 import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
@@ -77,6 +78,7 @@ import {
   buildTerminalMenuSessions,
   getTerminalStatusLabel,
   nextOpenTerminalId,
+  pickTerminalIdForBootstrap,
   previousLiveTerminalId,
   resolveTerminalSessionLabel,
   type TerminalMenuSession,
@@ -226,22 +228,6 @@ function inferHostPlatform(environmentLabel: string | null): HostPlatform {
   return "unknown";
 }
 
-function pickRunningTerminalSessionForBootstrap(
-  sessions: ReadonlyArray<KnownTerminalSession>,
-): KnownTerminalSession | null {
-  const running = sessions.filter(
-    (session) => session.state.status === "running" || session.state.status === "starting",
-  );
-  if (running.length === 0) {
-    return null;
-  }
-  return (
-    running.find((session) => session.target.terminalId === DEFAULT_TERMINAL_ID) ??
-    running[0] ??
-    null
-  );
-}
-
 type ThreadTerminalRouteScreenProps = StaticScreenProps<{
   readonly environmentId: string;
   readonly threadId: string;
@@ -288,17 +274,24 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
   // made once, from the first session list that has one, so the terminal shown
   // does not change under the user as sessions come and go.
   const [bootstrapTerminalId, setBootstrapTerminalId] = useState<string | null>(null);
-  const runningSession = knownSessions.sessions
-    ? (pickRunningTerminalSessionForBootstrap(knownSessions.sessions) ??
-      (access.canOperate ? null : (knownSessions.sessions[0] ?? null)))
+  const workspaceRoot = selection.selectedThreadProject
+    ? threadWorkspaceRoot(selectedThread ?? {}, selection.selectedThreadProject.workspaceRoot)
     : null;
+  const initialTerminalId =
+    access.isAuthenticated && knownSessions.sessions && workspaceRoot
+      ? pickTerminalIdForBootstrap({
+          sessions: knownSessions.sessions,
+          workspaceRoot,
+          canOperate: access.canOperate,
+        })
+      : null;
   if (
     requestedTerminalId === null &&
     bootstrapTerminalId === null &&
-    runningSession !== null &&
-    runningSession.target.terminalId !== DEFAULT_TERMINAL_ID
+    initialTerminalId !== null &&
+    initialTerminalId !== DEFAULT_TERMINAL_ID
   ) {
-    setBootstrapTerminalId(runningSession.target.terminalId);
+    setBootstrapTerminalId(initialTerminalId);
   }
   const explicitTerminalId = requestedTerminalId ?? bootstrapTerminalId;
   const terminalId = explicitTerminalId ?? DEFAULT_TERMINAL_ID;
@@ -426,8 +419,18 @@ function ThreadTerminal(props: {
   } = useAppearancePreferences();
   const fontSize = appearance.terminalFontSize;
   const terminalKey = `${selectedThread.environmentId}:${selectedThread.id}:${terminalId}`;
+  const workspaceRoot = selectedThreadProject
+    ? threadWorkspaceRoot(selectedThread, selectedThreadProject.workspaceRoot)
+    : null;
   const activeKnownSession =
-    knownSessions?.find((session) => session.target.terminalId === terminalId) ?? null;
+    knownSessions?.find(
+      (session) =>
+        session.target.terminalId === terminalId &&
+        (props.hasExplicitTerminalId ||
+          (workspaceRoot !== null &&
+            session.state.summary !== null &&
+            terminalMatchesWorkspace(session.state.summary.cwd, workspaceRoot))),
+    ) ?? null;
   const hasTerminalTarget = props.hasExplicitTerminalId || activeKnownSession !== null;
   const [pendingLaunch] = useState<PendingTerminalLaunch | null>(() =>
     takePendingTerminalLaunch({
@@ -484,11 +487,11 @@ function ThreadTerminal(props: {
     canRead: canReadTerminal,
     canOperate: canOperateTerminal,
     hasLoadedSessions: knownSessions !== null,
-    location: selectedThreadProject?.workspaceRoot
+    location: workspaceRoot
       ? {
           terminalLocation: activeKnownSession?.state.summary ?? null,
           activeSessionLocation: activeKnownSession?.state.summary ?? null,
-          workspaceRoot: selectedThreadProject.workspaceRoot,
+          workspaceRoot,
           threadShellWorktreePath: selectedThread.worktreePath ?? null,
           threadDetailWorktreePath: selectedThreadDetailWorktreePath,
         }
@@ -542,7 +545,7 @@ function ThreadTerminal(props: {
   );
   const isRunning = terminal.status === "running" || terminal.status === "starting";
 
-  const cwd = terminal.summary?.cwd ?? selectedThreadProject?.workspaceRoot ?? null;
+  const cwd = terminal.summary?.cwd ?? workspaceRoot;
   const serverConfigs = useServerConfigs();
   const hostOs =
     routeEnvironmentId === null
@@ -610,7 +613,7 @@ function ThreadTerminal(props: {
 
   const terminalMenuSessions: ReadonlyArray<TerminalMenuSession> = buildTerminalMenuSessions({
     knownSessions: knownSessions ?? [],
-    workspaceRoot: selectedThreadProject?.workspaceRoot ?? null,
+    workspaceRoot,
     currentSession: {
       terminalId,
       cwd: cwd ?? null,
@@ -799,7 +802,7 @@ function ThreadTerminal(props: {
     }
   };
 
-  if (!selectedThreadProject?.workspaceRoot) {
+  if (!workspaceRoot) {
     return (
       <View className="flex-1 bg-screen">
         <EmptyState
@@ -841,7 +844,7 @@ function ThreadTerminal(props: {
           status: terminal.status,
           hasRunningSubprocess: terminal.hasRunningSubprocess,
         }}
-        workspaceRoot={selectedThreadProject.workspaceRoot}
+        workspaceRoot={workspaceRoot}
         onCloseTerminal={handleCloseTerminal}
         onDecreaseFontSize={handleDecreaseFontSize}
         onIncreaseFontSize={handleIncreaseFontSize}

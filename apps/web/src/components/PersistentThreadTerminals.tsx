@@ -1,5 +1,6 @@
 import {
   AuthTerminalOperateScope,
+  threadWorkspaceRoot,
   type EnvironmentId,
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
@@ -24,6 +25,7 @@ import { useEnvironmentScope } from "../state/session";
 import { useKnownTerminalSessions } from "../state/terminalSessions";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useThreadTerminalActions } from "./terminal/useThreadTerminalActions";
+import { terminalMatchesWorkspace } from "@t3tools/client-runtime/state/terminal";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { resolveTerminalWorktreePath } from "./ChatView.logic";
 
@@ -92,7 +94,7 @@ export const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerm
   threadId,
   active,
   composerHeight,
-  launchContext,
+  launchContext: requestedLaunchContext,
   splitShortcutLabel,
   splitVerticalShortcutLabel,
   newShortcutLabel,
@@ -110,6 +112,14 @@ export const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerm
       ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
       : null;
   const project = useProject(projectRef);
+  const thread = serverThread ?? draftThread;
+  const projectRoot = project ? threadWorkspaceRoot(thread ?? {}, project.workspaceRoot) : null;
+  const launchContext =
+    requestedLaunchContext &&
+    projectRoot !== null &&
+    terminalMatchesWorkspace(requestedLaunchContext.cwd, projectRoot)
+      ? requestedLaunchContext
+      : null;
   const terminalUiState = useTerminalUiStateStore((state) =>
     selectThreadTerminalUiState(state.terminalUiStateByThreadKey, threadRef),
   );
@@ -127,29 +137,44 @@ export const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerm
   const drawerTerminalSessions =
     knownTerminalSessions?.filter((session) => !panelTerminalIds.has(session.target.terminalId)) ??
     [];
+  const otherComputerTerminalIds = new Set(
+    drawerTerminalSessions.flatMap((session) =>
+      projectRoot !== null &&
+      session.state.summary &&
+      !terminalMatchesWorkspace(session.state.summary.cwd, projectRoot)
+        ? [session.target.terminalId]
+        : [],
+    ),
+  );
+  const workspaceTerminalSessions = drawerTerminalSessions.filter(
+    (session) => !otherComputerTerminalIds.has(session.target.terminalId),
+  );
+  const workspaceTerminalIds = terminalUiState.terminalIds.filter(
+    (id) => !otherComputerTerminalIds.has(id),
+  );
   const terminalLabelsById = new Map<string, string>();
-  for (const session of drawerTerminalSessions) {
+  for (const session of workspaceTerminalSessions) {
     terminalLabelsById.set(
       session.target.terminalId,
       resolveTerminalSessionLabel(session.target.terminalId, session.state.summary),
     );
   }
   const terminalLaunchLocationsById = new Map<string, TerminalLaunchLocationWithEnv>();
-  for (const session of drawerTerminalSessions) {
+  for (const session of workspaceTerminalSessions) {
     const summary = session.state.summary;
-    if (!project || !summary) continue;
+    if (projectRoot === null || !summary) continue;
     const worktreePathForLaunch =
       launchContext !== null ? launchContext.worktreePath : summary.worktreePath;
     terminalLaunchLocationsById.set(session.target.terminalId, {
       cwd: launchContext?.cwd ?? summary.cwd,
       worktreePath: worktreePathForLaunch,
       runtimeEnv: projectScriptRuntimeEnv({
-        project: { cwd: project.workspaceRoot },
+        project: { cwd: projectRoot },
         worktreePath: worktreePathForLaunch,
       }),
     });
   }
-  const serverOrderedTerminalIds = drawerTerminalSessions.map(
+  const serverOrderedTerminalIds = workspaceTerminalSessions.map(
     (session) => session.target.terminalId,
   );
   const storeSetTerminalHeight = useTerminalUiStateStore((state) => state.setTerminalHeight);
@@ -174,22 +199,23 @@ export const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerm
     }
     reconcileTerminalIds(threadRef, serverOrderedTerminalIds);
   }, [reconcileTerminalIds, serverOrderedTerminalIds, terminalUiState.terminalIds, threadRef]);
-  const worktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
+  const worktreePath = thread?.worktreePath ?? null;
   const effectiveWorktreePath = launchContext !== null ? launchContext.worktreePath : worktreePath;
   const cwd =
     launchContext?.cwd ??
-    (project
+    (projectRoot !== null
       ? projectScriptCwd({
-          project: { cwd: project.workspaceRoot },
+          project: { cwd: projectRoot },
           worktreePath: effectiveWorktreePath,
         })
       : null);
-  const runtimeEnv = project
-    ? projectScriptRuntimeEnv({
-        project: { cwd: project.workspaceRoot },
-        worktreePath: effectiveWorktreePath,
-      })
-    : {};
+  const runtimeEnv =
+    projectRoot !== null
+      ? projectScriptRuntimeEnv({
+          project: { cwd: projectRoot },
+          worktreePath: effectiveWorktreePath,
+        })
+      : {};
 
   const setTerminalHeight = (height: number) => {
     storeSetTerminalHeight(threadRef, height);
@@ -214,6 +240,16 @@ export const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerm
   const createNewTerminal = useStableCallback(() =>
     launchDrawerTerminal((terminalId) => storeNewTerminal(threadRef, terminalId)),
   );
+  const needsWorkspaceTerminal =
+    visible &&
+    canOperateTerminal &&
+    otherComputerTerminalIds.size > 0 &&
+    workspaceTerminalIds.length === 0 &&
+    workspaceTerminalSessions.length === 0;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opens a shell on the selected computer while preserving shells still running on another computer
+  useEffect(() => {
+    if (needsWorkspaceTerminal) createNewTerminal();
+  }, [needsWorkspaceTerminal, createNewTerminal]);
 
   const activateTerminal = (terminalId: string) => {
     storeSetActiveTerminal(threadRef, terminalId);
@@ -259,7 +295,7 @@ export const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerm
           height={terminalUiState.terminalHeight}
           composerHeight={composerHeight}
           // Known-session order is MRU and changes on focus; persisted store order keeps sidebar labels stable.
-          terminalIds={canOperateTerminal ? terminalUiState.terminalIds : serverOrderedTerminalIds}
+          terminalIds={canOperateTerminal ? workspaceTerminalIds : serverOrderedTerminalIds}
           activeTerminalId={terminalUiState.activeTerminalId}
           terminalGroups={terminalUiState.terminalGroups}
           activeTerminalGroupId={terminalUiState.activeTerminalGroupId}
@@ -305,7 +341,7 @@ export const PersistentThreadTerminalPanel = memo(function PersistentThreadTermi
   visible,
   threadRef,
   surface,
-  launchContext,
+  launchContext: requestedLaunchContext,
   keybindings,
   onAddTerminalContext,
   onSplitTerminal,
@@ -326,14 +362,39 @@ export const PersistentThreadTerminalPanel = memo(function PersistentThreadTermi
       ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
       : null;
   const project = useProject(projectRef);
+  const thread = serverThread ?? draftThread;
+  const projectRoot = project ? threadWorkspaceRoot(thread ?? {}, project.workspaceRoot) : null;
+  const launchContext =
+    requestedLaunchContext &&
+    projectRoot !== null &&
+    terminalMatchesWorkspace(requestedLaunchContext.cwd, projectRoot)
+      ? requestedLaunchContext
+      : null;
+  const terminalActions = useThreadTerminalActions(threadRef);
+  const canOperateTerminal = useEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope);
   const knownTerminalSessions = useKnownTerminalSessions({
     environmentId: threadRef.environmentId,
     threadId: threadRef.threadId,
   });
-  const threadWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
+  const threadWorktreePath = thread?.worktreePath ?? null;
+  const otherComputerTerminalIds = new Set(
+    knownTerminalSessions?.flatMap((session) =>
+      projectRoot !== null &&
+      session.state.summary &&
+      !terminalMatchesWorkspace(session.state.summary.cwd, projectRoot)
+        ? [session.target.terminalId]
+        : [],
+    ),
+  );
+  const workspaceTerminalIds = surface.terminalIds.filter(
+    (id) => !otherComputerTerminalIds.has(id),
+  );
+  const activeTerminalId = workspaceTerminalIds.includes(surface.activeTerminalId)
+    ? surface.activeTerminalId
+    : (workspaceTerminalIds[0] ?? "");
   const activeSummary =
-    knownTerminalSessions?.find((session) => session.target.terminalId === surface.activeTerminalId)
-      ?.state.summary ?? null;
+    knownTerminalSessions?.find((session) => session.target.terminalId === activeTerminalId)?.state
+      .summary ?? null;
   const worktreePath = resolveTerminalWorktreePath({
     launchContext,
     summary: activeSummary,
@@ -342,18 +403,21 @@ export const PersistentThreadTerminalPanel = memo(function PersistentThreadTermi
   const cwd =
     launchContext?.cwd ??
     activeSummary?.cwd ??
-    (project ? projectScriptCwd({ project: { cwd: project.workspaceRoot }, worktreePath }) : null);
-  const runtimeEnv = project
-    ? projectScriptRuntimeEnv({ project: { cwd: project.workspaceRoot }, worktreePath })
-    : {};
+    (projectRoot !== null
+      ? projectScriptCwd({ project: { cwd: projectRoot }, worktreePath })
+      : null);
+  const runtimeEnv =
+    projectRoot !== null
+      ? projectScriptRuntimeEnv({ project: { cwd: projectRoot }, worktreePath })
+      : {};
   const terminalLabelsById = new Map<string, string>();
   const terminalLaunchLocationsById = new Map<string, TerminalLaunchLocationWithEnv>();
-  for (const terminalId of surface.terminalIds) {
+  for (const terminalId of workspaceTerminalIds) {
     const summary =
       knownTerminalSessions?.find((session) => session.target.terminalId === terminalId)?.state
         .summary ?? null;
     terminalLabelsById.set(terminalId, resolveTerminalSessionLabel(terminalId, summary));
-    if (!project) continue;
+    if (projectRoot === null) continue;
     const terminalWorktreePath = resolveTerminalWorktreePath({
       launchContext,
       summary,
@@ -364,16 +428,31 @@ export const PersistentThreadTerminalPanel = memo(function PersistentThreadTermi
         launchContext?.cwd ??
         summary?.cwd ??
         projectScriptCwd({
-          project: { cwd: project.workspaceRoot },
+          project: { cwd: projectRoot },
           worktreePath: terminalWorktreePath,
         }),
       worktreePath: terminalWorktreePath,
       runtimeEnv: projectScriptRuntimeEnv({
-        project: { cwd: project.workspaceRoot },
+        project: { cwd: projectRoot },
         worktreePath: terminalWorktreePath,
       }),
     });
   }
+
+  const needsWorkspaceTerminal =
+    visible &&
+    canOperateTerminal &&
+    surface.terminalIds.some((id) => otherComputerTerminalIds.has(id)) &&
+    workspaceTerminalIds.length === 0;
+  const openWorkspaceTerminal = useStableCallback(() => {
+    void terminalActions.launchTerminal({
+      place: (terminalId) => useRightPanelStore.getState().openTerminal(threadRef, terminalId),
+    })?.result;
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- selects a shell on the new computer without stopping the panel's existing shell
+  useEffect(() => {
+    if (needsWorkspaceTerminal) openWorkspaceTerminal();
+  }, [needsWorkspaceTerminal, openWorkspaceTerminal]);
 
   if (!project || !cwd) return null;
 
@@ -387,12 +466,12 @@ export const PersistentThreadTerminalPanel = memo(function PersistentThreadTermi
       worktreePath={worktreePath}
       runtimeEnv={runtimeEnv}
       height={0}
-      terminalIds={surface.terminalIds}
-      activeTerminalId={surface.activeTerminalId}
+      terminalIds={workspaceTerminalIds}
+      activeTerminalId={activeTerminalId}
       terminalGroups={[
         {
           id: surface.id,
-          terminalIds: surface.terminalIds,
+          terminalIds: workspaceTerminalIds,
           ...(surface.splitDirection === "vertical" ? { splitDirection: "vertical" as const } : {}),
         },
       ]}

@@ -3,6 +3,9 @@ import { assert, describe, it } from "@effect/vitest";
 import {
   ProviderInstanceId,
   ProviderDriverKind,
+  ProviderThreadId,
+  ProviderSessionId,
+  EnvironmentId,
   ThreadId,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2ThreadShell,
@@ -10,6 +13,7 @@ import {
   type ServerProviderSkill,
 } from "@t3tools/contracts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -24,22 +28,28 @@ import { liveThreadShell } from "./McpToolAccess.testkit.ts";
 
 const caller = {
   threadId: ThreadId.make("thread:host-tools"),
-  providerSessionId: "session:host-tools",
+  providerSessionId: "credential:host-tools",
   providerInstanceId: ProviderInstanceId.make("codex"),
 };
 const hostCwd = "/home/user/project";
+const runtimeSessionId = ProviderSessionId.make("provider-session:shared");
+const providerThreadId = ProviderThreadId.make("provider-thread:host-tools");
 const providerThread = {
-  providerSessionId: caller.providerSessionId,
+  id: providerThreadId,
+  providerSessionId: runtimeSessionId,
   providerInstanceId: caller.providerInstanceId,
 } as OrchestrationV2ProviderThread;
 
 function dependencies(input: {
   skills?: ReadonlyArray<ServerProviderSkill>;
   provider?: "codex" | "claude";
+  providerInstanceId?: ProviderInstanceId;
   mcpApps?: ProviderAdapter.ProviderAdapterV2McpApps;
   live?: boolean;
   instanceId?: ProviderInstanceId;
   sessionId?: string;
+  credential?: boolean;
+  activeProviderThreadId?: ProviderThreadId | null;
   shell?: () => OrchestrationV2ThreadShell;
   onDiscovery?: (cwd: string, fresh: boolean) => void;
 }) {
@@ -48,12 +58,18 @@ function dependencies(input: {
     Layer.mock(ThreadManagement.ThreadManagementService)({
       getThreadRecords: () =>
         Effect.succeed({
-          thread: liveThreadShell(caller.threadId),
+          thread: {
+            ...liveThreadShell(caller.threadId),
+            activeProviderThreadId:
+              input.activeProviderThreadId === undefined
+                ? providerThreadId
+                : input.activeProviderThreadId,
+          },
           providerThreads: [
             {
               ...providerThread,
-              providerInstanceId: ProviderInstanceId.make(input.provider ?? "codex"),
-              providerSessionId: input.sessionId ?? caller.providerSessionId,
+              providerInstanceId:
+                input.providerInstanceId ?? ProviderInstanceId.make(input.provider ?? "codex"),
             },
           ],
         } as never),
@@ -63,14 +79,36 @@ function dependencies(input: {
       get: () => Effect.succeedSome({ workspaceRoot: hostCwd } as never),
     }),
     Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
-      get: () =>
-        Effect.succeed(
+      get: (sessionId) => {
+        assert.equal(sessionId, runtimeSessionId);
+        return Effect.succeed(
           input.live === false
             ? Option.none()
             : Option.some({
-                instanceId: input.instanceId ?? ProviderInstanceId.make(input.provider ?? "codex"),
+                instanceId:
+                  input.instanceId ??
+                  input.providerInstanceId ??
+                  ProviderInstanceId.make(input.provider ?? "codex"),
                 ...(input.mcpApps === undefined ? {} : { mcpApps: input.mcpApps }),
               } as ProviderAdapter.ProviderAdapterV2SessionRuntime),
+        );
+      },
+    }),
+    Layer.mock(McpProviderSessions.McpProviderSessions)({
+      read: () =>
+        Effect.succeed(
+          input.credential === false
+            ? undefined
+            : {
+                environmentId: EnvironmentId.make("host"),
+                threadId: caller.threadId,
+                providerSessionId: input.sessionId ?? caller.providerSessionId,
+                providerInstanceId:
+                  input.providerInstanceId ?? ProviderInstanceId.make(input.provider ?? "codex"),
+                endpoint: "http://127.0.0.1/mcp",
+                authorizationHeader: "Bearer fixture",
+                browserToolsAvailable: false,
+              },
         ),
     }),
     Layer.mock(ProviderRegistry.ProviderRegistry)({
@@ -79,7 +117,8 @@ function dependencies(input: {
           input.onDiscovery?.(cwd, fresh ?? false);
           return [
             {
-              instanceId: ProviderInstanceId.make(input.provider ?? "codex"),
+              instanceId:
+                input.providerInstanceId ?? ProviderInstanceId.make(input.provider ?? "codex"),
               enabled: true,
               driver: ProviderDriverKind.make(input.provider ?? "codex"),
               installed: true,
@@ -130,22 +169,23 @@ const fixture = Effect.gen(function* () {
 });
 
 describe("HostTools skills", () => {
-  it.effect("reads Claude skills from the host provider catalog", () =>
+  it.effect.each([
+    { provider: "claude", providerInstanceId: ProviderInstanceId.make("claude") },
+    { provider: "codex", providerInstanceId: ProviderInstanceId.make("custom-codex") },
+  ] as const)("reads skills from host instance $providerInstanceId", (input) =>
     Effect.gen(function* () {
       const { skill } = yield* fixture;
       yield* Effect.gen(function* () {
         const service = yield* HostTools.HostTools;
-        const claudeCaller = { ...caller, providerInstanceId: ProviderInstanceId.make("claude") };
-        assert.deepEqual((yield* service.listSkills(claudeCaller, {})).skills, [skill]);
+        const hostCaller = { ...caller, providerInstanceId: input.providerInstanceId };
+        assert.deepEqual((yield* service.listSkills(hostCaller, {})).skills, [skill]);
         assert.equal(
-          (yield* service.readSkill(claudeCaller, { skill: skill.name })).content,
+          (yield* service.readSkill(hostCaller, { skill: skill.name })).content,
           "# Host skill\nRead references/setup.md.",
         );
       }).pipe(
         Effect.provide(
-          HostTools.layer.pipe(
-            Layer.provide(dependencies({ provider: "claude", skills: [skill] })),
-          ),
+          HostTools.layer.pipe(Layer.provide(dependencies({ ...input, skills: [skill] }))),
         ),
       );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -366,6 +406,8 @@ describe("HostTools selective MCP", () => {
     ["stopped", { live: false }],
     ["another provider", { instanceId: ProviderInstanceId.make("other") }],
     ["another session", { sessionId: "session:other" }],
+    ["revoked credential", { credential: false }],
+    ["inactive provider thread", { activeProviderThreadId: null }],
   ] as const)("refuses %s callers before host discovery", ([_label, input]) =>
     Effect.gen(function* () {
       const service = yield* HostTools.HostTools;

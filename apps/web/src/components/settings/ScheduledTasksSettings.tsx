@@ -45,6 +45,8 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 
 import { formatRelativeTime } from "../../timestampFormat";
+import { CodespacesMenuItems } from "../ProjectCodespacesControl";
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { getCustomModelOptionsByInstance } from "../../modelSelection";
 import { providerInstanceEntriesFor } from "../../providerInstances";
@@ -139,6 +141,7 @@ const EMPTY_DRAFT: DraftState = {
   weekdays: new Set([1, 2, 3, 4, 5]),
   projectId: "",
   threadId: "",
+  codespaceName: null,
   workspaceMode: "worktree",
   baseRef: "main",
   startFromOrigin: true,
@@ -1326,6 +1329,7 @@ function ScheduledTaskEditorForm({
       schedule,
       projectId: selectedProjectId as ProjectId,
       threadId: draft.threadId ? (draft.threadId as ThreadId) : null,
+      codespaceName: draft.threadId ? null : draft.codespaceName,
       workspaceStrategy,
       modelSelection,
       runtimeMode: draft.runtimeMode,
@@ -1450,12 +1454,57 @@ function ScheduledTaskEditorForm({
             threadId={draft.threadId ? (draft.threadId as ThreadId) : null}
           />
 
+          {!draft.threadId &&
+          selectedProject &&
+          environment?.serverConfig?.environment.capabilities.codespaces ? (
+            <Field label="Computer">
+              <Menu>
+                <MenuTrigger
+                  render={<Button variant="outline" size="sm" disabled={saving || !connected} />}
+                >
+                  {draft.codespaceName ?? "Host"}
+                </MenuTrigger>
+                <MenuPopup>
+                  <MenuItem
+                    onClick={() =>
+                      setDraft((current) => ({
+                        ...current,
+                        codespaceName: null,
+                        existingWorktreePath: "",
+                      }))
+                    }
+                  >
+                    Host
+                  </MenuItem>
+                  <CodespacesMenuItems
+                    environmentId={environmentId}
+                    projectId={selectedProject.id}
+                    codespaceName={draft.codespaceName}
+                    onCodespaceChange={(codespaceName) =>
+                      setDraft((current) => ({
+                        ...current,
+                        codespaceName,
+                        existingWorktreePath: "",
+                      }))
+                    }
+                    locked={saving || !connected}
+                  />
+                </MenuPopup>
+              </Menu>
+            </Field>
+          ) : null}
+
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Project" htmlFor="scheduled-task-project">
               <Select
                 value={selectedProjectId}
                 onValueChange={(projectId) =>
-                  setDraft((current) => ({ ...current, projectId: projectId ?? "" }))
+                  setDraft((current) => ({
+                    ...current,
+                    projectId: projectId ?? "",
+                    codespaceName: null,
+                    existingWorktreePath: "",
+                  }))
                 }
               >
                 <SelectTrigger size="sm" id="scheduled-task-project">
@@ -1506,7 +1555,14 @@ function ScheduledTaskEditorForm({
                 key={`${environmentId}:${selectedProjectId}`}
                 id="scheduled-task-base-ref"
                 environmentId={environmentId}
-                cwd={selectedProject?.workspaceRoot ?? null}
+                cwd={
+                  selectedProject
+                    ? threadWorkspaceRoot(
+                        { codespaceName: draft.codespaceName },
+                        selectedProject.workspaceRoot,
+                      )
+                    : null
+                }
                 value={draft.baseRef}
                 onValueChange={(baseRef) => setDraft((current) => ({ ...current, baseRef }))}
                 startFromOrigin={draft.startFromOrigin}

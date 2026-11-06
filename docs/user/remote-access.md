@@ -244,6 +244,9 @@ review the compute and storage charges, then create it. A computer can hold
 several projects, each in `/workspaces/{project_name}`. Creation does not require
 a project, GitHub repository, or devcontainer configuration.
 In browser VS Code, open `/workspaces` to see every project's folder.
+Rename, rebuild, or change a computer's machine size from the same settings
+section. Stop the computer before changing its machine size. Rebuilding can
+remove files outside `/workspaces` and affects every project on the computer.
 
 Choose a project in the same settings section, then choose **Prepare project**.
 The first connection copies the project's current committed branch and Git
@@ -263,6 +266,8 @@ visible with a **Start** button. Start resumes the existing computer and its
 files. Choose the host or a Codespace before creating a thread. That choice stays
 fixed for the thread. The same project can have host and Codespace threads running
 at once. Switching a draft between prepared computers does not move existing threads.
+Scheduled and webhook tasks that create fresh threads have their own **Run on**
+choice. Tasks that post into an existing thread keep that thread's computer.
 
 A devcontainer is optional. When present, T3 attempts its lifecycle setup commands
 with memory, process and CPU limits. If the computer cannot enforce those limits,
@@ -293,6 +298,9 @@ checkout or a worktree. No provider sign-in is required in the Codespace.
 Commands, file browsing, terminals, Git and checkpoints use its filesystem.
 Preview URLs are forwarded privately through your T3 host. Other providers are
 not supported for this execution target.
+The thread's **Servers** section shows the Codespace's CPU and memory usage and
+servers running in its checkout. Open or stop those servers there. Servers
+without a known thread owner appear as workspace servers.
 
 Claude uses remote tools for reading, searching, editing and shell commands.
 The agent reads skills and their text references from your T3 host through

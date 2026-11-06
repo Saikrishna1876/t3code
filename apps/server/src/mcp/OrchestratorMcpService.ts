@@ -269,6 +269,7 @@ function scheduledTaskSummary(task: ScheduledTask, mayRun: boolean): Orchestrato
     enabled: task.enabled,
     projectId: task.projectId,
     boundThreadId: task.threadId,
+    codespaceName: task.codespaceName ?? null,
     schedule: task.schedule,
     nextRunAt: task.nextRunAt,
     lastRunStatus: task.lastRunStatus,
@@ -1905,6 +1906,13 @@ const make = Effect.gen(function* () {
         schedule: input.schedule,
         projectId,
         threadId: bindToCurrentThread && parent !== undefined ? parent.thread.id : null,
+        codespaceName: bindToCurrentThread
+          ? null
+          : input.codespaceName === undefined
+            ? parent?.thread.projectId === projectId
+              ? (parent.thread.codespaceName ?? null)
+              : null
+            : input.codespaceName,
         workspaceStrategy: scheduledTaskWorkspaceStrategy(bindToCurrentThread),
         modelSelection,
         runtimeMode: limits.runtimeMode,
@@ -1978,6 +1986,12 @@ const make = Effect.gen(function* () {
           input.bindToCurrentThread === undefined
             ? existing.workspaceStrategy
             : scheduledTaskWorkspaceStrategy(input.bindToCurrentThread);
+        const previousThread =
+          existing.threadId !== null && input.bindToCurrentThread === false
+            ? yield* threadManagement
+                .getThreadShell(existing.threadId)
+                .pipe(Effect.mapError(threadManagementFailure))
+            : null;
         const upsertInput: ScheduledTaskUpsertInput = {
           id: existing.id,
           title: input.title ?? existing.title,
@@ -1986,6 +2000,12 @@ const make = Effect.gen(function* () {
           schedule: input.schedule ?? existing.schedule,
           projectId: existing.projectId,
           threadId,
+          codespaceName:
+            threadId !== null
+              ? null
+              : input.codespaceName === undefined
+                ? (previousThread?.codespaceName ?? existing.codespaceName ?? null)
+                : input.codespaceName,
           workspaceStrategy,
           modelSelection: existing.modelSelection,
           runtimeMode: existing.runtimeMode,

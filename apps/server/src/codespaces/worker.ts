@@ -1,3 +1,4 @@
+import { makeWorkspaceTelemetry } from "./WorkspaceTelemetry.ts";
 // @effect-diagnostics nodeBuiltinImport:off -- standalone execution worker owns Node HTTP and filesystem boundaries.
 import * as NodeHttp from "node:http";
 import * as NodeFS from "node:fs";
@@ -529,7 +530,21 @@ export async function startWorker(root: string, token: string, port = 0) {
     },
     refresh: async () => null,
   };
-  const groups = { git, vcs: driver, checkpoints, files: filesystem, entries, worktrees };
+  const executorPid = Number(
+    await NodeFSP.readFile(
+      NodePath.join(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "executor.pid"),
+      "utf8",
+    ).catch(() => ""),
+  );
+  const groups = {
+    git,
+    vcs: driver,
+    checkpoints,
+    files: filesystem,
+    entries,
+    worktrees,
+    telemetry: makeWorkspaceTelemetry(undefined, undefined, new Set([process.pid, executorPid])),
+  };
   const server = NodeHttp.createServer(async (request, response) => {
     const supplied = Buffer.from(request.headers.authorization ?? "");
     const expected = Buffer.from(`Bearer ${token}`);

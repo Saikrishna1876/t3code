@@ -83,6 +83,8 @@ ones across your connected environments. Use the settings filter to narrow the
 list by environment or project. Each task runs on the environment you choose,
 using its project, model, and workspace settings. Fixed-time schedules use that
 environment's time zone, which may differ from your phone's.
+For tasks that start fresh threads, **Run on** selects the host or a prepared
+Codespace. Tasks that post into an existing thread use that thread's computer.
 
 Deleting a thread also deletes tasks that post into that thread. Tasks that start
 a new thread on each run survive deletion of their previous threads.

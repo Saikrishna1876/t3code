@@ -4,6 +4,7 @@ import {
   type DiscoveredLocalServer,
   type EnvironmentId,
   type ThreadId,
+  type HostResourcesSnapshot,
 } from "@t3tools/contracts";
 import { isLoopbackHost } from "@t3tools/shared/preview";
 
@@ -15,6 +16,9 @@ const EMPTY_PORTS: ReadonlyArray<DiscoveredLocalServer> = Object.freeze([]);
 interface DiscoveredPortsState {
   readonly servers: ReadonlyArray<DiscoveredLocalServer>;
   readonly configuredUrlProbing: boolean;
+  readonly resources: HostResourcesSnapshot | undefined;
+  readonly codespaceName: string | undefined;
+  readonly error: "disconnected" | undefined;
 }
 
 export function boundConfiguredLocalServerUrls(
@@ -40,16 +44,10 @@ export function boundConfiguredLocalServerUrls(
   return bounded;
 }
 
-function useDiscoveredPorts(
-  environmentId: EnvironmentId | null,
-  configuredUrls?: ReadonlyArray<string>,
-): ReadonlyArray<DiscoveredLocalServer> {
-  return useDiscoveredPortsState(environmentId, configuredUrls).servers;
-}
-
 export function useDiscoveredPortsState(
   environmentId: EnvironmentId | null,
   configuredUrls?: ReadonlyArray<string>,
+  threadId?: ThreadId | null,
 ): DiscoveredPortsState {
   const boundedConfiguredUrls = boundConfiguredLocalServerUrls(configuredUrls);
   const query = useEnvironmentQuery(
@@ -57,24 +55,17 @@ export function useDiscoveredPortsState(
       ? null
       : previewEnvironment.discoveredServers({
           environmentId,
-          input: boundedConfiguredUrls.length ? { configuredUrls: boundedConfiguredUrls } : {},
+          input: {
+            ...(boundedConfiguredUrls.length ? { configuredUrls: boundedConfiguredUrls } : {}),
+            ...(threadId ? { threadId } : {}),
+          },
         }),
   );
   return {
     servers: query.data?.servers ?? EMPTY_PORTS,
     configuredUrlProbing: query.data?.configuredUrlProbing === true,
+    resources: query.data?.resources,
+    codespaceName: query.data?.codespaceName,
+    error: query.data?.error,
   };
-}
-
-export function useThreadDiscoveredPorts(input: {
-  readonly environmentId: EnvironmentId | null;
-  readonly threadId: ThreadId | null;
-}): ReadonlyArray<DiscoveredLocalServer> {
-  const ports = useDiscoveredPorts(input.environmentId);
-  return input.threadId
-    ? ports.filter(
-        (port) =>
-          port.terminal?.threadId === input.threadId || port.agent?.threadId === input.threadId,
-      )
-    : EMPTY_PORTS;
 }

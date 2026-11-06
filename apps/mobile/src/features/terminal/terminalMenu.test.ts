@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { DEFAULT_TERMINAL_ID } from "@t3tools/contracts";
+import { DEFAULT_TERMINAL_ID, EnvironmentId, ThreadId } from "@t3tools/contracts";
+
+import {
+  EMPTY_TERMINAL_SESSION_STATE,
+  type KnownTerminalSession,
+} from "@t3tools/client-runtime/state/terminal";
 
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 
 import {
   nextOpenTerminalId,
+  pickTerminalIdForBootstrap,
   previousLiveTerminalId,
   resolveProjectScriptTerminalId,
   type TerminalMenuSession,
@@ -87,4 +93,61 @@ describe("resolveProjectScriptTerminalId", () => {
     });
     expect(terminalId).not.toBe(DEFAULT_TERMINAL_ID);
   });
+});
+
+it("bootstraps on the selected computer while retaining terminals on other computers", () => {
+  const remoteRoot = "/repo/.git/t3-codespaces/cloud";
+  const session = (terminalId: string, cwd: string): KnownTerminalSession => ({
+    target: {
+      environmentId: EnvironmentId.make("host"),
+      threadId: ThreadId.make("thread"),
+      terminalId,
+    },
+    state: {
+      ...EMPTY_TERMINAL_SESSION_STATE,
+      status: "running",
+      summary: {
+        threadId: ThreadId.make("thread"),
+        terminalId,
+        cwd,
+        worktreePath: null,
+        status: "running",
+        pid: 123,
+        exitCode: null,
+        exitSignal: null,
+        hasRunningSubprocess: false,
+        label: terminalId,
+        updatedAt: "2026-11-06T00:00:00.000Z",
+      },
+    },
+  });
+  const host = session("term-1", "/repo");
+  const remote = session("term-3", remoteRoot);
+  expect(
+    pickTerminalIdForBootstrap({ sessions: [host], workspaceRoot: remoteRoot, canOperate: false }),
+  ).toBeNull();
+  expect(
+    pickTerminalIdForBootstrap({ sessions: [host], workspaceRoot: remoteRoot, canOperate: true }),
+  ).toBe("term-2");
+  expect(
+    pickTerminalIdForBootstrap({
+      sessions: [host, remote],
+      workspaceRoot: remoteRoot,
+      canOperate: true,
+    }),
+  ).toBe("term-3");
+  expect(
+    pickTerminalIdForBootstrap({
+      sessions: [host, remote],
+      workspaceRoot: "/repo",
+      canOperate: true,
+    }),
+  ).toBe("term-1");
+  expect(
+    pickTerminalIdForBootstrap({
+      sessions: [host, remote],
+      workspaceRoot: remoteRoot,
+      canOperate: false,
+    }),
+  ).toBe("term-3");
 });

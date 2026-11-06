@@ -276,13 +276,17 @@ const make = Effect.fn("NodePtyAdapter.make")(function* () {
         const remoteRoot = target.executor.remoteRoot;
         const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
         const remoteEnvironment = [
-          "T3CODE_PROJECT_ROOT",
-          "T3CODE_WORKTREE_PATH",
-          "COLORTERM",
-          "NO_COLOR",
-          "FORCE_COLOR",
+          ...new Set([
+            "T3CODE_PROJECT_ROOT",
+            "T3CODE_WORKTREE_PATH",
+            "COLORTERM",
+            "NO_COLOR",
+            "FORCE_COLOR",
+            ...Object.keys(input.envOverrides ?? {}),
+          ]),
         ].flatMap((key) => {
-          const value = input.env[key];
+          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return [];
+          const value = input.envOverrides?.[key] ?? input.env[key];
           if (value === undefined) return [];
           const remoteValue = key.startsWith("T3CODE_")
             ? CodespacesWorkspace.mapWorkspacePath(value, target.localRoot, remoteRoot)
@@ -296,7 +300,11 @@ const make = Effect.fn("NodePtyAdapter.make")(function* () {
           ...remoteEnvironment,
           `cd -- ${quote(target.remoteCwd)}`,
         ];
-        const bash = `exec bash --rcfile <(printf '%s\\n' ${startup.map(quote).join(" ")}) -i`;
+        const identity = [
+          ["T3CODE_THREAD_ID", input.threadId],
+          ["T3CODE_TERMINAL_ID", input.terminalId],
+        ].flatMap(([key, value]) => (value === undefined ? [] : [`export ${key}=${quote(value)}`]));
+        const bash = `${identity.length > 0 ? identity.join("; ") + "; " : ""}exec bash --rcfile <(printf '%s\\n' ${startup.map(quote).join(" ")}) -i`;
         input = {
           ...input,
           cwd: target.hostRoot ?? target.localRoot,
