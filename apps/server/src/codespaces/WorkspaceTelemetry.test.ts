@@ -146,4 +146,26 @@ it("rejects stale process identities and other workspaces before signaling a rem
   expect(signal).not.toHaveBeenCalled();
   await telemetry.stop({ ...input, processStartTime: "200" });
   expect(signal).toHaveBeenCalledWith(123, "SIGTERM");
+
+  const workspace = NodePath.resolve(test.proc, "../workspace");
+  for (const relative of [".git/t3-worktrees/project/other", "checkouts/other"]) {
+    const checkout = NodePath.join(workspace, relative);
+    const cwd = NodePath.join(checkout, "app");
+    await NodeFSP.mkdir(cwd, { recursive: true });
+    await NodeFSP.writeFile(
+      NodePath.join(checkout, ".git"),
+      "gitdir: /repo/.git/worktrees/other\n",
+    );
+    await NodeFSP.unlink(NodePath.join(test.proc, "123/cwd"));
+    await NodeFSP.symlink(cwd, NodePath.join(test.proc, "123/cwd"));
+    signal.mockClear();
+    const scoped = test.telemetry();
+    const currentInput = { ...input, cwd: workspace, processStartTime: "200" };
+    expect((await scoped.scan(currentInput)).servers).toEqual([]);
+    await expect(scoped.stop(currentInput)).rejects.toThrow();
+    expect(signal).not.toHaveBeenCalled();
+    expect((await scoped.scan({ ...currentInput, cwd: checkout })).servers).toHaveLength(1);
+    await scoped.stop({ ...currentInput, cwd: checkout });
+    expect(signal).toHaveBeenCalledWith(123, "SIGTERM");
+  }
 });

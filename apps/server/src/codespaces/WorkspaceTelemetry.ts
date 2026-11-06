@@ -162,6 +162,29 @@ export function makeWorkspaceTelemetry(
     const sockets = [...parseListeningSockets(tcp), ...parseListeningSockets(tcp6)];
     const byInode = new Map(sockets.map((socket) => [socket.inode, socket.port]));
     const servers: DiscoveredLocalServer[] = [];
+    const ownership = new Map<string, boolean>();
+    const ownsCheckout = async (directory: string) => {
+      const cached = ownership.get(directory);
+      if (cached !== undefined) return cached;
+      for (let current = directory; current !== cwd; current = NodePath.dirname(current)) {
+        if (NodePath.basename(current) === ".git") {
+          ownership.set(directory, false);
+          return false;
+        }
+        try {
+          await NodeFSP.lstat(NodePath.join(current, ".git"));
+          ownership.set(directory, false);
+          return false;
+        } catch (error) {
+          if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+            ownership.set(directory, false);
+            return false;
+          }
+        }
+      }
+      ownership.set(directory, true);
+      return true;
+    };
     for (const process of table.filter(
       (item) =>
         !excludedPids.has(item.pid) &&
@@ -169,6 +192,7 @@ export function makeWorkspaceTelemetry(
         inside(item.cwd, cwd) &&
         item.uid === (globalThis.process.getuid?.() ?? item.uid),
     )) {
+      if (!(await ownsCheckout(process.cwd))) continue;
       const directory = NodePath.join(procRoot, String(process.pid), "fd");
       const descriptors = await NodeFSP.readdir(directory).catch(() => []);
       const links = await Promise.all(

@@ -110,7 +110,7 @@ export function ThreadServersPanel(props: {
       input: {
         pid: server.pid,
         port: server.port,
-        threadId: props.threadId,
+        ...(discovery.threadId ? { threadId: discovery.threadId } : {}),
         ...(server.processStartTime ? { processStartTime: server.processStartTime } : {}),
       },
     });

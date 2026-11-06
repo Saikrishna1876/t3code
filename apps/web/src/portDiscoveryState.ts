@@ -7,13 +7,17 @@ import {
   type HostResourcesSnapshot,
 } from "@t3tools/contracts";
 import { isLoopbackHost } from "@t3tools/shared/preview";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
 import { previewEnvironment } from "./state/preview";
 import { useEnvironmentQuery } from "./state/query";
+import { useQuietThreadShell } from "./state/entities";
+import { useComposerDraftStore } from "./composerDraftStore";
 
 const EMPTY_PORTS: ReadonlyArray<DiscoveredLocalServer> = Object.freeze([]);
 
 interface DiscoveredPortsState {
+  readonly threadId: ThreadId | null | undefined;
   readonly servers: ReadonlyArray<DiscoveredLocalServer>;
   readonly configuredUrlProbing: boolean;
   readonly resources: HostResourcesSnapshot | undefined;
@@ -49,19 +53,27 @@ export function useDiscoveredPortsState(
   configuredUrls?: ReadonlyArray<string>,
   threadId?: ThreadId | null,
 ): DiscoveredPortsState {
+  const threadRef = environmentId && threadId ? scopeThreadRef(environmentId, threadId) : null;
+  const thread = useQuietThreadShell(threadRef);
+  const draft = useComposerDraftStore((store) =>
+    threadRef ? store.getDraftThreadByRef(threadRef) : null,
+  );
+  const unsavedDraft = thread === null ? draft : null;
+  const targetThreadId = unsavedDraft ? null : threadId;
   const boundedConfiguredUrls = boundConfiguredLocalServerUrls(configuredUrls);
   const query = useEnvironmentQuery(
-    environmentId === null
+    environmentId === null || unsavedDraft?.codespaceName
       ? null
       : previewEnvironment.discoveredServers({
           environmentId,
           input: {
             ...(boundedConfiguredUrls.length ? { configuredUrls: boundedConfiguredUrls } : {}),
-            ...(threadId ? { threadId } : {}),
+            ...(targetThreadId ? { threadId: targetThreadId } : {}),
           },
         }),
   );
   return {
+    threadId: targetThreadId,
     servers: query.data?.servers ?? EMPTY_PORTS,
     configuredUrlProbing: query.data?.configuredUrlProbing === true,
     resources: query.data?.resources,

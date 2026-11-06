@@ -15,6 +15,7 @@ import { page, userEvent } from "vite-plus/test/browser";
 import "~/index.css";
 import { act, render } from "../../../test/render";
 import { ScheduledTasksSettings } from "./ScheduledTasksSettings";
+import { MenuItem } from "../ui/menu";
 
 const environmentId = EnvironmentId.make("laptop");
 const projectId = ProjectId.make("project");
@@ -47,7 +48,12 @@ const threadFamilyRead = {
   threads: [{ id: task.threadId, title: "Fix login bug" }],
 };
 
-const state = vi.hoisted(() => ({ connected: true, tasksLoaded: true, secondary: false }));
+const state = vi.hoisted(() => ({
+  connected: true,
+  tasksLoaded: true,
+  secondary: false,
+  codespaces: false,
+}));
 const secondaryId = EnvironmentId.make("secondary");
 const permissions = new Map<string, Atom.Writable<boolean>>();
 
@@ -55,6 +61,7 @@ function setup() {
   state.connected = true;
   state.tasksLoaded = true;
   state.secondary = false;
+  state.codespaces = false;
   permissions.clear();
   permissions.set(environmentId, Atom.make(true));
   permissions.set(secondaryId, Atom.make(true));
@@ -62,7 +69,12 @@ function setup() {
 }
 
 function secondaryEnvironment() {
-  return { ...environment(), environmentId: secondaryId, label: "Secondary" };
+  return {
+    ...environment(),
+    environmentId: secondaryId,
+    label: "Secondary",
+    serverConfig: { environment: { platform: "linux", capabilities: { codespaces: false } } },
+  };
 }
 
 function environment() {
@@ -71,10 +83,19 @@ function environment() {
     label: "Laptop",
     connection: { phase: state.connected ? "connected" : "disconnected" },
     serverConfig: state.connected
-      ? { environment: { platform: "linux", capabilities: { codespaces: false } } }
+      ? { environment: { platform: "linux", capabilities: { codespaces: state.codespaces } } }
       : null,
   };
 }
+
+vi.mock(import("../ProjectCodespacesControl"), () => ({
+  CodespacesMenuItems: ({
+    onCodespaceChange,
+  }: {
+    onCodespaceChange?: ((name: string | null) => void) | undefined;
+  }) => <MenuItem onClick={() => onCodespaceChange?.("cloud")}>Cloud</MenuItem>,
+}));
+vi.mock(import("../WorktreeBaseBranchPicker"), () => ({ WorktreeBaseBranchPicker: () => <></> }));
 
 vi.mock(import("./SettingsScopeContext"), async (original) => {
   const scope = () => {
@@ -125,7 +146,7 @@ vi.mock(import("../../state/query"), async (original) => ({
     data:
       request === null || request === threadFamilyRead
         ? request
-        : { tasks: state.tasksLoaded ? [task] : [] },
+        : { tasks: state.tasksLoaded ? [task] : [], refs: [] },
     error: null,
     isPending: false,
     refresh: vi.fn(),
@@ -138,7 +159,9 @@ vi.mock(import("../../state/environments"), async (original) => ({
 }));
 vi.mock(import("../../state/entities"), async (original) => ({
   ...(await original()),
-  useProjects: (() => [{ id: projectId, environmentId, title: "Project" }]) as never,
+  useProjects: (() => [
+    { id: projectId, environmentId, title: "Project", workspaceRoot: "/repo" },
+  ]) as never,
 }));
 vi.mock(import("../../hooks/useSettings"), async (original) => ({
   ...(await original()),
@@ -170,9 +193,21 @@ describe("ScheduledTasksSettings", () => {
   it("keeps the permitted representative as the creation target", async () => {
     setup();
     state.secondary = true;
+    state.codespaces = true;
     await using screen = await render(<ScheduledTasksSettings />);
     await screen.getByRole("button", { name: "New task" }).click();
     await expect.element(page.getByLabelText("Runs on")).toHaveTextContent("Laptop");
+    await page.getByRole("button", { name: "Host", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Cloud", exact: true }).click();
+    await expect.element(page.getByRole("button", { name: "cloud", exact: true })).toBeVisible();
+    await page.getByLabelText("Runs on").click();
+    await page.getByRole("option", { name: /Secondary/ }).click();
+    await expect
+      .element(page.getByRole("button", { name: "cloud", exact: true }))
+      .not.toBeInTheDocument();
+    await page.getByLabelText("Runs on").click();
+    await page.getByRole("option", { name: /Laptop/ }).click();
+    await expect.element(page.getByRole("button", { name: "Host", exact: true })).toBeVisible();
   });
 
   it("disables creation without a connected target", async () => {

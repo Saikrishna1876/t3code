@@ -1377,6 +1377,7 @@ function ScheduledTaskEditorForm({
                 setDraft((current) => ({
                   ...current,
                   projectId: defaultScheduledTaskProjectId(projectsOn(next.environmentId), scope),
+                  codespaceName: null,
                   modelKey: "",
                   baseModelSelection: null,
                   baseRef: "main",
