@@ -229,3 +229,73 @@ it.effect(
       }).pipe(Effect.provide(ScheduledTaskService.layer.pipe(Layer.provide(layerDependencies))));
     }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
+
+it.effect.each(
+  [undefined, null, "cloud-computer"].flatMap((codespaceName) => [
+    { codespaceName, schedule: { type: "interval", everyMs: 60000 } },
+    { codespaceName, schedule: { type: "webhook" } },
+  ]),
+)(
+  "preserves the selected computer for fresh scheduled and webhook threads: %s",
+  ({ codespaceName, schedule }) =>
+    Effect.gen(function* () {
+      const launched = yield* Deferred.make<ThreadLaunchService.ThreadLaunchInput>();
+      const dependencies = Layer.mergeAll(
+        NodeCrypto.layer,
+        Scheduler.layer,
+        Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+          launch: (input) =>
+            Deferred.succeed(launched, input).pipe(
+              Effect.as({ threadId: "scheduled-cloud-thread", resumed: false } as never),
+            ),
+        }),
+        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+          namedProjectsRoot: "/projects",
+          isScratchProject: () => Effect.succeed(false),
+        }),
+        Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+      );
+      yield* Effect.gen(function* () {
+        const service = yield* ScheduledTaskService.ScheduledTaskService;
+        const input = yield* decodeUpsertInput({
+          title: "Cloud review",
+          prompt: "Review changes",
+          enabled: true,
+          projectId: "scheduled-cloud-project",
+          codespaceName,
+          schedule,
+          workspaceStrategy: { type: "root" },
+          modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+        });
+        const { task } = yield* service.upsert(input);
+        expect(task).toMatchObject({ codespaceName: codespaceName ?? null });
+        expect((yield* service.list()).tasks[0]).toMatchObject({
+          codespaceName: codespaceName ?? null,
+        });
+        const { codespaceName: _target, ...legacyEdit } = input;
+        expect(
+          (yield* service.upsert({ ...legacyEdit, id: task.id, title: "Edited" })).task
+            .codespaceName,
+        ).toBe(codespaceName ?? null);
+        if (schedule.type === "webhook") {
+          const delivery = yield* service.triggerWebhook({
+            hookId: task.id,
+            token: task.webhook?.path.split("/").at(-1) ?? "",
+            method: "POST",
+            path: `/api/hooks/${task.id}`,
+            query: "",
+            headers: { "content-type": "application/json" },
+            body: new TextEncoder().encode("{}"),
+            bodyText: "{}",
+          });
+          expect(delivery._tag).toBe("accepted");
+        } else {
+          yield* service.runNow({ id: task.id });
+        }
+        expect((yield* Deferred.await(launched)).codespaceName).toBe(codespaceName ?? null);
+      }).pipe(Effect.provide(ScheduledTaskService.layer.pipe(Layer.provide(dependencies))));
+    }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);

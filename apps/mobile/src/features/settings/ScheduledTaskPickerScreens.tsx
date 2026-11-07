@@ -1,3 +1,4 @@
+import { threadWorkspaceRoot } from "@t3tools/contracts";
 import { useNavigation } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 import { useMemo, useState } from "react";
@@ -117,7 +118,9 @@ export function ScheduledTaskBranchPickerRouteScreen() {
   const debouncedQuery = useDebouncedValue(query, 150);
   const branches = usePaginatedBranches({
     environmentId: editor?.environmentId ?? null,
-    cwd: project?.workspaceRoot ?? null,
+    cwd: project
+      ? threadWorkspaceRoot({ codespaceName: editor?.draft.codespaceName }, project.workspaceRoot)
+      : null,
     query: debouncedQuery,
   });
   const visibleBranches = branches.refs.filter(

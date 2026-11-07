@@ -1,10 +1,12 @@
 import {
   AuthTerminalOperateScope,
   AuthTerminalReadScope,
+  threadWorkspaceRoot,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
+import { terminalMatchesWorkspace } from "@t3tools/client-runtime/state/terminal";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { nextTerminalId } from "@t3tools/shared/terminalLabels";
 import { useComposerDraftStore } from "../../composerDraftStore";
@@ -39,7 +41,9 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
       ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
       : null;
   const project = useProject(projectRef);
-  const threadWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
+  const thread = serverThread ?? draftThread;
+  const projectRoot = project ? threadWorkspaceRoot(thread ?? {}, project.workspaceRoot) : null;
+  const threadWorktreePath = thread?.worktreePath ?? null;
   const knownSessions = useKnownTerminalSessions({
     environmentId: threadRef?.environmentId ?? null,
     threadId: threadRef?.threadId ?? null,
@@ -71,10 +75,10 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
   };
 
   const defaultLaunchLocation = (): TerminalLaunchLocation | null =>
-    project
+    projectRoot !== null
       ? {
           cwd: projectScriptCwd({
-            project: { cwd: project.workspaceRoot },
+            project: { cwd: projectRoot },
             worktreePath: threadWorktreePath,
           }),
           worktreePath: threadWorktreePath,
@@ -89,10 +93,18 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
     readonly extraEnv?: Record<string, string>;
     readonly size?: { readonly cols: number; readonly rows: number };
   }) => {
-    if (!threadRef || !canWrite() || !project) return null;
+    if (!threadRef || !canWrite() || projectRoot === null) return null;
     const location = input.location ?? defaultLaunchLocation();
     if (!location) return null;
-    const terminalId = input.terminalId ?? allocateTerminalId();
+    const requestedSession = knownSessions?.find(
+      (session) => session.target.terminalId === input.terminalId,
+    );
+    const terminalId =
+      input.terminalId &&
+      (!requestedSession?.state.summary ||
+        terminalMatchesWorkspace(requestedSession.state.summary.cwd, projectRoot))
+        ? input.terminalId
+        : allocateTerminalId();
     input.place(terminalId);
     const result = openTerminalCommand({
       environmentId: threadRef.environmentId,
@@ -102,7 +114,7 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
         cwd: location.cwd,
         ...(location.worktreePath !== null ? { worktreePath: location.worktreePath } : {}),
         env: projectScriptRuntimeEnv({
-          project: { cwd: project.workspaceRoot },
+          project: { cwd: projectRoot },
           worktreePath: location.worktreePath,
           ...(input.extraEnv ? { extraEnv: input.extraEnv } : {}),
         }),

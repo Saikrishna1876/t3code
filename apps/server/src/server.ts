@@ -85,6 +85,7 @@ import * as DeviceService from "./device/DeviceService.ts";
 import * as DeviceHubProxy from "./device/DeviceHubProxy.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
+import * as WorkspaceDiscovery from "./preview/WorkspaceDiscovery.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
 import * as PreviewAgentActivity from "./preview/PreviewAgentActivity.ts";
 import * as DesktopBrowserChannel from "./preview/DesktopBrowserChannel.ts";
@@ -463,6 +464,13 @@ const layerCodespacesPreview = CodespacesPreview.layer.pipe(
 const layerPreview = Layer.empty.pipe(
   Layer.provideMerge(PreviewManager.layer.pipe(Layer.provide(layerCodespacesPreview))),
   Layer.provideMerge(layerPortScanner),
+  Layer.provideMerge(
+    WorkspaceDiscovery.layer.pipe(
+      Layer.provide(layerPortScanner),
+      Layer.provide(ProjectionStoreV2.layer),
+      Layer.provide(ProjectStore.layer),
+    ),
+  ),
 );
 
 const layerDevice = DeviceService.layer.pipe(

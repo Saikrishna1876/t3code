@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { NonNegativeInt, PositiveInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { BROWSER_PROFILE_MAX_COUNT, BrowserProfile, BrowserProfileId } from "./browserProfile.ts";
+import { HostResourcesSnapshot } from "./hostResources.ts";
 
 export const PREVIEW_URL_MAX_LENGTH = 2_048;
 export const CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS = 32;
@@ -324,6 +325,7 @@ export const DiscoveredLocalServer = Schema.Struct({
   url: Url,
   processName: Schema.NullOr(TrimmedNonEmptyString),
   pid: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
+  processStartTime: Schema.optionalKey(TrimmedNonEmptyString),
   terminal: Schema.NullOr(
     Schema.Struct({
       threadId: ThreadId,
@@ -338,6 +340,8 @@ export type DiscoveredLocalServer = typeof DiscoveredLocalServer.Type;
 export const PreviewStopLocalServerInput = Schema.Struct({
   pid: PositiveInt,
   port: LocalServerPort,
+  threadId: Schema.optionalKey(ThreadId),
+  processStartTime: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export type PreviewStopLocalServerInput = typeof PreviewStopLocalServerInput.Type;
 
@@ -366,6 +370,9 @@ export const DiscoveredLocalServerList = Schema.Struct({
   servers: Schema.Array(DiscoveredLocalServer),
   scannedAt: Schema.String,
   configuredUrlProbing: Schema.optional(Schema.Literal(true)),
+  codespaceName: Schema.optionalKey(TrimmedNonEmptyString),
+  resources: Schema.optionalKey(HostResourcesSnapshot),
+  error: Schema.optionalKey(Schema.Literal("disconnected")),
 });
 export type DiscoveredLocalServerList = typeof DiscoveredLocalServerList.Type;
 

@@ -11,6 +11,7 @@ import {
   XIcon,
 } from "lucide-react";
 import type {
+  Codespace,
   CodespacesConfiguration,
   CodespacesOptions,
   CodespacesRunInput,
@@ -94,6 +95,12 @@ function CodespacesComputerSettings({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<CodespacesRunInput | null>(null);
+  const [editing, setEditing] = useState<{
+    space: Codespace;
+    kind: "rename" | "resize";
+    value: string;
+    options: CodespacesOptions | null;
+  } | null>(null);
   const formId = useId();
   const operation = state.data?.operations.at(-1);
   const feedback = operation ? codespacesOperationPresentation(operation) : null;
@@ -112,6 +119,7 @@ function CodespacesComputerSettings({
     setPending(true);
     setError(null);
     setConfirmation(null);
+    setEditing(null);
     const result = await run({ environmentId, input });
     if (result._tag === "Failure") failure(result);
     else if (input.action === "create") setOptions(null);
@@ -129,6 +137,27 @@ function CodespacesComputerSettings({
     }
     setPending(false);
   };
+  const editComputer = async (space: Codespace, kind: "rename" | "resize") => {
+    if (!canManage || busy) return;
+    if (kind === "rename") {
+      setEditing({ space, kind, value: space.displayName || space.name, options: null });
+      return;
+    }
+    if (space.state !== "Shutdown") return;
+    setPending(true);
+    setError(null);
+    const result = await loadOptions({ environmentId, input: {} });
+    if (result._tag === "Failure") failure(result);
+    else setEditing({ space, kind, value: space.machine, options: result.value });
+    setPending(false);
+  };
+  const canSaveEdit =
+    editing !== null &&
+    Boolean(editing.value.trim()) &&
+    editing.value.trim() !==
+      (editing.kind === "rename"
+        ? editing.space.displayName || editing.space.name
+        : editing.space.machine);
   return (
     <SettingsSection
       id={id}
@@ -334,6 +363,44 @@ function CodespacesComputerSettings({
                   </Button>
                 ) : null}
                 <Button
+                  size="sm"
+                  variant="outline"
+                  aria-label={`Rename ${space.displayName || space.name}`}
+                  disabled={busy || !canManage}
+                  onClick={() => void editComputer(space, "rename")}
+                >
+                  Rename
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  aria-label={`Change machine for ${space.displayName || space.name}`}
+                  title={
+                    space.state === "Shutdown"
+                      ? "Change machine"
+                      : "Stop computer before changing its machine"
+                  }
+                  disabled={busy || !canManage || space.state !== "Shutdown"}
+                  onClick={() => void editComputer(space, "resize")}
+                >
+                  Machine
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  aria-label={`Rebuild ${space.displayName || space.name}`}
+                  disabled={busy || !canManage || (!managed && space.state !== "Shutdown")}
+                  onClick={() =>
+                    setConfirmation({
+                      action: "rebuild",
+                      name: space.name,
+                      clientRequestId: randomUUID(),
+                    })
+                  }
+                >
+                  Rebuild
+                </Button>
+                <Button
                   size="icon-sm"
                   variant="ghost-destructive"
                   aria-label={`Delete ${space.displayName || space.name}`}
@@ -421,12 +488,18 @@ function CodespacesComputerSettings({
         <DialogPopup>
           <DialogHeader>
             <DialogTitle>
-              {confirmation?.action === "delete" ? "Delete computer?" : "Create blank computer?"}
+              {confirmation?.action === "delete"
+                ? "Delete computer?"
+                : confirmation?.action === "rebuild"
+                  ? "Rebuild computer?"
+                  : "Create blank computer?"}
             </DialogTitle>
             <DialogDescription>
               {confirmation?.action === "delete"
                 ? "GitHub permanently deletes every project and unpushed change on this computer. Local thread history remains."
-                : "GitHub compute and storage charges may apply. You can add several projects after creation."}
+                : confirmation?.action === "rebuild"
+                  ? "Finish or stop active turns first. Rebuilding affects every project on this computer and may reset installed tools. GitHub compute and storage charges may apply."
+                  : "GitHub compute and storage charges may apply. You can add several projects after creation."}
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
@@ -447,7 +520,87 @@ function CodespacesComputerSettings({
                 if (confirmation) void execute(confirmation);
               }}
             >
-              {confirmation?.action === "delete" ? "Delete computer" : "Create computer"}
+              {confirmation?.action === "delete"
+                ? "Delete computer"
+                : confirmation?.action === "rebuild"
+                  ? "Rebuild computer"
+                  : "Create computer"}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+      <Dialog
+        open={editing !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditing(null);
+        }}
+      >
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>
+              {editing?.kind === "rename" ? "Rename computer" : "Change machine"}
+            </DialogTitle>
+            <DialogDescription>
+              {editing?.kind === "rename"
+                ? "Update the name shown for this computer across all projects."
+                : "The computer must stay stopped while changing its machine. This affects every project on it. GitHub compute and storage charges may change."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            {editing?.kind === "rename" ? (
+              <label className="grid gap-1.5 text-sm">
+                Computer name
+                <Input
+                  value={editing.value}
+                  onValueChange={(value) => setEditing({ ...editing, value })}
+                />
+              </label>
+            ) : editing ? (
+              <div className="grid gap-1.5 text-sm">
+                <label htmlFor={formId + "-edit-machine"}>Machine</label>
+                <Select
+                  value={editing.value}
+                  onValueChange={(value) => setEditing({ ...editing, value: value ?? "" })}
+                  items={
+                    editing.options?.machines.map((entry) => ({
+                      value: entry.name,
+                      label: entry.displayName,
+                    })) ?? []
+                  }
+                >
+                  <SelectTrigger id={formId + "-edit-machine"}>
+                    <SelectValue placeholder="Choose a machine" />
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {editing.options?.machines.map((entry) => (
+                      <SelectItem key={entry.name} value={entry.name}>
+                        {entry.displayName}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              </div>
+            ) : null}
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditing(null)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={busy || !canManage || !canSaveEdit}
+              onClick={() => {
+                if (!editing || !canSaveEdit) return;
+                void execute({
+                  action: "update",
+                  name: editing.space.name,
+                  clientRequestId: randomUUID(),
+                  ...(editing.kind === "rename"
+                    ? { displayName: editing.value.trim() }
+                    : { machine: editing.value }),
+                });
+              }}
+            >
+              {editing?.kind === "rename" ? "Save name" : "Change machine"}
             </Button>
           </DialogFooter>
         </DialogPopup>

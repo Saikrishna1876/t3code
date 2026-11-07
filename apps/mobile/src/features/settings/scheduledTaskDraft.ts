@@ -192,6 +192,7 @@ export type ScheduledTaskDraft = {
   readonly title: string;
   readonly prompt: string;
   readonly projectId: ProjectId | null;
+  readonly codespaceName: string | null;
   readonly modelSelection: ModelSelection | null;
   readonly modelSelectionIsExplicit: boolean;
   readonly schedule: ScheduleDraft;
@@ -208,6 +209,7 @@ function draftSignature(draft: ScheduledTaskDraft): string {
     draft.title,
     draft.prompt,
     draft.projectId,
+    draft.codespaceName,
     draft.modelSelection?.instanceId,
     draft.modelSelection?.model,
     [...(draft.modelSelection?.options ?? [])]
@@ -247,6 +249,7 @@ export function createDraft(
     title: "",
     prompt: "",
     projectId,
+    codespaceName: null,
     modelSelection,
     modelSelectionIsExplicit: false,
     schedule: DEFAULT_SCHEDULE,
@@ -265,6 +268,7 @@ export function editDraft(task: ScheduledTask): ScheduledTaskDraft {
     title: task.title,
     prompt: task.prompt,
     projectId: task.projectId,
+    codespaceName: task.codespaceName ?? null,
     modelSelection: task.modelSelection,
     modelSelectionIsExplicit: true,
     schedule: scheduleDraftForTask(task),

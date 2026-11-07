@@ -135,7 +135,7 @@ class TerminalSubprocessCheckError extends Schema.TaggedError<TerminalSubprocess
   "TerminalSubprocessCheckError",
   {
     cause: Schema.optional(Schema.Defect()),
-    command: Schema.Literals(["powershell", "ps", "resource-monitor"]),
+    command: Schema.Literals(["powershell", "ps", "resource-monitor", "remote workspace"]),
     exitCode: Schema.optional(Schema.NullOr(Schema.Number)),
     timedOut: Schema.optional(Schema.Boolean),
     stdoutTruncated: Schema.optional(Schema.Boolean),
@@ -305,6 +305,7 @@ interface TerminalSessionState {
   hasRunningSubprocess: boolean;
   childCommandLabel: string | null;
   runtimeEnv: Record<string, string> | null;
+  explicitEnv: Record<string, string> | null;
 }
 
 interface TerminalGrid {
@@ -1422,7 +1423,7 @@ function createTerminalSpawnEnv(
 }
 
 function normalizedRuntimeEnv(
-  env: Record<string, string> | undefined,
+  env: Readonly<Record<string, string>> | undefined,
 ): Record<string, string> | null {
   if (!env) return null;
   const entries = Object.entries(env);
@@ -1561,13 +1562,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const shellResolver = options.shellResolver ?? (() => defaultShellResolver(platform, baseEnv));
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const resolveLaunchInputEnvironment = Effect.fn("terminal.resolveLaunchInputEnvironment")(
-    function* <Input extends TerminalOpenInput | TerminalAttachInput>(
-      input: Input,
-    ): Effect.fn.Return<
-      Input,
-      TerminalProviderInstanceNotFoundError | TerminalProviderEnvironmentError
-    > {
-      if (input.providerInstanceId === undefined) return input;
+    function* (input: TerminalOpenInput) {
+      const explicitEnv = input.env;
+      if (input.providerInstanceId === undefined) return { ...input, explicitEnv };
       const resolver = options.resolveProviderInstanceEnvironment;
       if (resolver === undefined) {
         return yield* new TerminalProviderInstanceNotFoundError({
@@ -1575,7 +1572,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         });
       }
       const env = yield* resolver(input.providerInstanceId, input.env);
-      return { ...input, env };
+      return { ...input, env, explicitEnv };
     },
   );
   // Share one process table per poll; per-terminal scans can exhaust PIDs on busy hosts.
@@ -2423,6 +2420,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         cols: session.cols,
         rows: session.rows,
         env: spawnEnv,
+        ...(session.explicitEnv ? { envOverrides: session.explicitEnv } : {}),
+        threadId: session.threadId,
+        terminalId: session.terminalId,
       }),
     );
 
@@ -2668,6 +2668,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const isQuiet = (session: TerminalSessionState & { pid: number }) => {
     const quiet = quietSessions.get(session);
     return (
+      !session.cwd.replaceAll("\\", "/").includes("/.git/t3-codespaces/") &&
       quiet !== undefined &&
       quiet.idleSnapshots === 2 &&
       quiet.process === session.process &&
@@ -2721,7 +2722,25 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       let mark = candidate.mark;
       const previous = quietSessions.get(session);
       quietSessions.delete(session);
-      const inspectResult = yield* subprocessInspector(terminalPid).pipe(
+      const inspectResult = yield* Effect.gen(function* () {
+        const remote = Option.isSome(workspace) ? yield* workspace.value.lookup(session.cwd) : null;
+        if (remote && Option.isSome(workspace)) {
+          return yield* workspace.value
+            .call<TerminalSubprocessInspectResult>(session.cwd, "telemetry", "terminal", [
+              {
+                cwd: session.cwd,
+                threadId: session.threadId,
+                terminalId: session.terminalId,
+              },
+            ])
+            .pipe(
+              Effect.mapError(
+                (cause) => new TerminalSubprocessCheckError({ cause, command: "remote workspace" }),
+              ),
+            );
+        }
+        return yield* subprocessInspector(terminalPid);
+      }).pipe(
         Effect.asSome,
         Effect.catch((reason) =>
           Effect.logWarning("failed to check terminal subprocess activity", {
@@ -2873,7 +2892,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   );
 
   const openWithWorkspaceLease = Effect.fn("terminal.openLocked")(function* (
-    requestedInput: TerminalOpenInput,
+    requestedInput: TerminalOpenInput & {
+      readonly explicitEnv?: Readonly<Record<string, string>> | undefined;
+    },
   ) {
     const terminalId = requestedInput.terminalId;
     yield* assertValidCwd(requestedInput.cwd);
@@ -2921,6 +2942,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         hasRunningSubprocess: false,
         childCommandLabel: null,
         runtimeEnv: normalizedRuntimeEnv(input.env),
+        explicitEnv: normalizedRuntimeEnv(input.explicitEnv),
       };
 
       const createdSession = session;
@@ -2947,10 +2969,13 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
 
     const liveSession = existing.value;
     const nextRuntimeEnv = normalizedRuntimeEnv(input.env);
+    const nextExplicitEnv = normalizedRuntimeEnv(input.explicitEnv);
     const currentRuntimeEnv = liveSession.runtimeEnv;
     const targetCols = input.cols ?? liveSession.cols;
     const targetRows = input.rows ?? liveSession.rows;
-    const runtimeEnvChanged = !Equal.equals(currentRuntimeEnv, nextRuntimeEnv);
+    const runtimeEnvChanged =
+      !Equal.equals(currentRuntimeEnv, nextRuntimeEnv) ||
+      !Equal.equals(liveSession.explicitEnv, nextExplicitEnv);
     const nextWorktreePath =
       input.worktreePath !== undefined ? (input.worktreePath ?? null) : liveSession.worktreePath;
     const launchContextChanged =
@@ -2963,6 +2988,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       liveSession.cwd = input.cwd;
       liveSession.worktreePath = nextWorktreePath;
       liveSession.runtimeEnv = nextRuntimeEnv;
+      liveSession.explicitEnv = nextExplicitEnv;
       liveSession.history.clear();
       liveSession.pendingHistoryControlSequence = "";
       liveSession.pendingProcessEvents = [];
@@ -2971,6 +2997,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       yield* persistHistory(liveSession.threadId, liveSession.terminalId, liveSession.history);
     } else if (liveSession.status === "exited" || liveSession.status === "error") {
       liveSession.runtimeEnv = nextRuntimeEnv;
+      liveSession.explicitEnv = nextExplicitEnv;
       liveSession.worktreePath = nextWorktreePath;
       liveSession.history.clear();
       liveSession.pendingHistoryControlSequence = "";
@@ -3001,7 +3028,11 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     return snapshot(liveSession);
   });
 
-  const openLocked = (input: TerminalOpenInput) =>
+  const openLocked = (
+    input: TerminalOpenInput & {
+      readonly explicitEnv?: Readonly<Record<string, string>> | undefined;
+    },
+  ) =>
     withWorkspaceLease(
       path.resolve(input.worktreePath ?? input.cwd),
       openWithWorkspaceLease(input),

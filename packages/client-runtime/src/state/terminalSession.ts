@@ -7,6 +7,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { DEFAULT_MAX_TERMINAL_BUFFER_BYTES } from "@t3tools/contracts";
+import { isWindowsAbsolutePath, workspaceRelativeFilePath } from "@t3tools/shared/path";
 import {
   appendOutput,
   EMPTY_TERMINAL_OUTPUT_STATE,
@@ -235,4 +236,17 @@ export function applyTerminalMetadataStreamEvent(
       terminal.terminalId !== event.terminal.terminalId,
   );
   return [...next, event.terminal];
+}
+
+export function terminalMatchesWorkspace(cwd: string, workspaceRoot: string): boolean {
+  const normalizedCwd = cwd.replaceAll("\\", "/");
+  const normalizedRoot = workspaceRoot.replaceAll("\\", "/");
+  const marker = "/.git/t3-codespaces/";
+  const root = isWindowsAbsolutePath(normalizedRoot)
+    ? normalizedRoot.toLowerCase()
+    : normalizedRoot;
+  const path = isWindowsAbsolutePath(normalizedCwd) ? normalizedCwd.toLowerCase() : normalizedCwd;
+  return root.includes(marker)
+    ? workspaceRelativeFilePath(cwd, workspaceRoot) !== null
+    : !path.includes(marker);
 }

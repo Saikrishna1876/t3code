@@ -39,6 +39,9 @@ export interface PtySpawnInput {
   cols: number;
   rows: number;
   env: NodeJS.ProcessEnv;
+  envOverrides?: Readonly<Record<string, string>>;
+  threadId?: string;
+  terminalId?: string;
 }
 
 export class PtyAdapter extends Context.Service<

@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import { CodespaceName } from "./codespaces.ts";
 
 import {
   CommandId,
@@ -202,6 +203,7 @@ export const ScheduledTask = Schema.Struct({
   schedule: ScheduledTaskSchedule,
   projectId: ProjectId,
   threadId: Schema.NullOr(ThreadId),
+  codespaceName: Schema.optional(Schema.NullOr(CodespaceName)),
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -239,6 +241,7 @@ export const ScheduledTaskUpsertInput = Schema.Struct({
   schedule: ScheduledTaskUpsertSchedule,
   projectId: ProjectId,
   threadId: Schema.optional(Schema.NullOr(ThreadId)),
+  codespaceName: Schema.optional(Schema.NullOr(CodespaceName)),
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,

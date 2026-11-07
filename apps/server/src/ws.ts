@@ -1,3 +1,4 @@
+import * as WorkspaceDiscovery from "./preview/WorkspaceDiscovery.ts";
 import { threadWorkspaceRoot as executionWorkspaceRoot } from "@t3tools/contracts";
 import * as Codespaces from "./codespaces/Codespaces.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
@@ -7,7 +8,6 @@ import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
 import * as PeerLinks from "./peer/PeerLinks.ts";
 
-import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Base64 from "effect/encoding/Base64";
 import * as Effect from "effect/Effect";
@@ -37,7 +37,6 @@ import {
   ClientOs,
   ClientSurface,
   ClientWebDeployment,
-  type DiscoveredLocalServerList,
   type EditorId,
   type FileManagerRevealKind,
   type OrchestrationV2Command,
@@ -202,7 +201,6 @@ import {
 } from "./attachmentStore.ts";
 import { parseBase64DataUrl } from "./imageMime.ts";
 import { deletePendingAttachment, issueAttachmentUploadUrl } from "./assets/AttachmentUpload.ts";
-import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
@@ -1324,7 +1322,7 @@ export const layerWsRpc = (
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager.TerminalManager;
       const previewManager = yield* PreviewManager.PreviewManager;
-      const portDiscovery = yield* PortScanner.PortDiscovery;
+      const workspaceDiscovery = yield* WorkspaceDiscovery.WorkspaceDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
       const modelManifest = yield* ModelManifest.ModelManifest;
       const providerLatestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
@@ -3086,33 +3084,8 @@ export const layerWsRpc = (
         [WS_METHODS.deviceDetail]: (input) => deviceService.detail(input),
         [WS_METHODS.deviceAction]: (input) => deviceService.action(input),
         [WS_METHODS.subscribeDeviceState]: (_input) => DeviceService.stateStream(deviceService),
-        [WS_METHODS.previewStopLocalServer]: (input) => portDiscovery.stopServer(input),
-        [WS_METHODS.subscribeDiscoveredLocalServers]: (input) =>
-          Stream.callback<DiscoveredLocalServerList>((queue) =>
-            Effect.gen(function* () {
-              const configuredUrls = input.configuredUrls ?? [];
-              yield* portDiscovery.retain;
-              const initial = yield* portDiscovery.scan(configuredUrls);
-              const initialScannedAt = DateTime.formatIso(yield* DateTime.now);
-              yield* Queue.offer(queue, {
-                servers: initial,
-                scannedAt: initialScannedAt,
-                configuredUrlProbing: true,
-              });
-              yield* portDiscovery.subscribe(
-                { configuredUrls, initialSnapshot: initial },
-                (servers) =>
-                  Effect.gen(function* () {
-                    const scannedAt = DateTime.formatIso(yield* DateTime.now);
-                    yield* Queue.offer(queue, {
-                      servers,
-                      scannedAt,
-                      configuredUrlProbing: true,
-                    });
-                  }),
-              );
-            }),
-          ),
+        [WS_METHODS.previewStopLocalServer]: (input) => workspaceDiscovery.stop(input),
+        [WS_METHODS.subscribeDiscoveredLocalServers]: (input) => workspaceDiscovery.stream(input),
         [WS_METHODS.subscribeServerConfig]: (input) =>
           Stream.unwrap(
             Effect.gen(function* () {

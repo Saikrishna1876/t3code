@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 import { Alert, Linking, Pressable, Switch, View } from "react-native";
 import type {
+  Codespace,
   EnvironmentId,
   ProjectId,
   CodespacesRunInput,
@@ -14,7 +15,7 @@ import {
   codespaceStateLabel,
 } from "@t3tools/client-runtime/codespaces-presentation";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { AppText as Text } from "../../components/ui/AppText";
+import { AppText as Text, AppTextInput } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { Menu } from "../../components/ui/Menu";
 import { useEnvironments } from "../../state/environments";
@@ -296,6 +297,12 @@ function ComputerSettings({
   const loadOptions = useAtomCommand(codespacesEnvironment.options, { reportFailure: false });
   const projects = useProjects().filter((project) => project.environmentId === environmentId);
   const [projectId, setProjectId] = useState("");
+  const [editing, setEditing] = useState<{
+    space: Codespace;
+    kind: "rename" | "resize";
+    value: string;
+    options: CodespacesOptions | null;
+  } | null>(null);
   const [options, setOptions] = useState<CodespacesOptions | null>(null);
   const [machine, setMachine] = useState("");
   const [pending, setPending] = useState(false);
@@ -314,6 +321,7 @@ function ComputerSettings({
   const execute = async (input: CodespacesRunInput) => {
     setPending(true);
     setError(null);
+    setEditing(null);
     const result = await run({ environmentId, input });
     if (result._tag === "Failure") failure(result);
     else if (input.action === "create") setOptions(null);
@@ -321,6 +329,27 @@ function ComputerSettings({
     state.refresh();
     inventory.refresh();
   };
+  const editComputer = async (space: Codespace, kind: "rename" | "resize") => {
+    if (!canManage || busy) return;
+    if (kind === "rename") {
+      setEditing({ space, kind, value: space.displayName || space.name, options: null });
+      return;
+    }
+    if (space.state !== "Shutdown") return;
+    setPending(true);
+    setError(null);
+    const result = await loadOptions({ environmentId, input: {} });
+    if (result._tag === "Failure") failure(result);
+    else setEditing({ space, kind, value: space.machine, options: result.value });
+    setPending(false);
+  };
+  const canSaveEdit =
+    editing !== null &&
+    Boolean(editing.value.trim()) &&
+    editing.value.trim() !==
+      (editing.kind === "rename"
+        ? editing.space.displayName || editing.space.name
+        : editing.space.machine);
   return (
     <SettingsSection title={`Codespaces · ${label}`}>
       <View className="gap-4 p-4">
@@ -463,6 +492,38 @@ function ComputerSettings({
                   />
                 ) : null}
                 <Button
+                  label="Rename"
+                  disabled={busy || !canManage}
+                  onPress={() => void editComputer(space, "rename")}
+                />
+                <Button
+                  label="Change machine"
+                  disabled={busy || !canManage || space.state !== "Shutdown"}
+                  onPress={() => void editComputer(space, "resize")}
+                />
+                <Button
+                  label="Rebuild"
+                  disabled={busy || !canManage || (!managed && space.state !== "Shutdown")}
+                  onPress={() =>
+                    Alert.alert(
+                      "Rebuild computer?",
+                      "Finish or stop active turns first. Rebuilding affects every project on this computer and may reset installed tools. GitHub compute and storage charges may apply.",
+                      [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: "Rebuild",
+                          onPress: () =>
+                            void execute({
+                              action: "rebuild",
+                              name: space.name,
+                              clientRequestId: uuidv4(),
+                            }),
+                        },
+                      ],
+                    )
+                  }
+                />
+                <Button
                   label="Delete"
                   tone="danger"
                   disabled={busy || !canManage}
@@ -487,6 +548,58 @@ function ComputerSettings({
                   }
                 />
               </View>
+              {editing?.space.name === space.name ? (
+                <View className="gap-3">
+                  <Text className="text-sm font-t3-medium text-foreground">
+                    {editing.kind === "rename" ? "Rename computer" : "Change machine"}
+                  </Text>
+                  {editing.kind === "rename" ? (
+                    <AppTextInput
+                      accessibilityLabel="Computer name"
+                      value={editing.value}
+                      editable={!busy && canManage}
+                      onChangeText={(value) => setEditing({ ...editing, value })}
+                    />
+                  ) : (
+                    <CodespaceOptionPicker
+                      label="Machine"
+                      value={editing.value}
+                      placeholder="Choose a machine"
+                      disabled={busy || !canManage}
+                      options={
+                        editing.options?.machines.map((entry) => ({
+                          value: entry.name,
+                          label: entry.displayName,
+                        })) ?? []
+                      }
+                      onSelect={(value) => setEditing({ ...editing, value })}
+                    />
+                  )}
+                  <Text className="text-xs text-foreground-muted">
+                    {editing.kind === "rename"
+                      ? "Update the name shown for this computer across all projects."
+                      : "The computer must stay stopped while changing its machine. This affects every project on it. GitHub compute and storage charges may change."}
+                  </Text>
+                  <View className="flex-row gap-2">
+                    <Button
+                      label={editing.kind === "rename" ? "Save name" : "Change machine"}
+                      disabled={busy || !canManage || !canSaveEdit}
+                      onPress={() => {
+                        if (!canSaveEdit) return;
+                        void execute({
+                          action: "update",
+                          name: editing.space.name,
+                          clientRequestId: uuidv4(),
+                          ...(editing.kind === "rename"
+                            ? { displayName: editing.value.trim() }
+                            : { machine: editing.value }),
+                        });
+                      }}
+                    />
+                    <Button label="Cancel" onPress={() => setEditing(null)} />
+                  </View>
+                </View>
+              ) : null}
             </View>
           );
         })}

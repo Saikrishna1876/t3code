@@ -1,4 +1,7 @@
-import { type KnownTerminalSession } from "@t3tools/client-runtime/state/terminal";
+import {
+  terminalMatchesWorkspace,
+  type KnownTerminalSession,
+} from "@t3tools/client-runtime/state/terminal";
 import { DEFAULT_TERMINAL_ID, type ProjectScript } from "@t3tools/contracts";
 import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
 import * as Arr from "effect/Array";
@@ -149,4 +152,28 @@ export function projectScriptMenuIcon(icon: ProjectScript["icon"]) {
   if (icon === "build") return "hammer";
   if (icon === "debug") return "ladybug";
   return "play";
+}
+
+export function pickTerminalIdForBootstrap(input: {
+  readonly sessions: ReadonlyArray<KnownTerminalSession>;
+  readonly workspaceRoot: string;
+  readonly canOperate: boolean;
+}) {
+  const matching = input.sessions.filter(
+    (session) =>
+      session.state.summary !== null &&
+      terminalMatchesWorkspace(session.state.summary.cwd, input.workspaceRoot),
+  );
+  const running = matching.filter(
+    (session) => session.state.status === "running" || session.state.status === "starting",
+  );
+  const active =
+    running.find((session) => session.target.terminalId === DEFAULT_TERMINAL_ID) ?? running[0];
+  if (active) return active.target.terminalId;
+  if (!input.canOperate) return matching[0]?.target.terminalId ?? null;
+  return input.sessions.some(
+    (session) => session.target.terminalId === DEFAULT_TERMINAL_ID && !matching.includes(session),
+  )
+    ? nextTerminalId(input.sessions.map((session) => session.target.terminalId))
+    : DEFAULT_TERMINAL_ID;
 }

@@ -217,6 +217,9 @@ it.live("starts a remote worktree terminal from an existing host directory", () 
           "/host/project/.git/t3-codespaces/space/.git/t3-worktrees/project/feature",
         HOST_ONLY_SECRET: "must-stay-local",
       },
+      envOverrides: { APP_MODE: "remote $HOME 'literal'" },
+      threadId: "thread-remote",
+      terminalId: "term-remote",
     });
     const call = spawn.mock.calls.at(-1)!;
     assert.equal(call[0], "gh");
@@ -246,7 +249,7 @@ it.live("starts a remote worktree terminal from an existing host directory", () 
         stdin: {
           stream: Stream.encodeText(
             Stream.make(
-              'printf "T3_CWD=%s\\nT3_ROOT=%s\\nT3_WORKTREE=%s\\nT3_SECRET=%s\\nT3_PROFILE=%s\\n" "$PWD" "$T3CODE_PROJECT_ROOT" "$T3CODE_WORKTREE_PATH" "$HOST_ONLY_SECRET" "$T3_LOGIN_PROFILE"\nexit\n',
+              'printf "T3_CWD=%s\\nT3_ROOT=%s\\nT3_WORKTREE=%s\\nT3_SECRET=%s\\nT3_PROFILE=%s\\nT3_APP=%s\\nT3_THREAD=%s\\nT3_TERMINAL=%s\\n" "$PWD" "$T3CODE_PROJECT_ROOT" "$T3CODE_WORKTREE_PATH" "$HOST_ONLY_SECRET" "$T3_LOGIN_PROFILE" "$APP_MODE" "$T3CODE_THREAD_ID" "$T3CODE_TERMINAL_ID"\nexit\n',
             ),
           ),
         },
@@ -271,6 +274,9 @@ it.live("starts a remote worktree terminal from an existing host directory", () 
     assert.include(output, `T3_WORKTREE=${checkout}`);
     assert.include(output, "T3_SECRET=\n");
     assert.include(output, "T3_PROFILE=loaded\n");
+    assert.include(output, "T3_APP=remote $HOME 'literal'\n");
+    assert.include(output, "T3_THREAD=thread-remote\n");
+    assert.include(output, "T3_TERMINAL=term-remote\n");
   }).pipe(
     Effect.provide(
       Layer.mergeAll(
