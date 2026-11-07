@@ -112,10 +112,13 @@ This does not transfer an old hash-bound grant to the first signed build.
    ```
 
    Leave the Apple signing secrets and `APPLE_TEAM_ID` variable unset. The runner
-   imports the P12 into a temporary keychain, trusts its certificate only for code
-   signing, checks its fingerprint, and removes the keychain and temporary signing
-   material even if packaging fails. Neither the private key nor its password
-   belongs in a build artifact.
+   imports the P12 into a temporary keychain and checks its fingerprint. On the
+   disposable runner, noninteractive `sudo` adds the public certificate to the
+   system keychain with admin-domain trust only for code signing. User-domain
+   trust can wait for a GUI authorization prompt on headless runners. Cleanup
+   removes private signing material before removing public trust and the system
+   certificate. Neither the private key nor its password belongs in a build
+   artifact.
 
 5. Run a trial without publishing. This command uses the current `main` SHA and
    uploads downloadable Actions artifacts. It does not create a GitHub release.

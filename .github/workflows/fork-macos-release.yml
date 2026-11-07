@@ -163,8 +163,17 @@ jobs:
             test "$(rg -c 'BEGIN CERTIFICATE' "$certificate")" = 1
             actual="$(openssl x509 -in "$certificate" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')"
             test "$actual" = "$identity"
-            # Trust only this certificate for code signing on the disposable runner.
-            security add-trusted-cert -r trustRoot -p codeSign -k "$keychain" "$certificate"
+            # User-domain trust can wait for a GUI authorization prompt on CI.
+            echo 'Installing code-signing trust in the disposable runner admin domain'
+            python3 - "$certificate" <<'PYTHON'
+          import subprocess, sys
+          subprocess.run([
+              'sudo', '-n', '/usr/bin/security', 'add-trusted-cert',
+              '-d', '-r', 'trustRoot', '-p', 'codeSign',
+              '-k', '/Library/Keychains/System.keychain', sys.argv[1],
+          ], check=True, timeout=60)
+          PYTHON
+            echo 'Checking imported signing identity'
             security find-identity -v -p codesigning "$keychain" | rg -F "$identity"
             export CSC_KEYCHAIN="$keychain"
             args+=(--private-signing-identity "$identity")
@@ -244,16 +253,29 @@ jobs:
 
       - name: Remove temporary signing material
         if: always() && steps.meta.outputs.skip != 'true'
+        timeout-minutes: 2
         run: |
           set -euo pipefail
-          if [[ -f "$RUNNER_TEMP/t3-private-signing.pem" ]]; then
-            security remove-trusted-cert "$RUNNER_TEMP/t3-private-signing.pem" || true
-          fi
+          rm -f "$RUNNER_TEMP/t3-private-signing.p12" "$RUNNER_TEMP/t3code.provisionprofile"
+          rm -f "$RUNNER_TEMP"/AuthKey_*.p8
           if [[ -f "$RUNNER_TEMP/t3-private-signing.keychain-db" ]]; then
             security delete-keychain "$RUNNER_TEMP/t3-private-signing.keychain-db"
           fi
-          rm -f "$RUNNER_TEMP/t3-private-signing.p12" "$RUNNER_TEMP/t3-private-signing.pem" "$RUNNER_TEMP/t3code.provisionprofile"
-          rm -f "$RUNNER_TEMP"/AuthKey_*.p8
+          if [[ -f "$RUNNER_TEMP/t3-private-signing.pem" ]]; then
+            python3 - "$RUNNER_TEMP/t3-private-signing.pem" <<'PYTHON'
+          import subprocess, sys
+          certificate = sys.argv[1]
+          fingerprint = subprocess.check_output([
+              'openssl', 'x509', '-in', certificate, '-noout', '-fingerprint', '-sha1',
+          ], text=True, timeout=10).strip().split('=')[1].replace(':', '')
+          for args in [
+              ['remove-trusted-cert', '-d', certificate],
+              ['delete-certificate', '-Z', fingerprint, '/Library/Keychains/System.keychain'],
+          ]:
+              subprocess.run(['sudo', '-n', '/usr/bin/security', *args], check=False, timeout=30)
+          PYTHON
+          fi
+          rm -f "$RUNNER_TEMP/t3-private-signing.pem"
 
       - name: Preserve build artifacts
         if: steps.meta.outputs.skip != 'true'
