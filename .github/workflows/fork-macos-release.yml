@@ -157,6 +157,18 @@ jobs:
             security create-keychain -p "$keychain_password" "$keychain"
             security set-keychain-settings -lut 21600 "$keychain"
             security unlock-keychain -p "$keychain_password" "$keychain"
+            # codesign still needs the identity on its search list with --keychain.
+            python3 - "$keychain" <<'PYTHON'
+          import shlex, subprocess, sys
+          keychain = sys.argv[1]
+          existing = shlex.split(subprocess.check_output([
+              '/usr/bin/security', 'list-keychains', '-d', 'user',
+          ], text=True, timeout=15))
+          subprocess.run([
+              '/usr/bin/security', 'list-keychains', '-d', 'user', '-s',
+              keychain, *[path for path in existing if path != keychain],
+          ], check=True, timeout=15)
+          PYTHON
             security import "$p12" -k "$keychain" -P "$MACOS_PRIVATE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
             security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
             security find-certificate -a -p "$keychain" > "$certificate"
@@ -175,6 +187,23 @@ jobs:
           PYTHON
             echo 'Checking imported signing identity'
             security find-identity -v -p codesigning "$keychain" | rg -F "$identity"
+            security find-identity -v -p codesigning | rg -F "$identity"
+            echo 'Checking private-key access before app build'
+            probe="$RUNNER_TEMP/t3-private-signing-probe"
+            printf 'int main(void) { return 0; }\n' | xcrun clang -x c - -o "$probe"
+            python3 - "$identity" "$keychain" "$probe" <<'PYTHON'
+          import subprocess, sys
+          identity, keychain, probe = sys.argv[1:]
+          subprocess.run([
+              '/usr/bin/codesign', '--sign', identity, '--force',
+              '--keychain', keychain, '--timestamp=none', probe,
+          ], check=True, timeout=30)
+          subprocess.run([
+              '/usr/bin/codesign', '--verify', '--strict', probe,
+          ], check=True, timeout=15)
+          PYTHON
+            rm -f "$probe"
+            echo 'Private signing probe passed'
             export CSC_KEYCHAIN="$keychain"
             args+=(--private-signing-identity "$identity")
             echo 'signing=private' >> "$GITHUB_OUTPUT"
@@ -257,6 +286,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -f "$RUNNER_TEMP/t3-private-signing.p12" "$RUNNER_TEMP/t3code.provisionprofile"
+          rm -f "$RUNNER_TEMP/t3-private-signing-probe"
           rm -f "$RUNNER_TEMP"/AuthKey_*.p8
           if [[ -f "$RUNNER_TEMP/t3-private-signing.keychain-db" ]]; then
             security delete-keychain "$RUNNER_TEMP/t3-private-signing.keychain-db"
@@ -272,7 +302,12 @@ jobs:
               ['remove-trusted-cert', '-d', certificate],
               ['delete-certificate', '-Z', fingerprint, '/Library/Keychains/System.keychain'],
           ]:
-              subprocess.run(['sudo', '-n', '/usr/bin/security', *args], check=False, timeout=30)
+              try:
+                  result = subprocess.run(['sudo', '-n', '/usr/bin/security', *args], check=False, timeout=30)
+                  if result.returncode:
+                      print(f'::warning::Public certificate cleanup {args[0]} exited {result.returncode}')
+              except subprocess.TimeoutExpired:
+                  print(f'::warning::Public certificate cleanup {args[0]} timed out; continuing cleanup')
           PYTHON
           fi
           rm -f "$RUNNER_TEMP/t3-private-signing.pem"
