@@ -91,6 +91,9 @@ jobs:
         if: steps.meta.outputs.skip != 'true'
         run: |
           set -euo pipefail
+          if ! command -v rg >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install ripgrep
+          fi
           node -e "if (require('./apps/desktop/package.json').dependencies.electron !== '43.6.0') throw Error('Compatibility Electron pin changed')"
           vp install --filter=t3... --filter=@t3tools/web... --filter=@t3tools/desktop... --filter=@t3tools/scripts...
           vp run --filter @t3tools/desktop ensure:electron
