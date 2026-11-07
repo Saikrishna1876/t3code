@@ -31,6 +31,7 @@ import {
   createBuildConfig,
   DESKTOP_FILE_EXCLUSIONS,
   InvalidMacPasskeyRpDomainError,
+  InvalidPrivateMacSigningConfigurationError,
   InvalidMacPasskeyPublishableKeyError,
   UnsupportedDesktopBuildArchitectureError,
   MacPasskeySigningConfigurationResolutionError,
@@ -1560,6 +1561,53 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.notInclude(error.message, secret);
   });
 
+  it.effect("requires certificate signing without Apple provisioning in private Mac builds", () =>
+    Effect.gen(function* () {
+      const identity = "1234567890ABCDEF1234567890ABCDEF12345678";
+      const config = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+        false,
+        "x64",
+        identity,
+      );
+      const mac = config.mac as Record<string, unknown>;
+      assert.equal(config.appId, "com.t3tools.t3code");
+      assert.equal(config.forceCodeSigning, true);
+      assert.equal(mac.identity, identity);
+      assert.equal(mac.timestamp, "none");
+      assert.equal(mac.hardenedRuntime, false);
+      assert.equal(mac.notarize, false);
+      assert.equal(mac.preAutoEntitlements, false);
+      assert.notProperty(mac, "sign");
+      assert.notProperty(mac, "provisioningProfile");
+      assert.notProperty(mac, "entitlements");
+
+      const unsigned = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+      assert.notProperty(unsigned, "forceCodeSigning");
+      assert.notProperty(unsigned.mac as Record<string, unknown>, "identity");
+      const apple = yield* createBuildConfig("mac", "dmg", "1.2.3", true, false, undefined, {
+        entitlementsPath: "/entitlements.plist",
+        provisioningProfilePath: "/profile",
+      });
+      assert.property(apple.mac as Record<string, unknown>, "sign");
+      assert.property(apple.mac as Record<string, unknown>, "provisioningProfile");
+    }),
+  );
+
   it.effect("signs Windows builds with signtool on Windows and the jsign hook elsewhere", () =>
     Effect.gen(function* () {
       const signedWinConfig = (hostPlatform: string) =>
@@ -1641,6 +1689,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
             skipBuild: Option.none(),
             keepStage: Option.none(),
             signed: Option.none(),
+            privateSigningIdentity: Option.none(),
             verbose: Option.none(),
             mockUpdates: Option.none(),
             mockUpdateServerPort: Option.none(),
@@ -1654,6 +1703,48 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }),
   );
 
+  it.effect("rejects conflicting and invalid private signing options before building", () =>
+    Effect.gen(function* () {
+      const identity = "1234567890ABCDEF1234567890ABCDEF12345678";
+      const input = {
+        platform: Option.some("mac" as const),
+        target: Option.none<string>(),
+        arch: Option.some("x64" as const),
+        buildVersion: Option.none<string>(),
+        outputDir: Option.none<string>(),
+        skipBuild: Option.none<boolean>(),
+        keepStage: Option.none<boolean>(),
+        signed: Option.some(false),
+        privateSigningIdentity: Option.none<string>(),
+        verbose: Option.none<boolean>(),
+        mockUpdates: Option.none<boolean>(),
+        mockUpdateServerPort: Option.none<number>(),
+        wslRuntime: Option.none<string>(),
+      };
+      const resolved = yield* resolveBuildOptions(input);
+      assert.equal(resolved.privateSigningIdentity, identity);
+      for (const overrides of [
+        { signed: Option.some(true) },
+        { platform: Option.some("win" as const) },
+        { privateSigningIdentity: Option.some("-") },
+        { privateSigningIdentity: Option.some("") },
+      ]) {
+        const error = yield* Effect.flip(resolveBuildOptions({ ...input, ...overrides }));
+        assert.instanceOf(error, InvalidPrivateMacSigningConfigurationError);
+      }
+    }).pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromEnv({
+            env: {
+              T3CODE_MACOS_PRIVATE_SIGNING_IDENTITY: "1234567890abcdef1234567890abcdef12345678",
+            },
+          }),
+        ),
+      ),
+    ),
+  );
+
   it.effect("preserves explicit false boolean flags over true env defaults", () =>
     Effect.gen(function* () {
       const resolved = yield* resolveBuildOptions({
@@ -1665,6 +1756,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         skipBuild: Option.some(false),
         keepStage: Option.some(false),
         signed: Option.some(false),
+        privateSigningIdentity: Option.none(),
         verbose: Option.some(false),
         mockUpdates: Option.some(false),
         mockUpdateServerPort: Option.none(),

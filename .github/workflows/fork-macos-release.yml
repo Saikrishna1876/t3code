@@ -8,6 +8,12 @@ on:
         required: true
         type: string
 
+      publish:
+        description: Publish release after verification. Disable for a signing trial.
+        required: true
+        default: true
+        type: boolean
+
 permissions:
   contents: read
 
@@ -30,6 +36,7 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
+          PUBLISH: ${{ inputs.publish }}
         with:
           script: |
             const sha = process.env.SOURCE_SHA;
@@ -38,7 +45,7 @@ jobs:
             if (branch.commit.sha !== sha) throw new Error('fork/main changed. Dispatch the current SHA.');
             const releases = await github.paginate(github.rest.repos.listReleases, { ...context.repo, per_page: 100 });
             const prior = releases.find(r => !r.draft && r.body?.includes(`Fork source: ${sha}`));
-            if (prior) {
+            if (prior && process.env.PUBLISH === 'true') {
               core.notice(`Already released: ${prior.html_url}`);
               core.setOutput('skip', 'true');
               return;
@@ -105,6 +112,9 @@ jobs:
         if: steps.meta.outputs.skip != 'true'
         env:
           RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+          MACOS_PRIVATE_CERTIFICATE: ${{ secrets.MACOS_PRIVATE_CERTIFICATE }}
+          MACOS_PRIVATE_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_PRIVATE_CERTIFICATE_PASSWORD }}
+          MACOS_PRIVATE_SIGNING_IDENTITY: ${{ vars.MACOS_PRIVATE_SIGNING_IDENTITY }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
@@ -120,7 +130,43 @@ jobs:
           for value in "$CSC_LINK" "$CSC_KEY_PASSWORD" "$APPLE_API_KEY" "$APPLE_API_KEY_ID" "$APPLE_API_ISSUER" "$APPLE_TEAM_ID" "$MACOS_PROVISIONING_PROFILE"; do
             if [[ -n "$value" ]]; then configured=$((configured + 1)); fi
           done
-          if [[ "$configured" == 7 ]]; then
+          private_configured=0
+          for value in "$MACOS_PRIVATE_CERTIFICATE" "$MACOS_PRIVATE_CERTIFICATE_PASSWORD" "$MACOS_PRIVATE_SIGNING_IDENTITY"; do
+            if [[ -n "$value" ]]; then private_configured=$((private_configured + 1)); fi
+          done
+          if [[ "$private_configured" != 0 ]]; then
+            if [[ "$private_configured" != 3 || "$configured" != 0 ]]; then
+              echo '::error::Configure all private signing values and remove Apple signing credentials, or use Apple signing alone.'
+              exit 1
+            fi
+            identity="$(printf '%s' "$MACOS_PRIVATE_SIGNING_IDENTITY" | tr '[:lower:]' '[:upper:]')"
+            if [[ ! "$identity" =~ ^[A-F0-9]{40}$ ]]; then
+              echo '::error::MACOS_PRIVATE_SIGNING_IDENTITY must be the certificate SHA-1 fingerprint without separators.'
+              exit 1
+            fi
+            umask 077
+            keychain="$RUNNER_TEMP/t3-private-signing.keychain-db"
+            certificate="$RUNNER_TEMP/t3-private-signing.pem"
+            p12="$RUNNER_TEMP/t3-private-signing.p12"
+            keychain_password="$(openssl rand -hex 32)"
+            echo "::add-mask::$keychain_password"
+            printf '%s' "$MACOS_PRIVATE_CERTIFICATE" | base64 -D > "$p12"
+            security create-keychain -p "$keychain_password" "$keychain"
+            security set-keychain-settings -lut 21600 "$keychain"
+            security unlock-keychain -p "$keychain_password" "$keychain"
+            security import "$p12" -k "$keychain" -P "$MACOS_PRIVATE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+            security find-certificate -a -p "$keychain" > "$certificate"
+            test "$(rg -c 'BEGIN CERTIFICATE' "$certificate")" = 1
+            actual="$(openssl x509 -in "$certificate" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')"
+            test "$actual" = "$identity"
+            # Trust only this certificate for code signing on the disposable runner.
+            security add-trusted-cert -r trustRoot -p codeSign -k "$keychain" "$certificate"
+            security find-identity -v -p codesigning "$keychain" | rg -F "$identity"
+            export CSC_KEYCHAIN="$keychain"
+            args+=(--private-signing-identity "$identity")
+            echo 'signing=private' >> "$GITHUB_OUTPUT"
+          elif [[ "$configured" == 7 ]]; then
             key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
             printf '%s' "$APPLE_API_KEY" > "$key_path"
             export APPLE_API_KEY="$key_path"
@@ -130,10 +176,10 @@ jobs:
             export T3CODE_APPLE_TEAM_ID="$APPLE_TEAM_ID"
             export T3CODE_MACOS_PROVISIONING_PROFILE="$profile_path"
             args+=(--signed)
-            echo 'signed=true' >> "$GITHUB_OUTPUT"
+            echo 'signing=apple' >> "$GITHUB_OUTPUT"
           elif [[ "$configured" == 0 ]]; then
             echo '::warning::Unsigned release. macOS in-app installation requires signing setup.'
-            echo 'signed=false' >> "$GITHUB_OUTPUT"
+            echo 'signing=unsigned' >> "$GITHUB_OUTPUT"
           else
             echo '::error::Signing configuration is incomplete. Configure all Apple credentials or remove them all.'
             exit 1
@@ -166,6 +212,46 @@ jobs:
           cd release
           shasum -a 256 ./*.dmg ./*.zip ./*.blockmap ./latest-mac.yml > SHA256SUMS
 
+      - name: Verify private signature from release archive
+        if: steps.meta.outputs.skip != 'true' && steps.package.outputs.signing == 'private'
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+          MACOS_PRIVATE_SIGNING_IDENTITY: ${{ vars.MACOS_PRIVATE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          extracted="$RUNNER_TEMP/t3-signature-verification"
+          mkdir -p "$extracted"
+          ditto -x -k "release/T3-Code-${RELEASE_VERSION}-x64.zip" "$extracted"
+          apps=("$extracted/"*.app)
+          test "${#apps[@]}" = 1
+          app="${apps[0]}"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -d --extract-certificates "$extracted/signer" "$app"
+          actual="$(openssl x509 -inform DER -in "$extracted/signer0" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')"
+          identity="$(printf '%s' "$MACOS_PRIVATE_SIGNING_IDENTITY" | tr '[:lower:]' '[:upper:]')"
+          test "$actual" = "$identity"
+          codesign -d -r- "$app" > release/designated-requirement.txt 2>&1
+          rg -F 'identifier "com.t3tools.t3code"' release/designated-requirement.txt
+          rg -i -F "$identity" release/designated-requirement.txt
+          if rg -q 'cdhash' release/designated-requirement.txt; then
+            echo '::error::Private signing must produce a certificate-bound requirement, not a code-hash requirement.'
+            exit 1
+          fi
+          cat release/designated-requirement.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove temporary signing material
+        if: always() && steps.meta.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          if [[ -f "$RUNNER_TEMP/t3-private-signing.pem" ]]; then
+            security remove-trusted-cert "$RUNNER_TEMP/t3-private-signing.pem" || true
+          fi
+          if [[ -f "$RUNNER_TEMP/t3-private-signing.keychain-db" ]]; then
+            security delete-keychain "$RUNNER_TEMP/t3-private-signing.keychain-db"
+          fi
+          rm -f "$RUNNER_TEMP/t3-private-signing.p12" "$RUNNER_TEMP/t3-private-signing.pem" "$RUNNER_TEMP/t3code.provisionprofile"
+          rm -f "$RUNNER_TEMP"/AuthKey_*.p8
+
       - name: Preserve build artifacts
         if: steps.meta.outputs.skip != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -177,21 +263,24 @@ jobs:
             release/*.blockmap
             release/latest-mac.yml
             release/SHA256SUMS
+            release/designated-requirement.txt
           if-no-files-found: error
           retention-days: 14
 
       - name: Publish fork release
-        if: steps.meta.outputs.skip != 'true'
+        if: steps.meta.outputs.skip != 'true' && inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.meta.outputs.version }}
           SOURCE_SHA: ${{ steps.meta.outputs.sha }}
-          SIGNED: ${{ steps.package.outputs.signed }}
+          SIGNING: ${{ steps.package.outputs.signing }}
         run: |
           set -euo pipefail
           notes="$RUNNER_TEMP/fork-release-notes.md"
-          printf 'Intel Mac compatibility build. Electron 43.6.0.\n\nFork source: %s\n\nSigned: %s\n' "$SOURCE_SHA" "$SIGNED" > "$notes"
-          if [[ "$SIGNED" != true ]]; then
+          printf 'Intel Mac compatibility build. Electron 43.6.0.\n\nFork source: %s\n\nSigning: %s\n' "$SOURCE_SHA" "$SIGNING" > "$notes"
+          if [[ "$SIGNING" == private ]]; then
+            printf '\nPrivately signed, not Apple-notarized. First installation and screenshot permission migration require manual setup. Automatic installation remains unverified.\n' >> "$notes"
+          elif [[ "$SIGNING" == unsigned ]]; then
             printf '\nUnsigned download. Install manually; macOS automatic installation needs signing configured.\n' >> "$notes"
           fi
           # A draft keeps partial asset uploads out of the update feed.
