@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   release:
-    if: github.repository == 'Saikrishna1876/t3code' && github.ref == 'refs/heads/main'
+    if: github.repository == 'Saikrishna1876/t3code' && (github.ref == 'refs/heads/main' || !inputs.publish)
     runs-on: macos-15-intel
     timeout-minutes: 90
     permissions:
