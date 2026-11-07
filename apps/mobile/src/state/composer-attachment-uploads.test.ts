@@ -102,6 +102,7 @@ vi.mock("./entities", () => ({
 }));
 vi.mock("./projects", () => ({ environmentProjects: {} }));
 vi.mock("./workspace", () => ({ workspaceConnections: {} }));
+vi.mock("./codespaces", () => ({ codespacesEnvironment: {} }));
 vi.mock("./server", async () => {
   const { Atom } = await import("effect/reactivity");
   return { serverEnvironment: { configValueAtom: Atom.family(() => Atom.make(null)) } };
