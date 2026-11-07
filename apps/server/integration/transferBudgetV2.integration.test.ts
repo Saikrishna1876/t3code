@@ -20,6 +20,7 @@ import {
   OrchestrationV2ThreadDetailSnapshot,
   OrchestrationV2ThreadHistoryPage,
   OrchestrationV2ShellSnapshot,
+  OrchestrationV2ThreadShell,
   OrchestrationV2GetThreadProjectionError,
   OrchestrationV2GetShellSnapshotError,
   ProviderDriverKind,
@@ -95,6 +96,8 @@ const decodeHistoryPage = Schema.decodeUnknownEffect(
 const decodeShellSnapshot = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.toCodecJson(OrchestrationV2ShellSnapshot)),
 );
+
+const encodeShell = Schema.encodeSync(Schema.toCodecJson(OrchestrationV2ThreadShell));
 
 const layerPersistence = EventSink.layer.pipe(
   Layer.provideMerge(EventStore.layerFromOrchestrationEventStore),
@@ -336,9 +339,11 @@ it.live("reports V2 thread HTTP and WebSocket transfer budgets", () =>
           // Shell items carry the shell read when their batch is projected, and unchanged
           // shells are skipped, so a turn split across batches may never yield an item at
           // the last sequence. Wait for the final shell instead.
-          const finalShell = yield* projection.getThreadShell(THREAD_ID);
+          // Optional nullable fields encode undefined as null; compare both shells on the wire.
+          const finalShell = encodeShell((yield* projection.getThreadShell(THREAD_ID))!);
           const shellTerminal = (item: StreamItem) =>
-            item.kind === "thread.updated" && NodeUtil.isDeepStrictEqual(item.thread, finalShell);
+            item.kind === "thread.updated" &&
+            NodeUtil.isDeepStrictEqual(encodeShell(item.thread), finalShell);
           const liveTurn = yield* collectUntil(tq, threadTerminal);
           yield* collectUntil(ttq, threadTerminal);
           // A direct check, so live dedupe stays guarded however small the turn gets.

@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   release:
-    if: github.repository == 'Saikrishna1876/t3code' && github.ref == 'refs/heads/main'
+    if: github.repository == 'Saikrishna1876/t3code' && (github.ref == 'refs/heads/main' || !inputs.publish)
     runs-on: macos-15-intel
     timeout-minutes: 90
     permissions:
@@ -267,7 +267,7 @@ jobs:
           test "${#apps[@]}" = 1
           app="${apps[0]}"
           codesign --verify --deep --strict --verbose=2 "$app"
-          codesign -d --extract-certificates "$extracted/signer" "$app"
+          codesign -d --extract-certificates="$extracted/signer" "$app"
           actual="$(openssl x509 -inform DER -in "$extracted/signer0" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')"
           identity="$(printf '%s' "$MACOS_PRIVATE_SIGNING_IDENTITY" | tr '[:lower:]' '[:upper:]')"
           test "$actual" = "$identity"

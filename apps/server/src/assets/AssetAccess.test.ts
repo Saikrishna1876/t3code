@@ -282,7 +282,10 @@ describe("AssetAccess", () => {
         "remote",
       );
       yield* workspace.bind({ projectId: "asset-project", localRoot: local, name: "other-space" });
-      expect(yield* resolve(index.relativeUrl)).toBeNull();
+      // Adding another thread's computer keeps existing signed URLs on their original target.
+      expect((yield* read((yield* resolve(index.relativeUrl))!)).bytes.toString()).toBe(
+        "remote <img src='shot.png'>",
+      );
       yield* workspace.bind({ projectId: "asset-project", localRoot: local, name: "asset-space" });
       yield* workspace.disconnect("asset-space");
       expect(yield* resolve(index.relativeUrl)).toBeNull();
