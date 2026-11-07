@@ -184,6 +184,7 @@ interface BuildCliInput {
   readonly skipBuild: Option.Option<boolean>;
   readonly keepStage: Option.Option<boolean>;
   readonly signed: Option.Option<boolean>;
+  readonly privateSigningIdentity: Option.Option<string>;
   readonly verbose: Option.Option<boolean>;
   readonly mockUpdates: Option.Option<boolean>;
   readonly mockUpdateServerPort: Option.Option<number>;
@@ -286,6 +287,15 @@ const InvalidMockUpdateServerPortReason = Schema.Literals([
   "not-integer",
   "out-of-range",
 ]);
+
+export class InvalidPrivateMacSigningConfigurationError extends Schema.TaggedError<InvalidPrivateMacSigningConfigurationError>()(
+  "InvalidPrivateMacSigningConfigurationError",
+  { reason: Schema.String },
+) {
+  override get message(): string {
+    return this.reason;
+  }
+}
 
 export class InvalidMockUpdateServerPortError extends Schema.TaggedError<InvalidMockUpdateServerPortError>()(
   "InvalidMockUpdateServerPortError",
@@ -946,6 +956,7 @@ interface ResolvedBuildOptions {
   readonly skipBuild: boolean;
   readonly keepStage: boolean;
   readonly signed: boolean;
+  readonly privateSigningIdentity: string | undefined;
   readonly verbose: boolean;
   readonly mockUpdates: boolean;
   readonly mockUpdateServerPort: number | undefined;
@@ -1639,6 +1650,9 @@ const BuildEnvConfig = Config.all({
   skipBuild: Config.Boolean("T3CODE_DESKTOP_SKIP_BUILD").pipe(Config.withDefault(false)),
   keepStage: Config.Boolean("T3CODE_DESKTOP_KEEP_STAGE").pipe(Config.withDefault(false)),
   signed: Config.Boolean("T3CODE_DESKTOP_SIGNED").pipe(Config.withDefault(false)),
+  privateSigningIdentity: Config.String("T3CODE_MACOS_PRIVATE_SIGNING_IDENTITY").pipe(
+    Config.option,
+  ),
   verbose: Config.Boolean("T3CODE_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
   mockUpdates: Config.Boolean("T3CODE_DESKTOP_MOCK_UPDATES").pipe(Config.withDefault(false)),
   mockUpdateServerPort: Config.String("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
@@ -1719,6 +1733,21 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
   const skipBuild = resolveBooleanFlag(input.skipBuild, env.skipBuild);
   const keepStage = resolveBooleanFlag(input.keepStage, env.keepStage);
   const signed = resolveBooleanFlag(input.signed, env.signed);
+  const privateSigningIdentity = mergeOptions(
+    input.privateSigningIdentity,
+    env.privateSigningIdentity,
+    undefined,
+  )
+    ?.trim()
+    .toUpperCase();
+  if (privateSigningIdentity !== undefined) {
+    if (platform !== "mac" || signed || !/^[A-F0-9]{40}$/.test(privateSigningIdentity)) {
+      return yield* new InvalidPrivateMacSigningConfigurationError({
+        reason:
+          "Private signing requires macOS, a 40-character certificate SHA-1 fingerprint, and --signed disabled.",
+      });
+    }
+  }
   const verbose = resolveBooleanFlag(input.verbose, env.verbose);
 
   const mockUpdates = resolveBooleanFlag(input.mockUpdates, env.mockUpdates);
@@ -1745,6 +1774,7 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
     skipBuild,
     keepStage,
     signed,
+    privateSigningIdentity,
     verbose,
     mockUpdates,
     mockUpdateServerPort,
@@ -2769,9 +2799,11 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     | undefined,
   wslRuntimeBundled = false,
   arch?: typeof BuildArch.Type,
+  privateSigningIdentity?: string,
 ) {
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
+    ...(privateSigningIdentity ? { forceCodeSigning: true } : {}),
     productName: resolveDesktopProductName(version),
     artifactName: "T3-Code-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
@@ -2855,6 +2887,16 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
           role: "Viewer",
         },
       ],
+      ...(privateSigningIdentity
+        ? {
+            identity: privateSigningIdentity,
+            timestamp: "none",
+            notarize: false,
+            // Preserve the unsigned fork's runtime access without Apple-only entitlements.
+            hardenedRuntime: false,
+            preAutoEntitlements: false,
+          }
+        : {}),
       ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
       ...(macPasskeySigning
         ? {
@@ -3881,6 +3923,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
         : undefined,
       bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime }),
       options.arch,
+      options.privateSigningIdentity,
     ),
     dependencies: stageDependencies,
     devDependencies: {
@@ -3978,6 +4021,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
     buildEnv.CSC_IDENTITY_AUTO_DISCOVERY = "false";
     delete buildEnv.CSC_LINK;
     delete buildEnv.CSC_KEY_PASSWORD;
+    delete buildEnv.CSC_NAME;
     delete buildEnv.APPLE_API_KEY;
     delete buildEnv.APPLE_API_KEY_ID;
     delete buildEnv.APPLE_API_ISSUER;
@@ -4156,6 +4200,12 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   signed: Flag.Boolean("signed").pipe(
     Flag.withDescription(
       "Enable signing/notarization discovery; Windows uses Azure Trusted Signing (env: T3CODE_DESKTOP_SIGNED).",
+    ),
+    Flag.optional,
+  ),
+  privateSigningIdentity: Flag.String("private-signing-identity").pipe(
+    Flag.withDescription(
+      "Sign macOS with an installed private certificate SHA-1 fingerprint, without Apple provisioning or notarization (env: T3CODE_MACOS_PRIVATE_SIGNING_IDENTITY). Mutually exclusive with --signed.",
     ),
     Flag.optional,
   ),
