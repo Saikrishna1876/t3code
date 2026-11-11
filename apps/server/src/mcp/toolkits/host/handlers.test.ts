@@ -117,7 +117,7 @@ it.effect("registers four host tools and enforces thread permissions before host
     }).pipe(
       Effect.provide(
         McpHttpServer.layerHostToolkit.pipe(
-          Layer.provideMerge(McpServer.McpServer.layer),
+          Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
           Layer.provideMerge(dependencies),
         ),
       ),

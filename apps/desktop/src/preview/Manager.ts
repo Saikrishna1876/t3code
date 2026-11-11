@@ -34,7 +34,7 @@ import {
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -463,10 +463,10 @@ export const previewWindowOpenAction = (details: {
     : "navigate";
 };
 
-const isPreviewRefreshShortcut = (input: Electron.Input): boolean =>
+const isPreviewRefreshShortcut = (input: Electron.Input, platform: NodeJS.Platform): boolean =>
   input.type === "keyDown" &&
   input.key.toLowerCase() === "r" &&
-  (input.meta || input.control) &&
+  (platform === "darwin" ? input.meta && !input.control : input.control && !input.meta) &&
   !input.shift &&
   !input.alt;
 
@@ -522,7 +522,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const rendererHistory = yield* DesktopRendererHistory.DesktopRendererHistory;
   const hostPlatform = yield* HostProcess.Platform;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
   const parentScope = yield* Scope.Scope;
   const browserHost = yield* DesktopBrowserHost.DesktopBrowserHost;
   const passkeys = yield* PreviewPasskeys.PreviewPasskeys;
@@ -1477,7 +1477,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         if (!input.isAutoRepeat) {
           if (
             forwarded.command === "workspace.focusNext" ||
-            forwarded.command === "workspace.focusPrevious"
+            forwarded.command === "workspace.focusPrevious" ||
+            forwarded.command === "preview.focusUrl"
           ) {
             // DOM focus in the renderer cannot by itself release the guest's native keyboard focus.
             host.focus();
@@ -1486,7 +1487,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         }
         return;
       }
-      if (isPreviewRefreshShortcut(input)) {
+      if (isPreviewRefreshShortcut(input, hostPlatform)) {
         event.preventDefault();
         if (host && !host.isDestroyed() && holdsKeyboardFocus(wc)) {
           if (!input.isAutoRepeat) host.send(MENU_ACTION_CHANNEL, "preview.refresh");
@@ -2392,7 +2393,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc,
       ),
     ]);
-    const uuid = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
+    const uuid = yield* random.uuidV4();
     const id = `browser-screenshot-${artifactSiteSlug(wc.getURL())}-${millis.toString(36)}-${uuid.slice(0, 8)}`;
     const artifactPath = path.join(resolvedArtifactDirectory, `${id}.png`);
     const data = image.toPNG();

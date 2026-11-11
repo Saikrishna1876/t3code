@@ -83,7 +83,7 @@ function environment() {
     label: "Laptop",
     connection: { phase: state.connected ? "connected" : "disconnected" },
     serverConfig: state.connected
-      ? { environment: { platform: "linux", capabilities: { codespaces: state.codespaces } } }
+      ? { environment: { platform: "linux", capabilities: { codespaces: state.codespaces, oneTimeSchedules: true } } }
       : null,
   };
 }

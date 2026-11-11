@@ -709,9 +709,9 @@ export const BranchToolbar = memo(function BranchToolbar({
     codespacesInventory.data?.codespaces.find((entry) => entry.name === codespaceName)
       ?.displayName || codespaceName;
   const codespaceLabel = computerName
-    ? codespace.data?.connected
-      ? computerName
-      : `${computerName} unavailable`
+    ? codespace.data?.connected === false
+      ? `${computerName} unavailable`
+      : computerName
     : undefined;
   const workspaceRoot = activeProject
     ? threadWorkspaceRoot({ codespaceName }, activeProject.workspaceRoot)
