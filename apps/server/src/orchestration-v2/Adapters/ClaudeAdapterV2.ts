@@ -7561,18 +7561,16 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             statuses.some((status) => status.name === server && status.status === "pending") &&
             liveQuery.query.reconnectMcpServer
           ) {
-            yield* liveQuery.query
-              .reconnectMcpServer(server)
-              .pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new ProviderAdapter.ProviderAdapterProtocolError({
-                      driver: CLAUDE_PROVIDER,
-                      detail: "Failed to connect Claude MCP server.",
-                      cause,
-                    }),
-                ),
-              );
+            yield* liveQuery.query.reconnectMcpServer(server).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapter.ProviderAdapterProtocolError({
+                    driver: CLAUDE_PROVIDER,
+                    detail: "Failed to connect Claude MCP server.",
+                    cause,
+                  }),
+              ),
+            );
             statuses = yield* liveQuery.query.mcpServerStatus.pipe(
               Effect.mapError(
                 (cause) =>

@@ -61,6 +61,8 @@ class AttachmentCacheFullError extends Schema.TaggedError<AttachmentCacheFullErr
   {},
 ) {}
 
+const isAttachmentCacheFullError = Schema.is(AttachmentCacheFullError);
+
 /** Only workspace execution lives here. No provider, login, project store or conversation database. */
 export async function startWorker(root: string, token: string, port = 0) {
   const workspaceRoot = await NodeFSP.realpath(root);
@@ -750,12 +752,12 @@ export async function startWorker(root: string, token: string, port = 0) {
         return;
       }
       response
-        .writeHead(Schema.is(AttachmentCacheFullError)(error) ? 507 : 400, {
+        .writeHead(isAttachmentCacheFullError(error) ? 507 : 400, {
           "content-type": "application/json",
         })
         .end(
           JSON.stringify({
-            message: Schema.is(AttachmentCacheFullError)(error)
+            message: isAttachmentCacheFullError(error)
               ? "Codespace attachment storage is full."
               : "Codespace workspace operation failed.",
           }),

@@ -3656,7 +3656,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ]);
       assert.deepEqual(
         yield* bridge.listTools({ providerThread: harness.providerThread, server: "host-notes" }),
-        [{ name: "lookup", inputSchema: { type: "object" } }],
+        [{ name: "lookup", inputSchema: { type: "object" }, annotations: {} }],
       );
       assert.deepEqual(reconnects, ["host-notes"]);
       const input = {

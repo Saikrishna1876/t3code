@@ -89,7 +89,9 @@ vi.mock("./codespaces", async () => {
   const { Atom } = await import("effect/reactivity");
   const Effect = await import("effect/Effect");
   const Schema = await import("effect/Schema");
-  class BindingError extends Schema.TaggedError<BindingError>()("BindingError", { cause: Schema.Defect() }) {}
+  class BindingError extends Schema.TaggedError<BindingError>()("BindingError", {
+    cause: Schema.Defect(),
+  }) {}
   const project = Atom.family((key: string) =>
     Atom.make(
       Effect.tryPromise({
