@@ -1257,11 +1257,22 @@ describe("composerDraftStore project draft thread mapping", () => {
       threadId,
       environmentSelection: "auto",
       loadBalancedEnvironmentId: TEST_ENVIRONMENT_ID,
+      codespaceName: "cloud-computer",
     });
+    store.setProjectDraftThreadId(projectRef, draftId, { codespaceName: "other-computer" });
+    expect(store.getDraftThread(draftId)?.loadBalancedEnvironmentId).toBeNull();
+    store.setProjectDraftThreadId(
+      scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("other-member")),
+      draftId,
+      { threadId },
+    );
+    expect(store.getDraftThread(draftId)?.codespaceName).toBe("other-computer");
+    store.setDraftThreadContext(draftId, { loadBalancedEnvironmentId: TEST_ENVIRONMENT_ID });
     store.setProjectDraftThreadId(remoteProjectRef, draftId, { threadId });
     expect(store.getDraftThread(draftId)).toMatchObject({
       environmentSelection: "auto",
       loadBalancedEnvironmentId: null,
+      codespaceName: null,
     });
     store.setDraftThreadContext(draftId, { loadBalancedEnvironmentId: OTHER_TEST_ENVIRONMENT_ID });
     store.setDraftThreadContext(draftId, { projectRef });

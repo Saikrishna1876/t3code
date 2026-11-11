@@ -2918,118 +2918,164 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       ),
   );
 
-  it.effect("resumes a provider thread without requesting or decoding its history", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const scenario = "codex-resume-metadata";
-        const nativeThreadId = `native-${scenario}-thread`;
-        const preamble = codexReplayPreamble({
-          nativeThreadId,
-          nativeTurnId: "unused-turn",
-          prompt: "unused-prompt",
-        }).slice(0, 5);
-        const transcript = makeCodexReplayTranscript({
-          scenario,
-          entries: [
-            ...preamble,
-            {
-              type: "expect_outbound",
-              label: "thread/resume",
-              frame: {
-                id: 3,
-                method: "thread/resume",
-                params: {
-                  threadId: nativeThreadId,
-                  excludeTurns: true,
-                  config: CodexAdapterV2.CODEX_THREAD_CONFIG,
+  it.effect.each([false, true])(
+    "resumes a provider thread without requesting or decoding its history with remote=%s",
+    (remote) => {
+      let remoteEnabled = false;
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const scenario = "codex-resume-metadata";
+          const nativeThreadId = `native-${scenario}-thread`;
+          const preamble = codexReplayPreamble({
+            nativeThreadId,
+            nativeTurnId: "unused-turn",
+            prompt: "unused-prompt",
+          }).slice(0, 5);
+          const transcript = makeCodexReplayTranscript({
+            scenario,
+            entries: [
+              ...preamble,
+              {
+                type: "expect_outbound",
+                label: "thread/resume",
+                frame: {
+                  id: 3,
+                  method: "thread/resume",
+                  params: {
+                    threadId: nativeThreadId,
+                    excludeTurns: true,
+                    config: {
+                      ...CodexAdapterV2.CODEX_THREAD_CONFIG,
+                      ...(remote
+                        ? {
+                            "features.stable_environment_tools": false,
+                            "features.multi_agent": false,
+                            "features.multi_agent_v2": false,
+                          }
+                        : {}),
+                    },
+                  },
                 },
               },
-            },
-            {
-              type: "emit_inbound",
-              label: "thread/resume",
-              frame: { id: 3, result: { thread: { id: nativeThreadId, updatedAt: 1782622450 } } },
-            },
-            {
-              type: "expect_outbound",
-              label: "thread/resume without an app thread",
-              frame: {
-                id: 4,
-                method: "thread/resume",
-                params: {
-                  threadId: nativeThreadId,
-                  excludeTurns: true,
-                  config: CodexAdapterV2.CODEX_THREAD_CONFIG,
+              {
+                type: "emit_inbound",
+                label: "thread/resume",
+                frame: { id: 3, result: { thread: { id: nativeThreadId, updatedAt: 1782622450 } } },
+              },
+              {
+                type: "expect_outbound",
+                label: "thread/resume without an app thread",
+                frame: {
+                  id: 4,
+                  method: "thread/resume",
+                  params: {
+                    threadId: nativeThreadId,
+                    excludeTurns: true,
+                    config: {
+                      ...CodexAdapterV2.CODEX_THREAD_CONFIG,
+                      ...(remote
+                        ? {
+                            "features.stable_environment_tools": false,
+                            "features.multi_agent": false,
+                            "features.multi_agent_v2": false,
+                          }
+                        : {}),
+                    },
+                  },
                 },
               },
-            },
-            {
-              type: "emit_inbound",
-              label: "thread/resume without an app thread",
-              frame: { id: 4, result: { thread: { id: nativeThreadId, updatedAt: 1782622450 } } },
-            },
-            {
-              type: "expect_outbound",
-              label: "thread/resume with an explicit app thread",
-              frame: {
-                id: 5,
-                method: "thread/resume",
-                params: {
-                  threadId: nativeThreadId,
-                  excludeTurns: true,
-                  config: CodexAdapterV2.CODEX_THREAD_CONFIG,
+              {
+                type: "emit_inbound",
+                label: "thread/resume without an app thread",
+                frame: { id: 4, result: { thread: { id: nativeThreadId, updatedAt: 1782622450 } } },
+              },
+              {
+                type: "expect_outbound",
+                label: "thread/resume with an explicit app thread",
+                frame: {
+                  id: 5,
+                  method: "thread/resume",
+                  params: {
+                    threadId: nativeThreadId,
+                    excludeTurns: true,
+                    config: {
+                      ...CodexAdapterV2.CODEX_THREAD_CONFIG,
+                      ...(remote
+                        ? {
+                            "features.stable_environment_tools": false,
+                            "features.multi_agent": false,
+                            "features.multi_agent_v2": false,
+                          }
+                        : {}),
+                    },
+                  },
                 },
               },
-            },
-            {
-              type: "emit_inbound",
-              label: "thread/resume with an explicit app thread",
-              frame: { id: 5, result: { thread: { id: nativeThreadId, updatedAt: 1782622450 } } },
-            },
-          ],
-        });
-        const resumeThreadEnvs: Array<unknown> = [];
-        const harness = yield* makeCodexReplayHarness(
-          transcript,
-          () => Effect.void,
-          (method, params) =>
-            Effect.sync(() => {
-              if (method === "thread/resume") resumeThreadEnvs.push(threadEnvOf(params));
-            }),
-        );
-        const resumed = yield* harness.runtime.resumeThread({
-          providerThread: harness.providerThread,
-          modelSelection: CODEX_TEST_MODEL_SELECTION,
-          runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
-        });
-        yield* harness.runtime.resumeThread({
-          providerThread: { ...harness.providerThread, appThreadId: null },
-          modelSelection: CODEX_TEST_MODEL_SELECTION,
-          runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
-        });
-        const explicitThreadId = ThreadId.make(`thread-${scenario}-explicit`);
-        yield* harness.runtime.resumeThread({
-          threadId: explicitThreadId,
-          providerThread: harness.providerThread,
-          modelSelection: CODEX_TEST_MODEL_SELECTION,
-          runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
-        });
+              {
+                type: "emit_inbound",
+                label: "thread/resume with an explicit app thread",
+                frame: { id: 5, result: { thread: { id: nativeThreadId, updatedAt: 1782622450 } } },
+              },
+            ],
+          });
+          const resumeThreadEnvs: Array<unknown> = [];
+          const harness = yield* makeCodexReplayHarness(
+            transcript,
+            () => Effect.void,
+            (method, params) =>
+              Effect.sync(() => {
+                if (method === "thread/resume") resumeThreadEnvs.push(threadEnvOf(params));
+              }),
+          );
+          remoteEnabled = remote;
+          const resumed = yield* harness.runtime.resumeThread({
+            providerThread: harness.providerThread,
+            modelSelection: CODEX_TEST_MODEL_SELECTION,
+            runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+          });
+          yield* harness.runtime.resumeThread({
+            providerThread: { ...harness.providerThread, appThreadId: null },
+            modelSelection: CODEX_TEST_MODEL_SELECTION,
+            runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+          });
+          const explicitThreadId = ThreadId.make(`thread-${scenario}-explicit`);
+          yield* harness.runtime.resumeThread({
+            threadId: explicitThreadId,
+            providerThread: harness.providerThread,
+            modelSelection: CODEX_TEST_MODEL_SELECTION,
+            runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+          });
 
-        assert.equal(resumed.nativeThreadRef?.nativeId, nativeThreadId);
-        assert.equal(resumed.status, "idle");
-        assert.equal(DateTime.toEpochMillis(resumed.updatedAt), 1782622450000);
-        assert.deepEqual(resumeThreadEnvs, [harness.threadId, undefined, explicitThreadId]);
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            IdAllocator.layer,
-            McpProviderSessions.layer,
-            NodeServices.layer,
-            NodeCrypto.layer,
+          assert.equal(resumed.nativeThreadRef?.nativeId, nativeThreadId);
+          assert.equal(resumed.status, "idle");
+          assert.equal(DateTime.toEpochMillis(resumed.updatedAt), 1782622450000);
+          assert.deepEqual(resumeThreadEnvs, [harness.threadId, undefined, explicitThreadId]);
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+                lookup: () =>
+                  Effect.succeed(
+                    remoteEnabled
+                      ? {
+                          projectId: "project",
+                          name: "space",
+                          localRoot: "/workspace",
+                          remoteCwd: "/workspaces/project",
+                          executor: null,
+                        }
+                      : null,
+                  ),
+              }),
+              IdAllocator.layer,
+              McpProviderSessions.layer,
+              NodeServices.layer,
+              NodeCrypto.layer,
+            ),
           ),
         ),
-      ),
-    ),
+      );
+    },
   );
 
   // regression: #15389 archived native Codex sessions resume via thread/unarchive
@@ -8754,82 +8800,110 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       ),
   );
 
-  it.effect("unarchives an archived Codex source thread before forking it", () =>
-    Effect.gen(function* () {
-      const nativeThreadId = "archived-fork-source";
-      const forkThreadId = "archived-fork-target";
-      const forkParams = {
-        threadId: nativeThreadId,
-        lastTurnId: "native-turn-first",
-        config: CodexAdapterV2.CODEX_THREAD_CONFIG,
-      };
-      const exchange = (
-        id: number,
-        method: string,
-        params: unknown,
-        reply: { readonly result: unknown } | { readonly error: unknown },
-      ): Array<CodexReplay.CodexAppServerReplayEntry> => [
-        { type: "expect_outbound", label: method, frame: { id, method, params } },
-        { type: "emit_inbound", label: method, frame: { id, ...reply } },
-      ];
-      const transcript = makeCodexReplayTranscript({
-        scenario: "codex-archived-fork",
-        entries: [
-          ...codexReplayPreamble({
-            nativeThreadId,
-            nativeTurnId: "archived-fork-turn",
-            prompt: "unused",
-          }).slice(0, 5),
-          ...exchange(3, "thread/fork", forkParams, {
-            error: {
-              code: -32600,
-              message: `session ${nativeThreadId} is archived. Run \`codex unarchive ${nativeThreadId}\` to unarchive it first.`,
-            },
-          }),
-          ...exchange(
-            4,
-            "thread/unarchive",
-            { threadId: nativeThreadId },
-            { result: codexReplayThreadResult({ nativeThreadId, forkedFromId: null }) },
-          ),
-          ...exchange(5, "thread/fork", forkParams, {
-            result: codexReplayThreadResult({
-              nativeThreadId: forkThreadId,
-              forkedFromId: nativeThreadId,
+  it.effect.each([false, true])(
+    "unarchives an archived Codex source thread before forking it with remote=%s",
+    (remote) => {
+      let remoteEnabled = false;
+      return Effect.gen(function* () {
+        const nativeThreadId = "archived-fork-source";
+        const forkThreadId = "archived-fork-target";
+        const forkParams = {
+          threadId: nativeThreadId,
+          lastTurnId: "native-turn-first",
+          config: {
+            ...CodexAdapterV2.CODEX_THREAD_CONFIG,
+            ...(remote
+              ? {
+                  "features.stable_environment_tools": false,
+                  "features.multi_agent": false,
+                  "features.multi_agent_v2": false,
+                }
+              : {}),
+          },
+        };
+        const exchange = (
+          id: number,
+          method: string,
+          params: unknown,
+          reply: { readonly result: unknown } | { readonly error: unknown },
+        ): Array<CodexReplay.CodexAppServerReplayEntry> => [
+          { type: "expect_outbound", label: method, frame: { id, method, params } },
+          { type: "emit_inbound", label: method, frame: { id, ...reply } },
+        ];
+        const transcript = makeCodexReplayTranscript({
+          scenario: "codex-archived-fork",
+          entries: [
+            ...codexReplayPreamble({
+              nativeThreadId,
+              nativeTurnId: "archived-fork-turn",
+              prompt: "unused",
+            }).slice(0, 5),
+            ...exchange(3, "thread/fork", forkParams, {
+              error: {
+                code: -32600,
+                message: `session ${nativeThreadId} is archived. Run \`codex unarchive ${nativeThreadId}\` to unarchive it first.`,
+              },
             }),
-          }),
-        ],
-      });
-      const harness = yield* makeCodexReplayHarness(transcript);
-      const now = yield* DateTime.now;
-      const firstTurn = codexReplaySourceTurn({
-        id: "provider-turn-first",
-        ordinal: 1,
-        nativeId: "native-turn-first",
-        providerThreadId: harness.providerThread.id,
-        now,
-      });
+            ...exchange(
+              4,
+              "thread/unarchive",
+              { threadId: nativeThreadId },
+              { result: codexReplayThreadResult({ nativeThreadId, forkedFromId: null }) },
+            ),
+            ...exchange(5, "thread/fork", forkParams, {
+              result: codexReplayThreadResult({
+                nativeThreadId: forkThreadId,
+                forkedFromId: nativeThreadId,
+              }),
+            }),
+          ],
+        });
+        const harness = yield* makeCodexReplayHarness(transcript);
+        remoteEnabled = remote;
+        const now = yield* DateTime.now;
+        const firstTurn = codexReplaySourceTurn({
+          id: "provider-turn-first",
+          ordinal: 1,
+          nativeId: "native-turn-first",
+          providerThreadId: harness.providerThread.id,
+          now,
+        });
 
-      const forkedProviderThread = yield* harness.runtime.forkThread({
-        sourceProviderThread: harness.providerThread,
-        sourceProviderTurns: [firstTurn],
-        providerTurnId: firstTurn.id,
-        targetThreadId: ThreadId.make("thread-archived-fork-target"),
-      });
+        const forkedProviderThread = yield* harness.runtime.forkThread({
+          sourceProviderThread: harness.providerThread,
+          sourceProviderTurns: [firstTurn],
+          providerTurnId: firstTurn.id,
+          targetThreadId: ThreadId.make("thread-archived-fork-target"),
+        });
 
-      assert.equal(forkedProviderThread.nativeThreadRef?.nativeId, forkThreadId);
-      assert.equal(forkedProviderThread.forkedFrom?.providerTurnId, firstTurn.id);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        Layer.mergeAll(
-          IdAllocator.layer,
-          McpProviderSessions.layer,
-          NodeServices.layer,
-          NodeCrypto.layer,
+        assert.equal(forkedProviderThread.nativeThreadRef?.nativeId, forkThreadId);
+        assert.equal(forkedProviderThread.forkedFrom?.providerTurnId, firstTurn.id);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+              lookup: () =>
+                Effect.succeed(
+                  remoteEnabled
+                    ? {
+                        projectId: "project",
+                        name: "space",
+                        localRoot: "/workspace",
+                        remoteCwd: "/workspaces/project",
+                        executor: null,
+                      }
+                    : null,
+                ),
+            }),
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
         ),
-      ),
-    ),
+      );
+    },
   );
 
   describe("native goals", () => {

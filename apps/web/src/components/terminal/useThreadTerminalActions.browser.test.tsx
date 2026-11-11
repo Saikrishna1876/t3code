@@ -35,7 +35,8 @@ vi.mock("../../state/entities", () => ({
       : null,
   useProject: () => ({ workspaceRoot: "/repo" }),
 }));
-vi.mock("../../state/session", () => ({
+vi.mock("../../state/session", async (original) => ({
+  ...(await original<typeof import("../../state/session")>()),
   readEnvironmentScope: () => true,
   useEnvironmentScope: () => true,
 }));

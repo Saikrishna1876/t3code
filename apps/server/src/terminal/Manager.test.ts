@@ -434,9 +434,14 @@ it.layer(
 
   it.effect.each([true, false])(
     "checks remote worktree directories on the computer, exists=%s",
-    (exists) =>
-      Effect.gen(function* () {
-        const { manager, ptyAdapter } = yield* createManager();
+    (exists) => {
+      let inspections = 0;
+      return Effect.gen(function* () {
+        const { manager, ptyAdapter } = yield* createManager(5, {
+          subprocessPollIntervalMs: 1_000,
+          processKillGraceMs: 0,
+          processTable: Effect.succeed([]),
+        });
         const cwd = "/host/project/.git/t3-worktrees/project/feature";
         const result = yield* manager.open(openInput({ cwd })).pipe(Effect.result);
         assert.equal(result._tag, exists ? "Success" : "Failure");
@@ -446,22 +451,38 @@ it.layer(
             yield* manager.getShell({ threadId: "thread-1", terminalId: DEFAULT_TERMINAL_ID }),
             "bash",
           );
+          yield* TestClock.adjust("6 seconds");
+          expect(inspections).toBeGreaterThanOrEqual(4);
         }
       }).pipe(
         Effect.provide(
-          Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
-            lookup: () =>
-              Effect.succeed({
-                projectId: "project",
-                name: "space",
-                localRoot: "/host/project",
-                executor: null,
-                remoteCwd: null,
-              }),
-            call: () => Effect.succeed((exists ? { kind: "directory" } : null) as never),
-          }),
+          Layer.mergeAll(
+            TestClock.layer(),
+            Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+              lookup: () =>
+                Effect.succeed({
+                  projectId: "project",
+                  name: "space",
+                  localRoot: "/host/project",
+                  executor: null,
+                  remoteCwd: null,
+                }),
+              call: (_cwd, group) =>
+                group === "telemetry"
+                  ? Effect.sync(() => {
+                      inspections++;
+                      return {
+                        hasRunningSubprocess: false,
+                        childCommand: null,
+                        processIds: [],
+                      } as never;
+                    })
+                  : Effect.succeed((exists ? { kind: "directory" } : null) as never),
+            }),
+          ),
         ),
-      ),
+      );
+    },
   );
 
   it.effect("keeps attach streams live when a terminal id is closed and reopened", () =>

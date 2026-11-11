@@ -1527,7 +1527,7 @@ function createDraftThreadState(
       ? { loadBalancedEnvironmentId: options.loadBalancedEnvironmentId }
       : existingThread?.loadBalancedEnvironmentId !== undefined
         ? {
-            loadBalancedEnvironmentId: projectChanged
+            loadBalancedEnvironmentId: workspaceChanged
               ? null
               : existingThread.loadBalancedEnvironmentId,
           }
@@ -1540,7 +1540,7 @@ function createDraftThreadState(
     worktreePath: nextWorktreePath,
     codespaceName:
       options?.codespaceName === undefined
-        ? workspaceChanged
+        ? existingThread?.environmentId !== projectRef.environmentId
           ? null
           : (existingThread?.codespaceName ?? null)
         : options.codespaceName,

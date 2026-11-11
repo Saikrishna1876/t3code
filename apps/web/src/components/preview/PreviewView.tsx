@@ -262,7 +262,7 @@ export function PreviewView({
       if (serverInputDisabled) return false;
       serverSurfaceRef.current.navigate(resolvedUrl);
       rememberPreviewUrl(threadRef, requestedUrl);
-      return true;
+      return { tabId, runtimeTabId, server: true };
     }
     // Codespace forwards listen on the T3 host's loopback, not the desktop client's.
     let resolvedLoopback = false;
@@ -280,7 +280,7 @@ export function PreviewView({
       // The bridge mirrors the resolved URL back to the server.
       await previewBridge.navigate(runtimeTabId, resolvedUrl);
       rememberPreviewUrl(threadRef, requestedUrl);
-      return true;
+      return { tabId, runtimeTabId, server: false };
     }
     const result = await openPreviewSession({
       openPreview: open,
@@ -302,7 +302,17 @@ export function PreviewView({
         });
       }
     }
-    return result._tag === "Success";
+    return result._tag === "Success"
+      ? {
+          tabId: result.value.tabId,
+          runtimeTabId: previewRuntimeTabId(
+            threadRef,
+            previewState.serverEpoch,
+            result.value.tabId,
+          ),
+          server: moveToHost || serverOwnsRendering || result.value.runtime === "server",
+        }
+      : false;
   };
 
   const handleSubmitUrl = async (next: string) => {
@@ -355,11 +365,14 @@ export function PreviewView({
     else if (previewBridge && runtimeTabId) void previewBridge.refresh(runtimeTabId);
   };
 
-  const adjustServerTab = async (change: Omit<PreviewAdjustInput, "threadId" | "tabId">) => {
-    if (!tabId) return;
+  const adjustServerTab = async (
+    change: Omit<PreviewAdjustInput, "threadId" | "tabId">,
+    destinationTabId = tabId,
+  ) => {
+    if (!destinationTabId) return;
     const result = await adjust({
       environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, tabId, ...change },
+      input: { threadId: threadRef.threadId, tabId: destinationTabId, ...change },
     });
     if (result._tag === "Failure") {
       const error = squashAtomCommandFailure(result);
@@ -497,7 +510,15 @@ export function PreviewView({
           : Promise.resolve();
     if (supportsWorkspaceUrlResolution && sourceUrl && sourceUrl !== url) {
       void navigateToResolvedUrl(sourceUrl)
-        .then((navigated) => (navigated ? reload() : undefined))
+        .then((destination) =>
+          destination
+            ? destination.server
+              ? adjustServerTab({ hardReload: true }, destination.tabId)
+              : previewBridge && destination.runtimeTabId
+                ? previewBridge.hardReload(destination.runtimeTabId)
+                : undefined
+            : undefined,
+        )
         .catch(() => undefined);
     } else {
       void reload().catch(() => undefined);

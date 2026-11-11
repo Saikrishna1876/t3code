@@ -285,6 +285,7 @@ interface TerminalSessionState {
   threadId: string;
   terminalId: string;
   cwd: string;
+  remote: boolean;
   worktreePath: string | null;
   status: TerminalSessionStatus;
   pid: number | null;
@@ -2428,10 +2429,12 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     });
 
     const startingAt = yield* nowIso;
+    const remote = Option.isSome(workspace) ? yield* workspace.value.lookup(input.cwd) : null;
     yield* modifyManagerState((state) => {
       session.status = "starting";
       session.shell = null;
       session.cwd = input.cwd;
+      session.remote = remote !== null;
       session.worktreePath = input.worktreePath ?? null;
       session.cols = input.cols;
       session.rows = input.rows;
@@ -2453,9 +2456,6 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       increment(terminalSessionsTotal, { lifecycle: eventType }).pipe(
         Effect.andThen(
           Effect.gen(function* () {
-            const remote = Option.isSome(workspace)
-              ? yield* workspace.value.lookup(session.cwd)
-              : null;
             const shellCandidates = remote
               ? [{ shell: "bash" }]
               : resolveShellCandidates(shellResolver, platform, baseEnv);
@@ -2640,7 +2640,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const isQuiet = (session: TerminalSessionState & { pid: number }) => {
     const quiet = quietSessions.get(session);
     return (
-      !session.cwd.replaceAll("\\", "/").includes("/.git/t3-codespaces/") &&
+      !session.remote &&
       quiet !== undefined &&
       quiet.idleSnapshots === 2 &&
       quiet.process === session.process &&
@@ -2912,6 +2912,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         unsubscribeData: null,
         unsubscribeExit: null,
         hasRunningSubprocess: false,
+        remote: false,
         childCommandLabel: null,
         runtimeEnv: normalizedRuntimeEnv(input.env),
         explicitEnv: normalizedRuntimeEnv(input.explicitEnv),

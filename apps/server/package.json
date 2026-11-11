@@ -15,7 +15,7 @@
   ],
   "type": "module",
   "scripts": {
-    "dev": "node scripts/build-workspace-worker.ts && node --watch --watch-path=src --watch-path=../../packages src/bin.ts",
+    "dev": "node --watch --watch-path=src --watch-path=scripts --watch-path=../../packages scripts/dev.ts",
     "dev:built": "vp run dev",
     "build:bundle": "vp pack",
     "build:exe": "node scripts/cli.ts build-exe",
@@ -67,7 +67,6 @@
     "diff": "8.0.3",
     "effect": "catalog:",
     "ffi-rs": "1.3.2",
-    "jose": "catalog:",
     "jsonc-parser": "3.3.1",
     "node-pty": "^1.2.0-beta.15",
     "playwright-core": "1.64.1",

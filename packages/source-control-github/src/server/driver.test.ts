@@ -74,7 +74,7 @@ it.effect(
       expect(requests).toBe(2);
       expect(tokenReads).toBe(2);
     }).pipe(
-      Effect.provide(Layer.merge(services, NodeServices.layer)),
+      Effect.provide(Layer.mergeAll(services, NodeServices.layer, NodeCrypto.layer)),
       Effect.provideService(HostProcess.Environment, {}),
       Effect.scoped,
     );

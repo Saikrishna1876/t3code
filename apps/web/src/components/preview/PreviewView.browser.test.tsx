@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   openPreviewSession: vi.fn(),
   closePreviewSession: vi.fn(),
   openBrowser: vi.fn(),
+  adjust: vi.fn(async () => ({ _tag: "Success" as const })),
   resolveUrl: vi.fn(async () => ({ _tag: "Success", value: "http://localhost:14528/app" })),
   navigate: vi.fn(async (_tabId: string, _url: string): Promise<void> => undefined),
   rememberPreviewUrl: vi.fn(),
@@ -204,6 +205,7 @@ vi.mock(import("~/state/preview"), async (original) => {
     previewEnvironment: {
       open: {},
       close: {},
+      adjust: { id: "adjust" },
       resize: {},
       resolveUrl: {
         id: "resolveUrl",
@@ -216,7 +218,11 @@ vi.mock(import("~/state/preview"), async (original) => {
 vi.mock(import("~/state/use-atom-command"), async (original) => ({
   ...(await original()),
   useAtomCommand: ((command: { id?: string } | undefined) =>
-    command?.id === "resolveUrl" ? mocks.resolveUrl : vi.fn()) as never,
+    command?.id === "resolveUrl"
+      ? mocks.resolveUrl
+      : command?.id === "adjust"
+        ? mocks.adjust
+        : vi.fn()) as never,
 }));
 
 vi.mock(import("./openPreviewSession"), async (original) => ({
@@ -361,6 +367,23 @@ describe("PreviewView", () => {
     },
   );
 
+  it("hard reloads the replacement tab after moving to the remote host browser", async () => {
+    setup();
+    mocks.supportsCodespaces = true;
+    mocks.sourceUrl = "http://localhost:4173/page";
+    mocks.primaryEnvironmentId = EnvironmentId.make("local-host");
+    mocks.openPreviewSession.mockResolvedValue({ _tag: "Success", value: { tabId: "host-tab" } });
+    await using _screen = await render(view());
+    await userEvent.click(page.getByRole("button", { name: "Preview menu" }));
+    await userEvent.click(page.getByRole("menuitem", { name: "Hard reload" }));
+    await vi.waitFor(() =>
+      expect(mocks.adjust).toHaveBeenCalledWith({
+        environmentId: TEST_THREAD_REF.environmentId,
+        input: { threadId: TEST_THREAD_REF.threadId, tabId: "host-tab", hardReload: true },
+      }),
+    );
+    expect(mocks.hardReload).not.toHaveBeenCalled();
+  });
   it.each(["localhost:3000/app", "http://localhost:14528/app"])(
     "opens %s in the remote host browser, then replaces the desktop tab",
     async (requestedUrl) => {

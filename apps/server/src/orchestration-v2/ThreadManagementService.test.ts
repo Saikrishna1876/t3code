@@ -1,5 +1,7 @@
 import { expect, it } from "@effect/vitest";
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import {
+  codespaceWorkspaceRoot,
   CommandId,
   EnvironmentId,
   MessageId,
@@ -81,7 +83,8 @@ const layerReceiptsTest = CommandReceiptStore.layer.pipe(
 );
 
 const layerDispatchChokepointTest =
-  (settingsLayer: ReturnType<typeof ServerSettings.layerTest>) => (dispatched: Array<string>) =>
+  (settingsLayer: ReturnType<typeof ServerSettings.layerTest>) =>
+  (dispatched: Array<string>, codespaceName?: string) =>
     ThreadManagementService.layer.pipe(
       Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
       Layer.provide(
@@ -89,6 +92,7 @@ const layerDispatchChokepointTest =
           getThreadRecords: () =>
             Effect.succeed({
               thread: {
+                ...(codespaceName ? { codespaceName } : {}),
                 id: ThreadId.make("thread:thread-management:chokepoint"),
                 projectId: ProjectId.make("project:thread-management:chokepoint"),
                 deletedAt: null,
@@ -151,9 +155,9 @@ it.effect(
   },
 );
 
-it.effect(
-  "a replay of an already-accepted command id dispatches despite the instance now being disabled",
-  () => {
+it.effect.each(["message.dispatch", "thread.create"] as const)(
+  "replays accepted %s despite disabled providers or a disconnected Codespace",
+  (commandType) => {
     const projectId = ProjectId.make("project:thread-management:chokepoint");
     const threadId = ThreadId.make("thread:thread-management:chokepoint");
     const instanceId = ProviderInstanceId.make("codex_work");
@@ -173,7 +177,7 @@ it.effect(
       yield* receipts.insertIfAbsent({
         commandId,
         threadId,
-        commandType: "message.dispatch",
+        commandType,
         acceptedAt: yield* DateTime.now,
         resultSequence: 1,
         status: "accepted",
@@ -181,19 +185,37 @@ it.effect(
       });
 
       const threads = yield* ThreadManagementService.ThreadManagementService;
-      yield* threads.dispatch({
-        type: "message.dispatch",
-        commandId,
-        threadId,
-        messageId: MessageId.make("message:thread-management:chokepoint-replay"),
-        text: "Background task completed.",
-        attachments: [],
-        dispatchMode: { type: "queue_after_active" },
-        createdBy: "agent",
-        creationSource: "server",
-      });
+      yield* threads.dispatch(
+        commandType === "thread.create"
+          ? {
+              type: "thread.create",
+              commandId,
+              threadId,
+              projectId,
+              title: "Replay",
+              modelSelection: { instanceId, model: "test" },
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: null,
+              codespaceName: "disconnected-computer",
+              createdBy: "user",
+              creationSource: "web",
+            }
+          : {
+              type: "message.dispatch",
+              commandId,
+              threadId,
+              messageId: MessageId.make("message:thread-management:chokepoint-replay"),
+              text: "Background task completed.",
+              attachments: [],
+              dispatchMode: { type: "queue_after_active" },
+              createdBy: "agent",
+              creationSource: "server",
+            },
+      );
 
-      expect(dispatched).toEqual(["message.dispatch"]);
+      expect(dispatched).toEqual([commandType]);
     }).pipe(Effect.provide(layerTest));
   },
 );
@@ -213,6 +235,45 @@ it.effect("keeps a legacy host thread on the host when metadata names a Codespac
     expect(result._tag).toBe("Failure");
     expect(dispatched).toEqual([]);
   }).pipe(Effect.provide(layerDispatchChokepointTest(ServerSettings.layerTest())(dispatched)));
+});
+
+it.effect("rejects a worktree claimed by another project inside a named checkout", () => {
+  const dispatched: string[] = [];
+  const projectId = "project:thread-management:chokepoint";
+  const localRoot = codespaceWorkspaceRoot("/host/project", "computer");
+  return Effect.gen(function* () {
+    const threads = yield* ThreadManagementService.ThreadManagementService;
+    const result = yield* threads
+      .dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("nested-worktree"),
+        threadId: ThreadId.make("thread:thread-management:chokepoint"),
+        worktreePath: localRoot + "/nested/worktree",
+      })
+      .pipe(Effect.result);
+    expect(result._tag).toBe("Failure");
+    expect(dispatched).toEqual([]);
+  }).pipe(
+    Effect.provide(
+      layerDispatchChokepointTest(ServerSettings.layerTest())(dispatched, "computer").pipe(
+        Layer.provide(
+          Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+            bindings: Effect.succeed([
+              { projectId, name: "computer", localRoot, hostRoot: "/host/project" },
+            ]),
+            lookup: () =>
+              Effect.succeed({
+                projectId: "nested-project",
+                name: "computer",
+                localRoot,
+                executor: null,
+                remoteCwd: null,
+              }),
+          }),
+        ),
+      ),
+    ),
+  );
 });
 
 it.effect("waitForThread follows a restart continuation instead of the cut run", () =>

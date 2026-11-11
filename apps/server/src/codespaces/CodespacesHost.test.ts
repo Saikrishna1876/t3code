@@ -331,6 +331,7 @@ describe("Codespaces SSH host", () => {
         const error = yield* Fiber.join(pending);
         expect(error.code).toBe("bootstrap");
         expect(test.forwards()).toBe(0);
+        expect(test.activeExecutor()).toBe(false);
       }).pipe(Effect.provide(test.layer));
     }),
   );

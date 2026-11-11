@@ -657,14 +657,20 @@ const make = Effect.gen(function* () {
         forwardPort,
         isForwardedPort: (port) => [...previewPorts.values()].includes(port),
       });
-      workers.set(space.name, { url: `http://127.0.0.1:${localPort}`, token });
+      const registeredWorker = { url: `http://127.0.0.1:${localPort}`, token };
+      workers.set(space.name, registeredWorker);
       if (
         forwards.get(space.name)?.process !== child ||
         !(yield* child.isRunning.pipe(Effect.orElseSucceed(() => false)))
-      )
+      ) {
+        if (workers.get(space.name) === registeredWorker) {
+          workers.delete(space.name);
+          yield* workspaces.disconnect(space.name);
+        }
         return yield* bootstrapError(
           "Codespace SSH connection closed during workspace registration.",
         );
+      }
       return {
         name: space.name,
         account,

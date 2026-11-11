@@ -133,9 +133,10 @@ export async function startWorker(root: string, token: string, port = 0) {
     return target;
   };
   const openAsset = async (cwd: string, relativePath: string) => {
+    const boundary = await NodeFSP.realpath(await validPath(cwd));
     const candidate = await validPath(NodePath.resolve(cwd, relativePath));
     const target = await NodeFSP.realpath(candidate);
-    if (target !== workspaceRoot && !target.startsWith(workspaceRoot + NodePath.sep))
+    if (target !== boundary && !target.startsWith(boundary + NodePath.sep))
       throw new Error("Asset leaves the Codespace workspace.");
     const before = await NodeFSP.lstat(target);
     if (!before.isFile()) throw new Error("Asset is not a regular file.");

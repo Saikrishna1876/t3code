@@ -97,26 +97,25 @@ export const makeStarRepository = Effect.gen(function* () {
   );
 });
 
-const makeInstance = Effect.gen(function* () {
+const makeWithServices = Effect.gen(function* () {
   const mediaHttpClient = yield* HttpClient.HttpClient;
-  return yield* withOwnServices(
-    Effect.all({
-      sourceControl: GitHubSourceControlProvider.make,
-      discovery: GitHubSourceControlProvider.makeDiscovery,
-      pullRequests: GitHubPullRequestProvider.make,
-      fetchMedia: GitHubMediaFetch.make.pipe(
-        Effect.provideService(HttpClient.HttpClient, mediaHttpClient),
-      ),
-      signIn: makeSignIn,
-      isRepositoryStarred: makeIsRepositoryStarred,
-      starRepository: makeStarRepository,
-    }),
-    services,
-  );
+  return yield* Effect.all({
+    sourceControl: GitHubSourceControlProvider.make,
+    discovery: GitHubSourceControlProvider.makeDiscovery,
+    pullRequests: GitHubPullRequestProvider.make,
+    fetchMedia: GitHubMediaFetch.make.pipe(
+      Effect.provideService(HttpClient.HttpClient, mediaHttpClient),
+    ),
+    signIn: makeSignIn,
+    isRepositoryStarred: makeIsRepositoryStarred,
+    starRepository: makeStarRepository,
+  });
 });
 
+const makeInstance = withOwnServices(makeWithServices, services);
+
 // Codespaces and source control must share the same credential cache and quota reserve.
-export const makeWithSharedServices = makeInstance.pipe(
+export const makeWithSharedServices = makeWithServices.pipe(
   Effect.provide(GitHubPullRequestApi.layer.pipe(Layer.provideMerge(GitHubAppAccess.layer))),
 );
 

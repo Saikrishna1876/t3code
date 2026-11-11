@@ -1771,6 +1771,26 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
         );
         const executionParams = createCodexWorkspaceExecution(workspaceService, client.raw.request);
+        const threadRuntimeParams = Effect.fn("CodexAdapterV2.threadRuntimeParams")(function* (
+          params: Parameters<typeof codexThreadRuntimeParams>[0],
+        ) {
+          const result = codexThreadRuntimeParams(params);
+          const cwd = params.runtimePolicy?.cwd ?? input.runtimePolicy.cwd;
+          const target = cwd && workspaceService ? yield* workspaceService.lookup(cwd) : null;
+          return {
+            ...result,
+            config: {
+              ...result.config,
+              ...(target
+                ? {
+                    "features.stable_environment_tools": false,
+                    "features.multi_agent": false,
+                    "features.multi_agent_v2": false,
+                  }
+                : {}),
+            },
+          };
+        });
         const additionalContextByThread = yield* Ref.make(
           new Map<
             string,
@@ -7371,7 +7391,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               Effect.andThen(mcpSessions.read(threadInput.threadId)),
               Effect.flatMap((mcpSession) =>
                 Effect.gen(function* () {
-                  const params = codexThreadRuntimeParams({
+                  const params = yield* threadRuntimeParams({
                     threadId: threadInput.threadId,
                     mcpSession,
                     modelSelection: threadInput.modelSelection,
@@ -7384,12 +7404,6 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     .request("thread/start", {
                       ...params,
                       ...execution,
-                      config: {
-                        ...params.config,
-                        "features.stable_environment_tools": false,
-                        "features.multi_agent": false,
-                        "features.multi_agent_v2": false,
-                      },
                     })
                     .pipe(
                       Effect.flatMap(Schema.decodeUnknownEffect(CodexSchema.V2ThreadStartResponse)),
@@ -7422,7 +7436,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               const appThreadId = threadInput.threadId ?? threadInput.providerThread.appThreadId;
               const resume = resumeNativeThread(nativeThreadId, {
                 excludeTurns: true,
-                ...codexThreadRuntimeParams({
+                ...(yield* threadRuntimeParams({
                   threadId: appThreadId,
                   mcpSession: yield* readMcpSession(appThreadId),
                   ...(threadInput.modelSelection === undefined
@@ -7431,7 +7445,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   ...(threadInput.runtimePolicy === undefined
                     ? {}
                     : { runtimePolicy: threadInput.runtimePolicy }),
-                }),
+                })),
               });
               const response = yield* ensureInitialized.pipe(
                 Effect.andThen(resume),
@@ -8196,12 +8210,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               if (!loaded) {
                 yield* resumeNativeThread(threadId, {
                   excludeTurns: true,
-                  ...codexThreadRuntimeParams({
+                  ...(yield* threadRuntimeParams({
                     threadId: threadInput.providerThread.appThreadId,
                     mcpSession: yield* readMcpSession(threadInput.providerThread.appThreadId),
                     modelSelection: input.modelSelection,
                     runtimePolicy: input.runtimePolicy,
-                  }),
+                  })),
                 });
               }
               const response = yield* ensureInitialized.pipe(
@@ -8245,7 +8259,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               const fork = client.request("thread/fork", {
                 threadId,
                 ...(boundary.lastTurnId === undefined ? {} : { lastTurnId: boundary.lastTurnId }),
-                ...codexThreadRuntimeParams({
+                ...(yield* threadRuntimeParams({
                   threadId: threadInput.targetThreadId,
                   mcpSession: yield* mcpSessions.read(threadInput.targetThreadId),
                   ...(threadInput.modelSelection === undefined
@@ -8254,7 +8268,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   ...(threadInput.runtimePolicy === undefined
                     ? {}
                     : { runtimePolicy: threadInput.runtimePolicy }),
-                }),
+                })),
               });
               const response = yield* ensureInitialized.pipe(
                 Effect.andThen(

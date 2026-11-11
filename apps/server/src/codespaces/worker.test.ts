@@ -139,6 +139,8 @@ describe("Codespace workspace worker", () => {
   );
 
   it("loads the deployed bundle with only its provisioned native search dependency", async () => {
+    const { buildWorkspaceWorker } = await import("../../scripts/build-workspace-worker.ts");
+    await buildWorkspaceWorker();
     const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-worker-bundle-"));
     cleanups.push(() => NodeFSP.rm(root, { recursive: true, force: true }));
     const bundle = NodePath.join(root, "worker.mjs");
@@ -311,6 +313,12 @@ describe("Codespace workspace worker", () => {
       await NodeFSP.mkdir(NodePath.join(test.remote, ".t3-executors"));
       await NodeFSP.writeFile(NodePath.join(test.remote, ".t3-executors/token"), "private token");
       await NodeFSP.symlink(sibling, NodePath.join(project, "escape"), "junction");
+      for (const relativePath of ["escape/secret.txt", "../.t3-executors/token"]) {
+        expect(
+          (await test.call("files", "inspectAsset", [{ cwd: project, relativePath }])).response
+            .status,
+        ).toBe(400);
+      }
       const client = new Client({ name: "project-boundary-test", version: "1.0.0" });
       await client.connect(
         new StreamableHTTPClientTransport(

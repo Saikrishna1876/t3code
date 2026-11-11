@@ -23,7 +23,6 @@ import {
 import {
   hostPreviewMimeTypeFromExtension,
   isWorkspaceAudioPreviewPath,
-  isWorkspaceImagePreviewPath,
   isWorkspacePreviewEntryPath,
   isWorkspaceVideoPreviewPath,
   WORKSPACE_BROWSER_PREVIEW_EXTENSIONS,
@@ -598,9 +597,7 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
     if (remote) {
       return {
         claims:
-          download ||
-          isWorkspaceImagePreviewPath(resolved.relativePath) ||
-          !isWorkspacePreviewEntryPath(resolved.relativePath)
+          download || !/\.html?$/i.test(resolved.relativePath)
             ? {
                 version: 1 as const,
                 kind: "workspace-file-exact" as const,

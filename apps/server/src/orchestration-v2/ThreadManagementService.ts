@@ -763,6 +763,7 @@ const make = Effect.gen(function* () {
     command: OrchestrationV2ServerCommand,
   ) {
     if (command.type !== "thread.create" && command.type !== "thread.metadata.update") return;
+    if (yield* hasReceipt(command.commandId)) return;
     if (
       command.type === "thread.metadata.update" &&
       !command.worktreePath &&
@@ -809,6 +810,8 @@ const make = Effect.gen(function* () {
       if (
         name
           ? !binding ||
+            target?.projectId !== thread.projectId ||
+            target.name !== name ||
             !CodespacesWorkspace.isWorkspacePath(command.worktreePath, binding.localRoot)
           : target !== null
       ) {

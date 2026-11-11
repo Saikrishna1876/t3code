@@ -349,6 +349,13 @@ const make = Effect.gen(function* () {
     if (
       connected &&
       prepared &&
+      (yield* workspaces.bindings).some(
+        (binding) =>
+          binding.projectId === input.projectId &&
+          binding.name === input.name &&
+          binding.localRoot === prepared.binding.localRoot &&
+          binding.hostRoot === localRoot,
+      ) &&
       prepared.credentialFingerprint === credential?.credentialFingerprint &&
       prepared.binding.hostRoot === localRoot
     ) {

@@ -4,8 +4,17 @@ import { page } from "vite-plus/test/browser";
 
 vi.mock(import("../../portDiscoveryState"), async (importOriginal) => ({
   ...(await importOriginal()),
-  useThreadDiscoveredPorts: () =>
-    Array.from(
+  useDiscoveredPortsState: (
+    _environmentId: EnvironmentId | null,
+    _configuredUrls?: readonly string[],
+    threadId?: ThreadId | null,
+  ) => ({
+    threadId,
+    configuredUrlProbing: false,
+    resources: undefined,
+    codespaceName: undefined,
+    error: undefined,
+    servers: Array.from(
       { length: 10 },
       (_, index) =>
         ({
@@ -13,9 +22,11 @@ vi.mock(import("../../portDiscoveryState"), async (importOriginal) => ({
           port: 3000 + index,
           url: `http://localhost:${3000 + index}`,
           terminal: null,
+          agent: { threadId },
           processName: "node",
         }) as DiscoveredLocalServer,
     ),
+  }),
 }));
 
 import { render } from "../../../test/render";

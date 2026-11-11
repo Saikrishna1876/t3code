@@ -7,6 +7,7 @@ import * as NodePath from "@effect/platform-node/NodePath";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeFSP from "node:fs/promises";
 import {
+  codespaceWorkspaceRoot,
   AssetAccessError,
   AssetCreateUrlInput,
   AssetPreviewTypeValidationError,
@@ -236,6 +237,8 @@ describe("AssetAccess", () => {
         expect(yield* windowsResolve(nestedPage.relativeUrl, traversal)).toBeNull();
       }
       const image = yield* issue("shot.png");
+      const pdfGrant = yield* issue("report.pdf");
+      expect(yield* resolve(pdfGrant.relativeUrl, "index.html")).toBeNull();
       expect(image.imageDimensions).toEqual({ width: 390, height: 844 });
       expect(yield* resolve(image.relativeUrl, "index.html")).toBeNull();
       expect(yield* resolve(index.relativeUrl, "../local/index.html")).toBeNull();
@@ -305,8 +308,12 @@ describe("AssetAccess", () => {
         expect(downloaded.bytes.toString()).toBe("remote download bytes");
         expect(yield* resolve(issued.relativeUrl, "shot.png")).toBeNull();
       }
-      yield* workspace.bind({ projectId: "asset-project", name: null });
-      yield* workspace.bind({ projectId: "asset-project", localRoot: local, name: "other-space" });
+      yield* workspace.bind({
+        projectId: "asset-project",
+        hostRoot: local,
+        localRoot: codespaceWorkspaceRoot(local, "other-space"),
+        name: "other-space",
+      });
       // Adding another thread's computer keeps existing signed URLs on their original target.
       expect((yield* read((yield* resolve(index.relativeUrl))!)).bytes.toString()).toBe(
         "remote <img src='shot.png'>",
