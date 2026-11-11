@@ -247,6 +247,7 @@ it.effect.each(
       const launched = yield* Deferred.make<ThreadLaunchService.ThreadLaunchInput>();
       const dependencies = Layer.mergeAll(
         NodeCrypto.layer,
+        ManagedPolicy.layerTest(),
         Scheduler.layer,
         Layer.mock(ThreadLaunchService.ThreadLaunchService)({
           launch: (input) =>

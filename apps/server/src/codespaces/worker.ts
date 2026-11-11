@@ -56,7 +56,10 @@ const encodeVcsError = Schema.encodeSync(Schema.toCodecJson(VcsError));
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_ATTACHMENT_CACHE_BYTES = 512 * 1024 * 1024;
 const MAX_ATTACHMENT_CACHE_FILES = 1024;
-class AttachmentCacheFullError extends Error {}
+class AttachmentCacheFullError extends Schema.TaggedError<AttachmentCacheFullError>()(
+  "AttachmentCacheFullError",
+  {},
+) {}
 
 /** Only workspace execution lives here. No provider, login, project store or conversation database. */
 export async function startWorker(root: string, token: string, port = 0) {
@@ -747,15 +750,14 @@ export async function startWorker(root: string, token: string, port = 0) {
         return;
       }
       response
-        .writeHead(error instanceof AttachmentCacheFullError ? 507 : 400, {
+        .writeHead(Schema.is(AttachmentCacheFullError)(error) ? 507 : 400, {
           "content-type": "application/json",
         })
         .end(
           JSON.stringify({
-            message:
-              error instanceof AttachmentCacheFullError
-                ? "Codespace attachment storage is full."
-                : "Codespace workspace operation failed.",
+            message: Schema.is(AttachmentCacheFullError)(error)
+              ? "Codespace attachment storage is full."
+              : "Codespace workspace operation failed.",
           }),
         );
     }

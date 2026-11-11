@@ -28,8 +28,8 @@ import {
   type RightPanelSurface,
   useRightPanelStore,
 } from "../../rightPanelStore";
-import { isPreviewSupportedInRuntime } from "../../previewStateStore";
 import { openUrlInPreview } from "../../browser/openFileInPreview";
+import { isPreviewAvailableFor } from "../../browser/previewRuntime";
 import { resolveDiscoveredServerUrl } from "../../browser/browserTargetResolver";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { confirmTerminalClose } from "../../lib/terminalCloseConfirm";
@@ -220,6 +220,7 @@ export function useChatTerminalActions(input: ChatTerminalActionsInput) {
     }
     const targetCwd = options?.cwd ?? gitCwd ?? activeProject.workspaceRoot;
     const reusableTerminalId =
+      script.stopOnSettle ||
       options?.preferNewTerminal ||
       !canReuseTerminal ||
       !readEnvironmentScope(environmentId, AuthTerminalReadScope)
@@ -256,6 +257,7 @@ export function useChatTerminalActions(input: ChatTerminalActionsInput) {
         ? { size: { cols: SCRIPT_TERMINAL_COLS, rows: SCRIPT_TERMINAL_ROWS } }
         : { terminalId: reusableTerminalId }),
       location: { cwd: targetCwd, worktreePath: targetWorktreePath },
+      stopOnSettle: script.stopOnSettle ?? false,
       ...(options?.env ? { extraEnv: options.env } : {}),
     });
     if (!launched) return;
@@ -290,7 +292,11 @@ export function useChatTerminalActions(input: ChatTerminalActionsInput) {
       }
       return;
     }
-    if (script.autoOpenPreview && script.previewUrl && isPreviewSupportedInRuntime()) {
+    if (
+      script.autoOpenPreview &&
+      script.previewUrl &&
+      isPreviewAvailableFor(activeThreadRef.environmentId)
+    ) {
       const previewResult = await openUrlInPreview({
         threadRef: activeThreadRef,
         url: resolveDiscoveredServerUrl(activeThreadRef.environmentId, script.previewUrl),

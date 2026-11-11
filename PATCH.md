@@ -18,7 +18,7 @@ Keep project Codespaces work available with the user's existing local provider l
 
 ## Baseline
 
-- Fork/main integrated upstream baseline: stable `v0.1.6`, `2359643cffa6ba9ee84d6f2694b935de54a8013e`, landed through PR #9 at fork/main `4bc7fce0ee`. The v0.1.7 candidate below remains stacked above PR #11 until both PRs merge. Hardware acceptance remains separate.
+- Fork/main integrated upstream baseline: stable `v0.1.6`, `2359643cffa6ba9ee84d6f2694b935de54a8013e`, landed through PR #9 at fork/main `4bc7fce0ee`. PR #12 merged the v0.1.7 candidate into the former feature branch after main had already taken that feature; main did not inherit its integration. This update recovers that reviewed merge before v0.1.9. Hardware acceptance remains separate.
 - Previous integrated upstream baseline: stable `v0.1.5`, `6d450a4284852af137b2f3407fddd89eb76e7644`, included in PR #9 before its v0.1.6 update.
 - Compatibility patches, including PR #2, are committed. Superseded local Codespaces drafts were stashed before the 2026-10-13 integration; see Previous update, 2026-10-18.
 - Last behaviorally verified baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda` (release `0.0.42` built locally on 2026-09-18 with Electron `43.6.0` was extracted and interactively confirmed working by the user on the target Intel Mac macOS 15 system).
@@ -27,7 +27,7 @@ Keep project Codespaces work available with the user's existing local provider l
 
 - Status: active. Version observed in the user's existing patch, runtime result not independently verified.
 - Required behavior: preserve desktop usability on the target Intel Mac. Retain exact Electron `43.6.0` until another version is verified on that machine and the constraint is deliberately revised.
-- Implementation hints: `apps/desktop/package.json` pins Electron to `43.6.0` instead of upstream stable v0.1.7's `44.10.1`; `pnpm-workspace.yaml` aligns the minimum-release-age exception; `pnpm-lock.yaml` resolves the desktop importer and affected peer snapshots to `43.6.0`.
+- Implementation hints: `apps/desktop/package.json` pins Electron to `43.6.0` instead of upstream stable v0.1.9's `44.10.1`; `pnpm-workspace.yaml` aligns the minimum-release-age exception; `pnpm-lock.yaml` resolves the desktop importer and affected peer snapshots to `43.6.0`.
 - Regenerate the lockfile through the current package manager when dependencies change. Check the desktop importer directly; peer snapshots or other importers do not establish the active desktop runtime.
 - Verification: confirm the desktop manifest, resolved importer, installed Electron binary, and packaged runtime agree. On the target machine, inspect Electron GPU feature status and renderer information, then check representative scrolling, chat rendering, and CPU use against the user's working baseline. Do not claim acceleration based only on compilation or a version number.
 - Retirement: a newer runtime satisfies these hardware checks, or the user changes the hardware requirement. If upstream requires incompatible APIs, adapt those call sites or report the concrete blocker; do not silently upgrade Electron.
@@ -70,11 +70,11 @@ Keep project Codespaces work available with the user's existing local provider l
 
 ## P006: Keep server typechecks reliable across platforms
 
-- Status: active. Compiler integration adapted for stable `v0.1.3`.
-- Required behavior: server checks retain strict TypeScript and Effect diagnostics on Linux and macOS. Linux `tsc-rs` 0.4.0 incorrectly infers `any` requirements for the full CLI in `app.test.ts` and `theme.test.ts`; the existing Effect-patched TypeScript compiler accepts those unchanged tests. Do not suppress their diagnostics or weaken the test helpers.
-- Implementation: `apps/server/package.json` retains `tsc --noEmit`. Stable `v0.1.3` maps `typescript` to `@tsc-rs/typescript@0.8.0`, which bundles the Effect language service. Upstream PR #23023 removes the old shared-store mutation by `effect-tsgo patch`; do not restore it. Retain strict compiler and Effect diagnostics. The focused server program includes the unchanged full-CLI tests that exposed the older Linux compiler issue.
-- Verification: scoped server `tsc --noEmit` including `src/cli/app.test.ts` and `src/cli/theme.test.ts`, plus a successful Linux CI Typecheck job. Do not run the full server program locally when resource limits require a narrower check. Focus-ring lint and fork production-job guards remain covered by P004 and P005.
-- Retirement: a later `tsc-rs` version checks the unchanged full-CLI tests successfully on Linux with the same strict settings.
+- Status: active requirement, now using stable v0.1.9's compiler integration.
+- Required behavior: server checks retain strict TypeScript and Effect diagnostics on Linux and macOS. Older Linux `tsc-rs` inferred incorrect `any` requirements in the full CLI tests. Do not suppress diagnostics or weaken those helpers.
+- Implementation: upstream now runs `effect-tsgo tsrs --noEmit` with `@effect/tsgo@0.67.1`. Keep that supported integration and the unchanged full-CLI fixtures. Do not restore the old shared-store compiler mutation.
+- Verification: `vp run --filter t3 typecheck`, including `src/cli/app.test.ts` and `src/cli/theme.test.ts`, plus a successful Linux CI Typecheck job. Scope the local program only if resource limits require it.
+- Retirement: Linux CI checks those unchanged fixtures with the same strict settings successfully.
 
 ## P007: Serve packaged desktop assets on Electron 43
 
@@ -123,6 +123,15 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Prior successful release: 2026-10-07, version `0.0.45`, source `49b07dc3cb8e105c69ed93885ba0e6e80990762b`. DMG and ZIP integrity, packaged Electron `43.6.0`, x64 architecture, and fork feed checks passed. CodeRabbit had zero findings; Greptile's merged review was unavailable because reviews were disabled for the organization.
 
 ## Latest attempt
+
+- Date: 2026-11-11. Preparing stable `v0.1.9`, exact commit `24e77473ecf41bc1f7142529c7911c1c1aae1d76`, published at 11:33:49 UTC. Release API and fetched tag agree; neither draft nor prerelease. Newer upstream main commits are excluded.
+- Starting fork/main and rollback reference: `8c682b0ba4b7dee10e8f814ff50aa941423dc5da`. Branch: `chore/sync-fork-main-0-1-9`. Recovered PR #12's reviewed v0.1.7 merge in `b2ff842c7b`, then merged the exact v0.1.9 tag. The user will merge the PR before release publication.
+- Preserved P001 through P009, per-thread computers, scheduled-task computer selection, host provider login, remote attachments and preview routing. Accepted upstream's task thread modes, composer restructuring, MCP Apps permission enforcement and worker leases.
+- Fork migration 77 already shipped `ScheduledTaskCodespace`. It remains 77; incoming upstream migrations 77–81 register as 78–82. Focused upgrade cases first fail on the old manifest with a missing `thread_mode` column, then verify both unbound and bound computer tasks survive migration and repeat migration is a no-op.
+- Electron manifest, lockfile importer and installed binary remain exactly `43.6.0`. Dependencies regenerated with pinned Node `26.12.1` and this checkout's Vite+. Hardware graphics, native clipboard, native mobile, packaged startup, permission persistence and automatic updater installation remain unverified.
+- Checks and review in progress. Publication is authorized for this request so the in-app updater can download the release, after the user merges. The cloud workflow must verify private signing, packaged runtime and updater assets before publishing.
+
+## Previous stable preparation, 2026-11-04
 
 - Date: 2026-11-04. Prepared stable `v0.1.7`, exact commit `322f6544dfad0a3c8a0c8cbecf2c7f7874b14268`, published at 06:39:38 UTC. The live release API and fetched tag agree. Starting head and rollback reference: `19d168c34c`, the reviewed PR #11 head with long-running Git transport support. Previous upstream baseline: `v0.1.6`, `2359643cffa6ba9ee84d6f2694b935de54a8013e`; ancestry verified.
 - Integration branch: `chore/stable-v0.1.7-stacked`, sibling worktree `t3-stable-v0.1.7-stacked`. Stack order is PR #11, then this stable integration into fork/main. Original feature checkout stays on PR #11. This task does not merge PRs or publish a release.

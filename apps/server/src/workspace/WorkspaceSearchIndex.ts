@@ -487,6 +487,7 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
     const matches: Array<ProjectSearchContentsResult["matches"][number]> = [];
     let nextCursor: GrepCursor | null = null;
     let regexFallbackError: string | undefined;
+    let retryLiterally = false;
 
     do {
       const remainingTimeBudgetMs = Math.max(1, Math.ceil(deadline - performance.now()));
@@ -500,6 +501,13 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
           timeBudgetMs: remainingTimeBudgetMs,
         }),
       );
+      // fff searches an invalid pattern as a literal, which would keep the `(?i)` prefix.
+      retryLiterally = regexMode && !input.caseSensitive && result.regexFallbackError !== undefined;
+      if (retryLiterally) {
+        regexFallbackError = result.regexFallbackError;
+        ({ searchQuery, regexMode } = buildContentSearchQuery({ ...input, useRegex: false }));
+        continue;
+      }
 
       regexFallbackError ??= result.regexFallbackError;
       if (regexMode && !input.caseSensitive && result.regexFallbackError !== undefined) {
@@ -532,7 +540,10 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
       }
       nextCursor = result.nextCursor;
       regexFallbackError ??= result.regexFallbackError;
-    } while (matches.length < input.limit && nextCursor !== null && performance.now() < deadline);
+    } while (
+      retryLiterally ||
+      (matches.length < input.limit && nextCursor !== null && performance.now() < deadline)
+    );
 
     return {
       matches: matches.slice(0, input.limit),

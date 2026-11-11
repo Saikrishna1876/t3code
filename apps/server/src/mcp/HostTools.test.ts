@@ -302,7 +302,8 @@ describe("HostTools selective MCP", () => {
         };
         const mcpApps: ProviderAdapter.ProviderAdapterV2McpApps = {
           listServers: () => Effect.succeed(["host-files", "other-server", "t3-code"]),
-          listTools: () => Effect.succeed([tool, { name: "host_mcp_call" }]),
+          listTools: () =>
+            Effect.succeed([tool, { name: "host_mcp_call", inputSchema: { type: "object" } }]),
           callTool: (input) =>
             Effect.sync(() => {
               calls.push(input);
@@ -366,7 +367,7 @@ describe("HostTools selective MCP", () => {
         listTools: () =>
           Effect.sync(() => {
             shell = liveThreadShell(caller.threadId, { interactionMode: "plan" });
-            return [{ name: "lookup" }];
+            return [{ name: "lookup", inputSchema: { type: "object" } }];
           }),
         callTool: () =>
           Effect.sync(() => {

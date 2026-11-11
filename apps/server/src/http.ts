@@ -10,7 +10,6 @@ import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import type * as Cause from "effect/Cause";
 import type { CodespacesError } from "@t3tools/contracts";
 import * as ByteSize from "effect/ByteSize";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -344,9 +343,10 @@ export const layerServerEnvironmentHttpApi = HttpApiBuilder.group(
   }),
 );
 
-class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecordsError")<{
-  readonly cause: unknown;
-}> {}
+class DecodeOtlpTraceRecordsError extends Schema.TaggedError<DecodeOtlpTraceRecordsError>()(
+  "DecodeOtlpTraceRecordsError",
+  { cause: Schema.Defect() },
+) {}
 
 // Tracing once-per-second renderer exports would create more spans than it forwards.
 export const layerOtlpTracesProxyRoute = HttpRouter.add(
