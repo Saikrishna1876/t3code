@@ -3,6 +3,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
 
 import * as NodePath from "@effect/platform-node/NodePath";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, describe, expect } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -26,7 +27,23 @@ import { vi } from "vite-plus/test";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof NodeFSP>();
-  return { ...actual, realpath: vi.fn(actual.realpath) };
+  return { ...actual, realpath: vi.fn(actual.realpath), open: vi.fn(actual.open) };
+});
+
+const injectShortReads = Effect.fn("injectShortReads")(function* (target: string) {
+  const native = yield* Effect.promise(() => vi.importActual<typeof NodeFSP>("node:fs/promises"));
+  const open = vi.mocked(NodeFSP.open).mockImplementation(async (path, flags, mode) => {
+    const handle = await native.open(path, flags, mode);
+    if (path === target) {
+      const read = handle.read.bind(handle);
+      Object.defineProperty(handle, "read", {
+        value: (buffer: Uint8Array, offset: number, length: number, position: number) =>
+          read(buffer, offset, Math.min(length, 2), position),
+      });
+    }
+    return handle;
+  });
+  yield* Effect.addFinalizer(() => Effect.sync(() => open.mockImplementation(native.open)));
 });
 
 const UNKNOWN_WORKSPACE_PREFIX = "t3code-unknown-workspace-";
@@ -53,7 +70,7 @@ const layerTest = Layer.empty.pipe(
       prefix: "t3-workspace-files-test-",
     }),
   ),
-  Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 
 const makeTempDir = Effect.gen(function* () {
@@ -311,6 +328,37 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           byteLength: 26,
           truncated: false,
         });
+      }),
+    );
+
+    it.effect("finishes short reads before decoding UTF-8 text", () =>
+      Effect.gen(function* () {
+        const files = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fs = yield* FileSystem.FileSystem;
+        const cwd = yield* makeTempDir;
+        const contents = "A café 🐈\n";
+        yield* writeTextFile(cwd, "short.txt", contents);
+        const target = yield* fs.realPath(`${cwd}/short.txt`);
+        yield* injectShortReads(target);
+        expect(yield* files.readFile({ cwd, relativePath: "short.txt" })).toEqual({
+          relativePath: "short.txt",
+          contents,
+          byteLength: Buffer.byteLength(contents),
+          truncated: false,
+        });
+      }),
+    );
+
+    it.effect("rejects binary bytes delivered after an initial short read", () =>
+      Effect.gen(function* () {
+        const files = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fs = yield* FileSystem.FileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "short.txt", "ab\0cd");
+        const target = yield* fs.realPath(`${cwd}/short.txt`);
+        yield* injectShortReads(target);
+        const error = yield* files.readFile({ cwd, relativePath: "short.txt" }).pipe(Effect.flip);
+        expect(error).toBeInstanceOf(WorkspaceFileSystem.WorkspaceBinaryFileError);
       }),
     );
 

@@ -57,6 +57,11 @@ describe("V2 preview upgrade", () => {
         [75, "SubagentDeliveryState"],
         [76, "ProjectionProjectsPinArchive"],
         [77, "ScheduledTaskCodespace"],
+        [78, "RepairBooleanSettledOverride"],
+        [79, "DropOrchestrationEventCorrelationIndex"],
+        [80, "DelegatedRecoveryIndexes"],
+        [81, "ScheduledTaskThreadMode"],
+        [82, "ProjectionMessageSearchText"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -157,6 +162,11 @@ describe("V2 preview upgrade", () => {
         [75, "SubagentDeliveryState"],
         [76, "ProjectionProjectsPinArchive"],
         [77, "ScheduledTaskCodespace"],
+        [78, "RepairBooleanSettledOverride"],
+        [79, "DropOrchestrationEventCorrelationIndex"],
+        [80, "DelegatedRecoveryIndexes"],
+        [81, "ScheduledTaskThreadMode"],
+        [82, "ProjectionMessageSearchText"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
@@ -173,5 +183,48 @@ describe("V2 preview upgrade", () => {
         history,
       );
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+  it.effect.each([null, "bound-thread"])(
+    "upgrades fork migration 77 without losing a Codespace task bound to %s",
+    (threadId) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations({ toMigrationInclusive: 77 });
+        yield* sql`INSERT INTO scheduled_tasks ${sql.insert({
+          task_id: "existing",
+          title: "task",
+          prompt: "Run",
+          enabled: 1,
+          schedule_json: '{"type":"interval","everyMs":60000}',
+          project_id: "project",
+          thread_id: threadId,
+          codespace_name: "cloud-computer",
+          workspace_strategy_json: '{"type":"root"}',
+          model_selection_json: '{"instanceId":"codex","model":"gpt-5"}',
+          runtime_mode: "full-access",
+          interaction_mode: "default",
+          created_by: "user",
+          creation_source: "web",
+          created_at: "2026-10-01T00:00:00.000Z",
+          updated_at: "2026-10-01T00:00:00.000Z",
+          next_run_at: null,
+          last_run_at: null,
+          last_run_status: "never",
+          last_run_error: null,
+          run_count: 0,
+        })}`;
+        yield* runMigrations();
+        assert.deepEqual(
+          yield* sql`SELECT thread_id, codespace_name, thread_mode FROM scheduled_tasks`,
+          [
+            {
+              thread_id: threadId,
+              codespace_name: "cloud-computer",
+              thread_mode: threadId === null ? "new_thread" : "continue",
+            },
+          ],
+        );
+        assert.deepEqual(yield* runMigrations(), []);
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 });

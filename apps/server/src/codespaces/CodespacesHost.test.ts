@@ -1,5 +1,6 @@
 import * as CodespacesWorkspace from "./CodespacesWorkspace.ts";
 import { describe, expect, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,
@@ -102,7 +103,10 @@ const harness = Effect.gen(function* () {
   const spawner = ChildProcessSpawner.make((command) =>
     Effect.gen(function* () {
       if (command._tag === "StandardCommand")
-        spawned.push({ command: command.command, args: command.args });
+        spawned.push({
+          command: command.command,
+          args: command.args.map((arg) => (typeof arg === "string" ? arg : Redacted.value(arg))),
+        });
       forwards++;
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
@@ -228,7 +232,7 @@ const harness = Effect.gen(function* () {
         ),
       ),
     ),
-    Layer.provide(NodeServices.layer),
+    Layer.provide(Layer.merge(NodeServices.layer, NodeCrypto.layer)),
   );
   return {
     layer,
@@ -327,6 +331,7 @@ describe("Codespaces SSH host", () => {
         const error = yield* Fiber.join(pending);
         expect(error.code).toBe("bootstrap");
         expect(test.forwards()).toBe(0);
+        expect(test.activeExecutor()).toBe(false);
       }).pipe(Effect.provide(test.layer));
     }),
   );

@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   openPreviewSession: vi.fn(),
   closePreviewSession: vi.fn(),
   openBrowser: vi.fn(),
+  adjust: vi.fn(async () => ({ _tag: "Success" as const })),
   resolveUrl: vi.fn(async () => ({ _tag: "Success", value: "http://localhost:14528/app" })),
   navigate: vi.fn(async (_tabId: string, _url: string): Promise<void> => undefined),
   rememberPreviewUrl: vi.fn(),
@@ -40,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   addImage: vi.fn(),
   pictureInPicture: false,
   showEmptyState: false,
+  idleServerTab: false,
   loading: false,
   nativeServerTab: false,
   serverEpoch: null as string | null,
@@ -64,6 +66,7 @@ vi.mock(import("./previewBridge"), async (original) => ({
   previewBridge: {
     navigate: mocks.navigate,
     pickElement: mocks.pickElement,
+    annotationVoice: { onEvent: () => () => {}, update: async () => {} },
     setAnnotationSendEnabled: mocks.setAnnotationSendEnabled,
     cancelPickElement: mocks.cancelPickElement,
     refresh: mocks.refresh,
@@ -121,18 +124,31 @@ vi.mock(import("~/previewStateStore"), async (original) => ({
     recentlySeenUrls: [],
     sessions: mocks.showEmptyState
       ? {}
-      : {
-          "tab-1": {
-            sourceUrl: mocks.sourceUrl,
-            threadId: "thread-1",
-            tabId: "tab-1",
-            runtime: mocks.nativeServerTab ? "server" : "desktop",
-            navStatus: { _tag: "Success", url: "http://example.com/", title: "Example" },
-            canGoBack: false,
-            canGoForward: false,
-            updatedAt: "2026-07-13T00:00:00.000Z",
+      : mocks.idleServerTab
+        ? {
+            "tab-1": {
+              sourceUrl: mocks.sourceUrl,
+              threadId: "thread-1",
+              tabId: "tab-1",
+              runtime: "server",
+              navStatus: { _tag: "Idle" },
+              canGoBack: false,
+              canGoForward: false,
+              updatedAt: "2026-07-13T00:00:00.000Z",
+            },
+          }
+        : {
+            "tab-1": {
+              sourceUrl: mocks.sourceUrl,
+              threadId: "thread-1",
+              tabId: "tab-1",
+              runtime: mocks.nativeServerTab ? "server" : "desktop",
+              navStatus: { _tag: "Success", url: "http://example.com/", title: "Example" },
+              canGoBack: false,
+              canGoForward: false,
+              updatedAt: "2026-07-13T00:00:00.000Z",
+            },
           },
-        },
   })) as never,
 }));
 vi.mock(import("~/state/environments"), async (original) => ({
@@ -164,6 +180,13 @@ vi.mock(import("~/browser/previewRuntime"), async (original) => ({
 }));
 
 vi.mock(import("~/browser/browserViewportActions"), { spy: true });
+// The real surface opens a preview stream to the server; only its box matters here.
+vi.mock(import("~/browser/ServerBrowserSurface"), async (original) => ({
+  ...(await original()),
+  ServerBrowserSurface: ((props: { className?: string }) => (
+    <div data-testid="server-browser-surface" className={props.className} />
+  )) as never,
+}));
 
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { useBrowserPointerStore } from "~/browser/browserPointerStore";
@@ -182,6 +205,7 @@ vi.mock(import("~/state/preview"), async (original) => {
     previewEnvironment: {
       open: {},
       close: {},
+      adjust: { id: "adjust" },
       resize: {},
       resolveUrl: {
         id: "resolveUrl",
@@ -194,7 +218,11 @@ vi.mock(import("~/state/preview"), async (original) => {
 vi.mock(import("~/state/use-atom-command"), async (original) => ({
   ...(await original()),
   useAtomCommand: ((command: { id?: string } | undefined) =>
-    command?.id === "resolveUrl" ? mocks.resolveUrl : vi.fn()) as never,
+    command?.id === "resolveUrl"
+      ? mocks.resolveUrl
+      : command?.id === "adjust"
+        ? mocks.adjust
+        : vi.fn()) as never,
 }));
 
 vi.mock(import("./openPreviewSession"), async (original) => ({
@@ -259,6 +287,7 @@ function setup() {
   mocks.pickElement.mockReset();
   mocks.pictureInPicture = false;
   mocks.showEmptyState = false;
+  mocks.idleServerTab = false;
   mocks.loading = false;
   mocks.nativeServerTab = false;
   mocks.serverEpoch = null;
@@ -338,6 +367,23 @@ describe("PreviewView", () => {
     },
   );
 
+  it("hard reloads the replacement tab after moving to the remote host browser", async () => {
+    setup();
+    mocks.supportsCodespaces = true;
+    mocks.sourceUrl = "http://localhost:4173/page";
+    mocks.primaryEnvironmentId = EnvironmentId.make("local-host");
+    mocks.openPreviewSession.mockResolvedValue({ _tag: "Success", value: { tabId: "host-tab" } });
+    await using _screen = await render(view());
+    await userEvent.click(page.getByRole("button", { name: "Preview menu" }));
+    await userEvent.click(page.getByRole("menuitem", { name: "Hard reload" }));
+    await vi.waitFor(() =>
+      expect(mocks.adjust).toHaveBeenCalledWith({
+        environmentId: TEST_THREAD_REF.environmentId,
+        input: { threadId: TEST_THREAD_REF.threadId, tabId: "host-tab", hardReload: true },
+      }),
+    );
+    expect(mocks.hardReload).not.toHaveBeenCalled();
+  });
   it.each(["localhost:3000/app", "http://localhost:14528/app"])(
     "opens %s in the remote host browser, then replaces the desktop tab",
     async (requestedUrl) => {
@@ -450,6 +496,73 @@ describe("PreviewView", () => {
     await vi.waitFor(() => expect(onSendAnnotation).toHaveBeenCalledWith(sent, null));
     expect(mocks.addPreviewAnnotation).toHaveBeenCalledWith(TEST_THREAD_REF, sent);
     expect(mocks.addImage).not.toHaveBeenCalled();
+  });
+
+  it("lets the pointer reach a local server card above an idle server-rendered tab", async () => {
+    setup();
+    mocks.idleServerTab = true;
+    mocks.servers = [
+      {
+        host: "localhost",
+        port: 8081,
+        url: "http://localhost:8081/",
+        requestedUrl: "http://localhost:8081/",
+        processName: "python3",
+        pid: 4242,
+        terminal: null,
+        source: "scanner",
+      },
+    ];
+    await using _screen = await render(<ToastProvider timeout={0}>{view()}</ToastProvider>);
+    const card = page.getByRole("button", { name: /localhost:8081/ });
+    await expect.element(card).toBeVisible();
+
+    const rect = card.element().getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    expect(card.element().contains(hit)).toBe(true);
+  });
+
+  it("focuses and selects the address from forwarded desktop actions only while visible", async () => {
+    setup();
+    using stack = new DisposableStack();
+    const previousBridge = window.desktopBridge;
+    stack.defer(() => {
+      if (previousBridge) window.desktopBridge = previousBridge;
+      else delete window.desktopBridge;
+    });
+    const listeners = new Set<(action: string) => void>();
+    window.desktopBridge = {
+      getWindowZoomFactor: () => 1,
+      onMenuAction: (listener: (action: string) => void) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    } as NonNullable<typeof window.desktopBridge>;
+    await using screen = await render(view());
+    const address = page.getByRole("textbox");
+    const input = address.element() as HTMLInputElement;
+    const forward = () =>
+      act(() => {
+        listeners.forEach((listener) => listener("preview.focusUrl"));
+      });
+
+    await forward();
+    await expect.element(address).toHaveFocus();
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(input.value.length);
+    await act(() => input.blur());
+    await forward();
+    await expect.element(address).toHaveFocus();
+
+    await act(() => input.blur());
+    await screen.rerender(
+      <PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible={false} />,
+    );
+    await forward();
+    await expect.element(address).not.toHaveFocus();
+    expect(listeners.size).toBe(0);
   });
 
   it("focuses the address bar each time the focus-url shortcut fires", async () => {

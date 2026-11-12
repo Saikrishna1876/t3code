@@ -1,0 +1,46 @@
+name: Android preview comment
+
+on:
+  workflow_call:
+    inputs:
+      pr:
+        type: number
+        required: true
+      head-sha:
+        type: string
+        required: true
+      fingerprint:
+        type: string
+        required: true
+      client:
+        type: string
+        default: ""
+      group:
+        type: string
+        default: ""
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: mobile-preview-android-comment-${{ inputs.pr }}
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - name: Checkout trusted scripts
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          sparse-checkout: .github/scripts
+      - name: Comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr }}
+          HEAD_SHA: ${{ inputs.head-sha }}
+          FINGERPRINT: ${{ inputs.fingerprint }}
+          CLIENT: ${{ inputs.client }}
+          GROUP: ${{ inputs.group }}
+        run: node .github/scripts/mobile-preview-comment.cjs

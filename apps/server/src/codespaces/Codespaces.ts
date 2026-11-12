@@ -349,6 +349,13 @@ const make = Effect.gen(function* () {
     if (
       connected &&
       prepared &&
+      (yield* workspaces.bindings).some(
+        (binding) =>
+          binding.projectId === input.projectId &&
+          binding.name === input.name &&
+          binding.localRoot === prepared.binding.localRoot &&
+          binding.hostRoot === localRoot,
+      ) &&
       prepared.credentialFingerprint === credential?.credentialFingerprint &&
       prepared.binding.hostRoot === localRoot
     ) {
@@ -716,7 +723,7 @@ const make = Effect.gen(function* () {
       if (input.action === "rebuild") yield* host.rebuild(name);
       else
         yield* rest(
-          `user/codespaces/${name}${input.action === "delete" ? "" : "/stop"}`,
+          `user/codespaces/${encodeURIComponent(name)}${input.action === "delete" ? "" : "/stop"}`,
           input.action === "delete" ? "DELETE" : "POST",
         );
       yield* host.disconnect(name);
@@ -756,7 +763,7 @@ const make = Effect.gen(function* () {
         return yield* error("conflict", "Stop this Codespace before changing its machine.");
       if (!input.displayName && !input.machine)
         return yield* error("configuration", "Choose a display name or machine to update.");
-      yield* rest(`user/codespaces/${name}`, "PATCH", {
+      yield* rest(`user/codespaces/${encodeURIComponent(name)}`, "PATCH", {
         ...(input.displayName ? { display_name: input.displayName } : {}),
         ...(input.machine ? { machine: input.machine } : {}),
       });
@@ -770,7 +777,7 @@ const make = Effect.gen(function* () {
       );
     if (space.state === "Shutdown") {
       yield* stage(input.clientRequestId, "starting", "Starting this Codespace.");
-      yield* rest(`user/codespaces/${name}/start`, "POST");
+      yield* rest(`user/codespaces/${encodeURIComponent(name)}/start`, "POST");
     }
     space = yield* awaitAvailable(name);
     yield* stage(

@@ -51,6 +51,15 @@ const decodePnpmModulesManifest = Schema.decodeUnknownEffect(
   }),
 );
 
+class PnpmModulesManifestParseError extends Schema.TaggedError<PnpmModulesManifestParseError>()(
+  "PnpmModulesManifestParseError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Could not parse the pnpm modules manifest.";
+  }
+}
+
 export const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -90,7 +99,12 @@ export const make = Effect.gen(function* () {
     function* (root: string) {
       const nodeModules = path.join(root, "node_modules");
       const text = yield* fs.readFileString(path.join(nodeModules, ".modules.yaml"));
-      const manifest = yield* decodePnpmModulesManifest(yield* Effect.try(() => parseYaml(text)));
+      const manifest = yield* decodePnpmModulesManifest(
+        yield* Effect.try({
+          try: () => parseYaml(text),
+          catch: (cause) => new PnpmModulesManifestParseError({ cause }),
+        }),
+      );
       // An agent can write this manifest, and statting a network path makes
       // Windows sign in to its host with the user's NTLM credentials.
       if (isNetworkPath(manifest.storeDir) || isNetworkPath(manifest.virtualStoreDir ?? "")) {

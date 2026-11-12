@@ -9,6 +9,7 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as NodeCrypto from "node:crypto";
 import { NodeServices } from "@effect/platform-node";
+import * as EffectNodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import {
@@ -55,7 +56,12 @@ const encodeVcsError = Schema.encodeSync(Schema.toCodecJson(VcsError));
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_ATTACHMENT_CACHE_BYTES = 512 * 1024 * 1024;
 const MAX_ATTACHMENT_CACHE_FILES = 1024;
-class AttachmentCacheFullError extends Error {}
+class AttachmentCacheFullError extends Schema.TaggedError<AttachmentCacheFullError>()(
+  "AttachmentCacheFullError",
+  {},
+) {}
+
+const isAttachmentCacheFullError = Schema.is(AttachmentCacheFullError);
 
 /** Only workspace execution lives here. No provider, login, project store or conversation database. */
 export async function startWorker(root: string, token: string, port = 0) {
@@ -69,7 +75,7 @@ export async function startWorker(root: string, token: string, port = 0) {
     ).pipe(
       Layer.provide(VcsProcess.layer),
       Layer.provide(ServerConfig.layerTest(workspaceRoot, { prefix: "t3-codespaces-worker-" })),
-      Layer.provide(NodeServices.layer),
+      Layer.provide(Layer.merge(NodeServices.layer, EffectNodeCrypto.layer)),
     ),
   );
   const gitCore = await runtime.runPromise(GitVcsDriver.GitVcsDriver);
@@ -127,9 +133,10 @@ export async function startWorker(root: string, token: string, port = 0) {
     return target;
   };
   const openAsset = async (cwd: string, relativePath: string) => {
+    const boundary = await NodeFSP.realpath(await validPath(cwd));
     const candidate = await validPath(NodePath.resolve(cwd, relativePath));
     const target = await NodeFSP.realpath(candidate);
-    if (target !== workspaceRoot && !target.startsWith(workspaceRoot + NodePath.sep))
+    if (target !== boundary && !target.startsWith(boundary + NodePath.sep))
       throw new Error("Asset leaves the Codespace workspace.");
     const before = await NodeFSP.lstat(target);
     if (!before.isFile()) throw new Error("Asset is not a regular file.");
@@ -746,15 +753,14 @@ export async function startWorker(root: string, token: string, port = 0) {
         return;
       }
       response
-        .writeHead(error instanceof AttachmentCacheFullError ? 507 : 400, {
+        .writeHead(isAttachmentCacheFullError(error) ? 507 : 400, {
           "content-type": "application/json",
         })
         .end(
           JSON.stringify({
-            message:
-              error instanceof AttachmentCacheFullError
-                ? "Codespace attachment storage is full."
-                : "Codespace workspace operation failed.",
+            message: isAttachmentCacheFullError(error)
+              ? "Codespace attachment storage is full."
+              : "Codespace workspace operation failed.",
           }),
         );
     }

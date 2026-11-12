@@ -23,7 +23,7 @@ import { useProjects } from "../../state/entities";
 import { codespacesEnvironment } from "../../state/codespaces";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
+import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 import {
   createNewTaskDraft,
   getComposerDraftSnapshot,

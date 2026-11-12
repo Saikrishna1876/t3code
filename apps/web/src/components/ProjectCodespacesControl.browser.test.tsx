@@ -38,7 +38,8 @@ vi.mock(import("~/state/environments"), async (original) => ({
     serverConfig: { environment: { capabilities: { codespaces: true } } },
   })) as never,
 }));
-vi.mock(import("~/state/entities"), () => ({
+vi.mock(import("~/state/entities"), async (original) => ({
+  ...(await original()),
   useProjects: (() => [{ id: "project", environmentId: "local", title: "Project" }]) as never,
 }));
 vi.mock(import("~/hooks/useHandleNewThread"), () => ({

@@ -79,8 +79,13 @@ import Migration0073 from "./Migrations/073_ActiveTurnItemIndexes.ts";
 import Migration0074 from "./Migrations/074_ExcludeAttachmentPlaceholdersFromSearch.ts";
 import Migration0075 from "./Migrations/075_SubagentDeliveryState.ts";
 import Migration0076 from "./Migrations/076_ProjectionProjectsPinArchive.ts";
+import Migration0078 from "./Migrations/078_RepairBooleanSettledOverride.ts";
+import Migration0079 from "./Migrations/079_DropOrchestrationEventCorrelationIndex.ts";
+import Migration0080 from "./Migrations/080_DelegatedRecoveryIndexes.ts";
+import Migration0081 from "./Migrations/081_ScheduledTaskThreadMode.ts";
+import Migration0082 from "./Migrations/082_ProjectionMessageSearchText.ts";
 
-import Migration0077 from "./Migrations/077_ScheduledTaskCodespace.ts";
+import ScheduledTaskCodespace from "./Migrations/077_ScheduledTaskCodespace.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -160,7 +165,13 @@ const migrationEntries = [
   [74, "ExcludeAttachmentPlaceholdersFromSearch", Migration0074],
   [75, "SubagentDeliveryState", Migration0075],
   [76, "ProjectionProjectsPinArchive", Migration0076],
-  [77, "ScheduledTaskCodespace", Migration0077],
+  // Fork migration 77 shipped before upstream reused that ID; incoming IDs stay offset by one.
+  [77, "ScheduledTaskCodespace", ScheduledTaskCodespace],
+  [78, "RepairBooleanSettledOverride", Migration0078],
+  [79, "DropOrchestrationEventCorrelationIndex", Migration0079],
+  [80, "DelegatedRecoveryIndexes", Migration0080],
+  [81, "ScheduledTaskThreadMode", Migration0081],
+  [82, "ProjectionMessageSearchText", Migration0082],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

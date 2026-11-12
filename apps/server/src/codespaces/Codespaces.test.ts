@@ -94,6 +94,7 @@ function harness(
     head?: string;
     remoteFolderExists?: boolean;
     bindings?: ReadonlyArray<CodespacesWorkspace.WorkspaceBinding>;
+    beforeBind?: () => Effect.Effect<void, CodespacesError>;
     threads?: ReadonlyArray<
       Pick<
         OrchestrationV2ThreadShell,
@@ -237,17 +238,21 @@ function harness(
               .pipe(Effect.as([...projects]));
           },
           bind: (binding) =>
-            Effect.sync(() => {
-              targetEvents.push("bind:" + binding.name);
-              bindings = [
-                ...bindings.filter(
-                  (entry) =>
-                    entry.projectId !== binding.projectId ||
-                    (binding.name !== null && entry.name !== binding.name),
-                ),
-                ...(binding.name === null ? [] : [binding]),
-              ];
-            }),
+            Effect.suspend(() => overrides.beforeBind?.() ?? Effect.void).pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  targetEvents.push("bind:" + binding.name);
+                  bindings = [
+                    ...bindings.filter(
+                      (entry) =>
+                        entry.projectId !== binding.projectId ||
+                        (binding.name !== null && entry.name !== binding.name),
+                    ),
+                    ...(binding.name === null ? [] : [binding]),
+                  ];
+                }),
+              ),
+            ),
           lookup: (cwd) =>
             Effect.sync(() => {
               const binding = bindings.find((entry) => entry.localRoot === cwd);
@@ -757,6 +762,34 @@ describe("Codespaces controller", () => {
       }).pipe(Effect.provide(test.layer));
     },
   );
+  it.effect("retries saving a prepared checkout after binding persistence fails", () => {
+    let fail = true;
+    const test = harness({
+      bindings: [],
+      beforeBind: () =>
+        fail
+          ? Effect.fail(
+              new CodespacesError({ code: "configuration", message: "Storage unavailable" }),
+            )
+          : Effect.void,
+    });
+    return Effect.gen(function* () {
+      const service = yield* Codespaces.Codespaces;
+      yield* service.run({
+        action: "connect",
+        name: managed.name,
+        clientRequestId: "retry-binding",
+      });
+      yield* completed(service, "retry-binding");
+      expect(
+        (yield* service.bind({ projectId: testProjectId, name: managed.name }).pipe(Effect.result))
+          ._tag,
+      ).toBe("Failure");
+      fail = false;
+      yield* service.bind({ projectId: testProjectId, name: managed.name });
+      expect(test.targetEvents).toEqual(["bind:" + managed.name]);
+    }).pipe(Effect.provide(test.layer));
+  });
   it.effect("host selection leaves a waiting Codespace thread untouched", () => {
     const projectId = ProjectId.make("project-test");
     const test = harness({

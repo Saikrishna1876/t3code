@@ -25,7 +25,8 @@ import * as Stream from "effect/Stream";
 import * as Socket from "effect/socket/Socket";
 import * as Schedule from "effect/Schedule";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as GitHubRequestPolicy from "@t3tools/source-control-github/server/GitHubRequestPolicy";
@@ -212,7 +213,8 @@ const make = Effect.gen(function* () {
   const net = yield* Net.NetService;
   const config = yield* ServerConfig.ServerConfig;
   const client = yield* HttpClient.HttpClient;
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
+  const digest = yield* Digest.Digest;
   const webSocket = yield* Socket.WebSocketConstructor;
   // A live PID can hide a stalled exec-server, so a reattached executor must finish a handshake.
   const executorReady = (port: number, token: string) =>
@@ -484,8 +486,8 @@ const make = Effect.gen(function* () {
   ) {
     const worker = yield* getWorkerSource;
     const fingerprint = Hex.encode(
-      yield* crypto
-        .digest("SHA-256", new TextEncoder().encode(launcherScript("", worker)))
+      yield* digest
+        .digest(Digest.sha256, new TextEncoder().encode(launcherScript("", worker)))
         .pipe(Effect.orDie),
     );
     const executorId = `${account}-${space.id}`;
@@ -501,8 +503,7 @@ const make = Effect.gen(function* () {
         : Option.none();
       const token = Option.isSome(attached)
         ? attached.value.token
-        : (yield* crypto.randomUUIDv4().pipe(Effect.orDie)) +
-          (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+        : (yield* random.uuidV4()) + (yield* random.uuidV4());
       const result = Option.isSome(attached)
         ? attached.value.launch
         : yield* transport
@@ -656,14 +657,20 @@ const make = Effect.gen(function* () {
         forwardPort,
         isForwardedPort: (port) => [...previewPorts.values()].includes(port),
       });
-      workers.set(space.name, { url: `http://127.0.0.1:${localPort}`, token });
+      const registeredWorker = { url: `http://127.0.0.1:${localPort}`, token };
+      workers.set(space.name, registeredWorker);
       if (
         forwards.get(space.name)?.process !== child ||
         !(yield* child.isRunning.pipe(Effect.orElseSucceed(() => false)))
-      )
+      ) {
+        if (workers.get(space.name) === registeredWorker) {
+          workers.delete(space.name);
+          yield* workspaces.disconnect(space.name);
+        }
         return yield* bootstrapError(
           "Codespace SSH connection closed during workspace registration.",
         );
+      }
       return {
         name: space.name,
         account,

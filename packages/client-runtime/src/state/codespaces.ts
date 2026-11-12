@@ -4,7 +4,7 @@ import * as Option from "effect/Option";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { EnvironmentRegistry } from "../connection/registry.ts";
 import { ConnectionOnboarding } from "../connection/onboarding.ts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
@@ -12,7 +12,10 @@ import {
 } from "./runtime.ts";
 
 export function createCodespacesEnvironmentAtoms<R, E>(
-  runtime: Atom.AtomRuntime<EnvironmentRegistry | ConnectionOnboarding | Crypto.Crypto | R, E>,
+  runtime: Atom.AtomRuntime<
+    EnvironmentRegistry | ConnectionOnboarding | SecureRandom.SecureRandom | R,
+    E
+  >,
 ) {
   const state = createEnvironmentRpcSubscriptionAtomFamily(runtime, {
     label: "codespaces:state",
