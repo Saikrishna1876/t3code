@@ -28,7 +28,7 @@ export const HostToolkit = Toolkit.make(
   Tool.make("host_skills_list", {
     ...shared,
     description:
-      "Codespace workspaces only. Never call from a host workspace; use the native skill catalog and local filesystem instead. List enabled skills from the calling provider's T3 host, including user, project and plugin skills. Returns host paths; read them with host_skills_read, never a remote shell. fresh refreshes discovery. Thread credential required.",
+      "Codespaces only; host workspaces use native catalog/local files. List enabled host user/project/plugin skills. Read host paths with host_skills_read, never remote shell. fresh refreshes discovery. Needs thread credential.",
     parameters: HostSkillsListInput,
     success: HostSkillsListResult,
   })
@@ -37,7 +37,7 @@ export const HostToolkit = Toolkit.make(
   Tool.make("host_skills_read", {
     ...shared,
     description:
-      "Codespace workspaces only. Never call from a host workspace; read skills and references directly from the local filesystem instead. Read a skill or its text references from the T3 host. skill is the exact path or unique name from host_skills_list or the native skill catalog. Omit file for SKILL.md; file can be relative to the skill directory or an absolute host path inside it. This reads instructions; scripts still need their declared runtime and credentials. Do not execute host paths in a Codespace. Thread credential required.",
+      "Codespaces only; host workspaces read local files. Read host skill/references. skill: exact path or unique name from host_skills_list/native catalog. file: relative or absolute inside skill directory; default SKILL.md. Scripts need runtime/credentials; never execute host paths remotely. Needs thread credential.",
     parameters: HostSkillReadInput,
     success: HostSkillReadResult,
   })
@@ -46,7 +46,7 @@ export const HostToolkit = Toolkit.make(
   Tool.make("host_mcp_list", {
     ...shared,
     description:
-      "Discover configured MCP servers on the calling provider's T3 host. Pass one server to get its tool descriptions and input schemas. Discovery does not reroute any tools. Use this bridge only for a server the user selects for host execution or a tool that needs host resources. Other MCP tools keep their existing execution location. Currently supported by active Codex and Claude sessions; other providers report unsupported. Claude may omit descriptions and input schemas; use known arguments or ask the user, never guess. Thread credential required.",
+      "List host MCP servers; pass server for tool metadata. No rerouting. Bridge only user-selected host servers or tools needing host resources. Keep other routing. Active Codex/Claude only. Missing Claude metadata: use known arguments or ask, never guess. Needs thread credential.",
     parameters: HostMcpListInput,
     success: HostMcpListResult,
   })
@@ -55,7 +55,7 @@ export const HostToolkit = Toolkit.make(
   Tool.make("host_mcp_call", {
     ...shared,
     description:
-      "Call exactly one named tool on a configured host MCP server using the calling provider's existing host connection and credentials. Discover its tool metadata with host_mcp_list first. Host execution is selective per call; do not send every MCP request through this bridge. Remote workspace paths are not translated to host files. Tool may have external side effects; follow its instructions and the user's authorization. Requires a live full-access/default thread. Currently supported by Codex and Claude. Never use for recursive T3 host bridge calls.",
+      "Call one host MCP tool with existing host connection/credentials; discover metadata with host_mcp_list first. Selective calls; keep other routing. No remote path translation. Follow tool instructions/user authorization for side effects. Needs live full-access/default Codex/Claude thread. No recursive T3 host bridge calls.",
     parameters: HostMcpCallInput,
     success: HostMcpCallResult,
   }).annotate(Tool.Destructive, true),
