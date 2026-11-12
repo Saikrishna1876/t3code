@@ -130,16 +130,16 @@ jobs:
       cancel-in-progress: true
     permissions:
       contents: read
-      pull-requests: write
     outputs:
       build: ${{ steps.client.outputs.build }}
       fingerprint: ${{ steps.client.outputs.fingerprint }}
+      client: ${{ steps.client.outputs.link }}
+      group: ${{ steps.update.outputs.group }}
     env:
       APP_VARIANT: preview
       NODE_OPTIONS: --max-old-space-size=8192
       MOBILE_VERSION_POLICY: fingerprint
       EXPO_TOKEN: ${{ secrets.EXPO_PREVIEW_TOKEN }}
-      GH_TOKEN: ${{ github.token }}
       PR: ${{ github.event.pull_request.number }}
     steps:
       - id: expo-token
@@ -258,17 +258,11 @@ jobs:
           group="$(eas update --auto --branch "pr-$PR" --platform android --environment preview --non-interactive --json | sed -n '/^\[/,$p' | jq -er '.[0].group')"
           echo "group=$group" >> "$GITHUB_OUTPUT"
 
-      - name: Comment
-        if: steps.expo-token.outputs.present == 'true'
-        env:
-          FINGERPRINT: ${{ steps.client.outputs.fingerprint }}
-          CLIENT: ${{ steps.client.outputs.link }}
-          GROUP: ${{ steps.update.outputs.group }}
-        run: node .github/scripts/mobile-preview-comment.cjs
-
   android-build:
     name: Android preview client
     needs: android
+    outputs:
+      client: ${{ steps.build.outputs.link || steps.record.outputs.link }}
     if: needs.android.outputs.build == 'true'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 60
@@ -278,7 +272,6 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write # pushes the build record tag
-      pull-requests: write
     env:
       APP_VARIANT: preview
       NODE_OPTIONS: --max-old-space-size=8192
@@ -447,9 +440,30 @@ jobs:
           # Only this step has the token; the checkout's copy was removed before the build.
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/$BUILD_TAG"
 
-      - name: Comment
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-          CLIENT: ${{ steps.build.outputs.link || steps.record.outputs.link }}
-        run: node .github/scripts/mobile-preview-comment.cjs
+  android-comment:
+    needs: android
+    if: needs.android.outputs.group != ''
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/mobile-preview-comment.yml
+    with:
+      pr: ${{ github.event.pull_request.number }}
+      head-sha: ${{ github.event.pull_request.head.sha }}
+      fingerprint: ${{ needs.android.outputs.fingerprint }}
+      client: ${{ needs.android.outputs.client }}
+      group: ${{ needs.android.outputs.group }}
+
+  android-build-comment:
+    needs: [android, android-build, android-comment]
+    if: ${{ !cancelled() && needs.android-build.outputs.client != '' }}
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/mobile-preview-comment.yml
+    with:
+      pr: ${{ github.event.pull_request.number }}
+      head-sha: ${{ github.event.pull_request.head.sha }}
+      fingerprint: ${{ needs.android.outputs.fingerprint }}
+      client: ${{ needs.android-build.outputs.client }}
+      group: ${{ needs.android-comment.result != 'success' && needs.android.outputs.group || '' }}

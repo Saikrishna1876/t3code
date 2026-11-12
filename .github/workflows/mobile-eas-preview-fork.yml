@@ -32,6 +32,8 @@ jobs:
     outputs:
       build: ${{ steps.client.outputs.build }}
       fingerprint: ${{ steps.client.outputs.fingerprint }}
+      client: ${{ steps.client.outputs.link }}
+      group: ${{ steps.update.outputs.group }}
     env:
       APP_VARIANT: preview
       NODE_OPTIONS: --max-old-space-size=8192
@@ -81,14 +83,6 @@ jobs:
           fetch-depth: 0
           # No sparse-checkout: see mobile-eas-preview.yml.
 
-      # The comment script comes from main, not from the PR.
-      - name: Checkout trusted scripts
-        if: steps.expo-token.outputs.present == 'true'
-        uses: actions/checkout@v6
-        with:
-          path: .trusted
-          sparse-checkout: .github/scripts
-
       # The steps below run the PR's dependency and build scripts; they get no token.
       # checkout keeps it in a file under RUNNER_TEMP that .git/config includes, so both
       # go. Asking checkout not to persist it fails here: that cleanup runs `git submodule
@@ -96,7 +90,7 @@ jobs:
       - name: Drop checkout credentials
         if: steps.expo-token.outputs.present == 'true'
         run: |
-          for dir in . .trusted; do
+          for dir in .; do
             [ -e "$dir/.git" ] || continue
             git -C "$dir" config --local --get-regexp '^includeif\..*\.path$' | while read -r key file; do
               rm -f "$file"
@@ -218,28 +212,17 @@ jobs:
           group="$(eas update --auto --branch "pr-$PR" --platform android --environment preview --non-interactive --json | sed -n '/^\[/,$p' | jq -er '.[0].group')"
           echo "group=$group" >> "$GITHUB_OUTPUT"
 
-      - name: Comment
-        if: steps.expo-token.outputs.present == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-          FINGERPRINT: ${{ steps.client.outputs.fingerprint }}
-          CLIENT: ${{ steps.client.outputs.link }}
-          GROUP: ${{ steps.update.outputs.group }}
-        run: node .trusted/.github/scripts/mobile-preview-comment.cjs
-
-  # The reviewed commit's Android client, built cold: no sticky disk, because PR
-  # code could leave Gradle or ccache state that trusted builds would restore, and
-  # no build record tag, so nobody else is served an APK a fork's code built.
+  # Fork builds stay cold and untagged, so other PRs cannot reuse their artifacts.
   android-build:
     name: Android preview client
     needs: preview
+    outputs:
+      client: ${{ steps.build.outputs.link }}
     if: needs.preview.outputs.build == 'true'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 60
     permissions:
       contents: read
-      pull-requests: write
     env:
       APP_VARIANT: preview
       NODE_OPTIONS: --max-old-space-size=8192
@@ -254,20 +237,13 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
-      # The comment script comes from main, not from the PR.
-      - name: Checkout trusted scripts
-        uses: actions/checkout@v6
-        with:
-          path: .trusted
-          sparse-checkout: .github/scripts
-
       # The steps below run the PR's dependency and build scripts; they get no token.
       # checkout keeps it in a file under RUNNER_TEMP that .git/config includes, so both
       # go. Asking checkout not to persist it fails here: that cleanup runs `git submodule
       # foreach`, which stops at the vendored gitlinks under .repos (no .gitmodules entry).
       - name: Drop checkout credentials
         run: |
-          for dir in . .trusted; do
+          for dir in .; do
             [ -e "$dir/.git" ] || continue
             git -C "$dir" config --local --get-regexp '^includeif\..*\.path$' | while read -r key file; do
               rm -f "$file"
@@ -347,9 +323,30 @@ jobs:
           fi
           echo "link=$link" >> "$GITHUB_OUTPUT"
 
-      - name: Comment
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-          CLIENT: ${{ steps.build.outputs.link }}
-        run: node .trusted/.github/scripts/mobile-preview-comment.cjs
+  android-comment:
+    needs: preview
+    if: needs.preview.outputs.group != ''
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/mobile-preview-comment.yml
+    with:
+      pr: ${{ github.event.pull_request.number }}
+      head-sha: ${{ github.event.pull_request.head.sha }}
+      fingerprint: ${{ needs.preview.outputs.fingerprint }}
+      client: ${{ needs.preview.outputs.client }}
+      group: ${{ needs.preview.outputs.group }}
+
+  android-build-comment:
+    needs: [preview, android-build, android-comment]
+    if: ${{ !cancelled() && needs.android-build.outputs.client != '' }}
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/mobile-preview-comment.yml
+    with:
+      pr: ${{ github.event.pull_request.number }}
+      head-sha: ${{ github.event.pull_request.head.sha }}
+      fingerprint: ${{ needs.preview.outputs.fingerprint }}
+      client: ${{ needs.android-build.outputs.client }}
+      group: ${{ needs.android-comment.result != 'success' && needs.preview.outputs.group || '' }}

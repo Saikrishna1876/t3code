@@ -1,7 +1,9 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const { readFileSync } = require("node:fs");
+const { join } = require("node:path");
 
-const { mergeState, readState, render } = require("./mobile-preview-comment.cjs");
+const { main, mergeState, readState, render } = require("./mobile-preview-comment.cjs");
 
 const fingerprint = "c31608b37a8a2dca35ccee39cfd2ec7305042629";
 const run = "https://github.com/pingdotgg/t3code/actions/runs/1";
@@ -59,4 +61,61 @@ test("state from the comment is always three strings", () => {
       group: "",
     },
   );
+});
+
+test("all Android comment writers share a lock outside the build jobs", () => {
+  for (const name of ["mobile-eas-preview", "mobile-eas-preview-fork"]) {
+    const workflow = readFileSync(join(__dirname, `../workflows/${name}.yml`), "utf8");
+    assert.doesNotMatch(workflow, /run: node .*mobile-preview-comment\.cjs/);
+    assert.equal(
+      (workflow.match(/uses: \.\/\.github\/workflows\/mobile-preview-comment\.yml/g) ?? []).length,
+      2,
+    );
+    assert.match(
+      workflow,
+      /if: \$\{\{ !cancelled\(\) && needs\.android-build\.outputs\.client != '' \}\}/,
+    );
+    assert.match(
+      workflow,
+      /needs\.android-comment\.result != 'success' && needs\.(android|preview)\.outputs\.group/,
+    );
+    assert.doesNotMatch(workflow, /GH_TOKEN:.*\n(?:      [^\n]*\n)*    steps:/);
+  }
+  const writer = readFileSync(join(__dirname, "../workflows/mobile-preview-comment.yml"), "utf8");
+  assert.match(writer, /group: mobile-preview-android-comment-\$\{\{ inputs\.pr \}\}/);
+  assert.match(writer, /cancel-in-progress: false/);
+  assert.match(writer, /queue: max/);
+  assert.match(writer, /ref: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
+  assert.doesNotMatch(writer, /pnpm|eas build|eas update/);
+});
+
+test("only current-head updates run, while older builds can still add their client", async () => {
+  for (const [head, group, expectedWrites] of [
+    ["older-head", "older-update", 0],
+    ["current-head", "new-update", 1],
+    ["older-head", "", 1],
+  ]) {
+    const current = { fingerprint, client: "", group: "current" };
+    const writes = [];
+    await main({
+      env: {
+        GITHUB_REPOSITORY: "acme/app",
+        PR: "1",
+        GH_TOKEN: "fixture",
+        HEAD_SHA: head,
+        FINGERPRINT: fingerprint,
+        GROUP: group,
+        CLIENT: "https://expo.dev/a/b",
+      },
+      request: async (path, init = {}) => {
+        if (init.method) {
+          writes.push(JSON.parse(init.body));
+          return {};
+        }
+        if (path.endsWith("/pulls/1")) return { head: { sha: "current-head" } };
+        return [{ id: 1, user: { login: "github-actions[bot]" }, body: render(current, run) }];
+      },
+    });
+    assert.equal(writes.length, expectedWrites);
+  }
 });

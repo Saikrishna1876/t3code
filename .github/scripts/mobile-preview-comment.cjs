@@ -1,6 +1,4 @@
-// The Android half of the mobile preview comment. The android job writes the fingerprint and
-// the update; the android-build job adds the client's install link a few minutes later. Each
-// run merges what it knows into the state kept in the comment's first line.
+// The per-PR workflow lock covers the whole read/merge/write, including comment creation.
 const MARKER = "mobile-preview-android";
 const PROJECT_ID = "d763fcb8-d37c-41ea-a773-b54a0ab4a454";
 const APP_SCHEME = "t3-code";
@@ -83,16 +81,24 @@ async function github(path, init = {}) {
   return response.json();
 }
 
-async function main() {
-  const repository = process.env.GITHUB_REPOSITORY;
-  const pr = process.env.PR;
-  if (!repository || !pr || !process.env.GH_TOKEN) {
+async function main({ env = process.env, request = github } = {}) {
+  const repository = env.GITHUB_REPOSITORY;
+  const pr = env.PR;
+  if (!repository || !pr || !env.GH_TOKEN) {
     throw new Error("GITHUB_REPOSITORY, PR and GH_TOKEN are required.");
   }
-  const runUrl = `${process.env.GITHUB_SERVER_URL}/${repository}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+  if (env.GROUP) {
+    if (!env.HEAD_SHA) throw new Error("HEAD_SHA is required for update comments.");
+    const pull = await request(`/repos/${repository}/pulls/${pr}`);
+    if (pull.head.sha !== env.HEAD_SHA) {
+      console.log("Skipping preview update for an outdated PR head.");
+      return;
+    }
+  }
+  const runUrl = `${env.GITHUB_SERVER_URL}/${repository}/actions/runs/${env.GITHUB_RUN_ID}`;
   let existing = null;
   for (let page = 1; existing === null; page++) {
-    const comments = await github(
+    const comments = await request(
       `/repos/${repository}/issues/${pr}/comments?per_page=100&page=${page}`,
     );
     // Only this workflow's own comment: anyone can post the marker, and nobody else's is editable.
@@ -104,15 +110,15 @@ async function main() {
     if (comments.length < 100) break;
   }
   const state = mergeState(readState(existing?.body), {
-    fingerprint: process.env.FINGERPRINT ?? "",
-    client: process.env.CLIENT ?? "",
-    group: process.env.GROUP ?? "",
+    fingerprint: env.FINGERPRINT ?? "",
+    client: env.CLIENT ?? "",
+    group: env.GROUP ?? "",
   });
   const body = JSON.stringify({ body: render(state, runUrl) });
   if (existing) {
-    await github(`/repos/${repository}/issues/comments/${existing.id}`, { method: "PATCH", body });
+    await request(`/repos/${repository}/issues/comments/${existing.id}`, { method: "PATCH", body });
   } else {
-    await github(`/repos/${repository}/issues/${pr}/comments`, { method: "POST", body });
+    await request(`/repos/${repository}/issues/${pr}/comments`, { method: "POST", body });
   }
 }
 
@@ -123,4 +129,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { mergeState, readState, render };
+module.exports = { main, mergeState, readState, render };
