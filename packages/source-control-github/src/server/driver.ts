@@ -97,9 +97,8 @@ export const makeStarRepository = Effect.gen(function* () {
   );
 });
 
-const makeWithServices = Effect.gen(function* () {
-  const mediaHttpClient = yield* HttpClient.HttpClient;
-  return yield* Effect.all({
+const makeWithServices = (mediaHttpClient: HttpClient.HttpClient) =>
+  Effect.all({
     sourceControl: GitHubSourceControlProvider.make,
     discovery: GitHubSourceControlProvider.makeDiscovery,
     pullRequests: GitHubPullRequestProvider.make,
@@ -110,14 +109,19 @@ const makeWithServices = Effect.gen(function* () {
     isRepositoryStarred: makeIsRepositoryStarred,
     starRepository: makeStarRepository,
   });
+
+const makeInstance = Effect.gen(function* () {
+  const mediaHttpClient = yield* HttpClient.HttpClient;
+  return yield* withOwnServices(makeWithServices(mediaHttpClient), services);
 });
 
-const makeInstance = withOwnServices(makeWithServices, services);
-
 // Codespaces and source control must share the same credential cache and quota reserve.
-export const makeWithSharedServices = makeWithServices.pipe(
-  Effect.provide(GitHubPullRequestApi.layer.pipe(Layer.provideMerge(GitHubAppAccess.layer))),
-);
+export const makeWithSharedServices = Effect.gen(function* () {
+  const mediaHttpClient = yield* HttpClient.HttpClient;
+  return yield* makeWithServices(mediaHttpClient).pipe(
+    Effect.provide(GitHubPullRequestApi.layer.pipe(Layer.provideMerge(GitHubAppAccess.layer))),
+  );
+});
 
 export const driver = defineSourceControlDriver({
   kind: definition.kind,
