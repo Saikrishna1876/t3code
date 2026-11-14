@@ -2,6 +2,8 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { DesktopUpdateState } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as FileSystem from "effect/FileSystem";
 import * as PlatformError from "effect/PlatformError";
 import * as Layer from "effect/Layer";
@@ -24,6 +26,10 @@ export interface UpdatesHarnessOptions {
     void,
     ElectronUpdater.ElectronUpdaterCheckForUpdatesError
   >;
+  readonly updateAvailable?: boolean;
+  readonly offeredVersion?: string;
+  readonly updateRepository?: string;
+  readonly githubResponse?: (url: string) => unknown;
   readonly beforeSetUpdateChannel?: Effect.Effect<void>;
   readonly setUpdateChannelError?: DesktopAppSettings.DesktopSettingsWriteError;
   readonly setDisableDifferentialDownload?: Effect.Effect<void>;
@@ -96,7 +102,14 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     checkForUpdates: Effect.sync(() => {
       checkCount += 1;
       checkAllowedDowngrade.push(allowDowngrade);
-    }).pipe(Effect.andThen(options.checkForUpdates ?? Effect.void)),
+    }).pipe(
+      Effect.andThen(options.checkForUpdates ?? Effect.void),
+      Effect.as(
+        options.updateAvailable === undefined
+          ? null
+          : { available: options.updateAvailable, version: options.offeredVersion ?? "1.2.4" },
+      ),
+    ),
     downloadUpdate: Effect.sync(() => {
       downloadCount += 1;
     }).pipe(Effect.andThen(options.downloadUpdate ?? Effect.void)),
@@ -243,6 +256,10 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     path.endsWith(DesktopUpdates.DESKTOP_UPDATE_INSTALL_RECORD_FILE);
   const layerFileSystem = FileSystem.layerNoop({
     readFileString: (path) => {
+      if (path.endsWith("app-update.yml") && options.updateRepository) {
+        const [owner, repo] = options.updateRepository.split("/");
+        return Effect.succeed(`provider: github\nowner: ${owner}\nrepo: ${repo}\n`);
+      }
       const installRecord = isInstallRecord(path)
         ? (installRecords.get(path) ?? previousInstallRecord)
         : undefined;
@@ -274,6 +291,19 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
 
   const layer = DesktopUpdates.layer.pipe(
     Layer.provide(layerFileSystem),
+    Layer.provide(
+      Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.sync(() =>
+            HttpClientResponse.fromWeb(
+              request,
+              Response.json(options.githubResponse ? options.githubResponse(request.url) : {}),
+            ),
+          ),
+        ),
+      ),
+    ),
     Layer.provide(DesktopUpdatePolicy.layerTest(options.policy)),
     Layer.provideMerge(layerUpdater),
     Layer.provideMerge(layerWindow),

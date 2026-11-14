@@ -303,6 +303,17 @@ describe("resolveIdleCompaction", () => {
   });
 });
 
+describe("fork update settings", () => {
+  it("keeps existing installations from sending an update prompt without review", () => {
+    const settings = decodeClientSettings({});
+    expect(settings.forkUpdateDraftOnly).toBe(true);
+    expect(settings.forkUpdateProject).toBeNull();
+    expect(settings.forkUpdatePrompt).toBe("");
+    const updated = { ...settings, ...decodeClientSettingsPatch({ forkUpdateDraftOnly: false }) };
+    expect(decodeClientSettings(encodeClientSettings(updated)).forkUpdateDraftOnly).toBe(false);
+  });
+});
+
 describe("ClientSettings notifications", () => {
   it("requires opt-in when existing settings omit notification preferences", () => {
     expect(decodeClientSettings({}).notificationMode).toBe("off");

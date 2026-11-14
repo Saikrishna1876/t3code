@@ -70,7 +70,15 @@ const checkForUpdatesFromMenu = Effect.gen(function* () {
   const result = yield* updates.check("menu");
   const updateState = result.state;
 
-  if (updateState.status === "up-to-date") {
+  if (updateState.upstreamRelease) {
+    yield* electronDialog.showMessageBox({
+      type: "info",
+      title: "Upstream release available",
+      message: `Upstream ${updateState.upstreamRelease.version} is available. The fork has no release yet.`,
+      detail: "Use the fork update button in the sidebar or Settings to open an update thread.",
+      buttons: ["OK"],
+    });
+  } else if (updateState.status === "up-to-date") {
     yield* electronDialog.showMessageBox({
       type: "info",
       title: "You're up to date!",

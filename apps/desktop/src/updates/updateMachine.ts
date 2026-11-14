@@ -48,6 +48,7 @@ export function reduceDesktopUpdateStateOnCheckStart(
   return {
     ...state,
     status: "checking",
+    upstreamRelease: undefined,
     checkedAt,
     releaseNotes: hasDownloadedUpdate ? state.releaseNotes : [],
     omittedReleaseCount: hasDownloadedUpdate ? state.omittedReleaseCount : 0,
@@ -98,6 +99,7 @@ export function reduceDesktopUpdateStateOnUpdateAvailable(
   return {
     ...state,
     status: isDownloadedVersion ? "downloaded" : "available",
+    upstreamRelease: undefined,
     availableVersion: version,
     downloadedVersion: isDownloadedVersion ? version : null,
     releaseNotes: preserveReleaseNotes ? state.releaseNotes : releaseNotes,
@@ -130,6 +132,7 @@ export function reduceDesktopUpdateStateOnNoUpdate(
   return {
     ...state,
     status: "up-to-date",
+    upstreamRelease: undefined,
     availableVersion: null,
     downloadedVersion: null,
     releaseNotes: [],

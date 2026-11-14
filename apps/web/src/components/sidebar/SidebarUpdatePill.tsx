@@ -8,6 +8,7 @@ import { type ComponentProps, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { isElectron } from "../../env";
+import { useForkUpdateAction } from "../../hooks/useForkUpdateAction";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { cn } from "../../lib/utils";
 import { ensureLocalApi } from "../../localApi";
@@ -107,7 +108,9 @@ function resolveSidebarUpdatePresentation({
             ? "downloaded"
             : action === "download"
               ? "available"
-              : "idle";
+              : action === "update-fork"
+                ? "update-fork"
+                : "idle";
 
   return {
     iconStatus,
@@ -198,6 +201,7 @@ export function SidebarUpdatePill() {
 
 function SidebarUpdateControl() {
   const state = useDesktopUpdateState();
+  const updateFork = useForkUpdateAction();
   // The desktop updates this machine, whose policy the primary environment reports.
   const updatesDenial = managedUpdatesDenial(usePrimaryManagedPolicy());
   const [isActionPending, setIsActionPending] = useState(false);
@@ -231,10 +235,13 @@ function SidebarUpdateControl() {
   const action = state ? resolveDesktopUpdateButtonAction(state) : "none";
   const isDownloading = state?.status === "downloading";
   const localUpdateVersion =
-    state && action !== "none" ? getDesktopUpdateDownloadedVersion(state) : null;
+    state && (action === "download" || action === "install")
+      ? getDesktopUpdateDownloadedVersion(state)
+      : null;
   const everything = useUpdateEverything(localUpdateVersion);
   const checkProviderUpdates = useCheckProviderUpdates();
   const runsEverything = everything.hasUpdates && !isDownloading;
+  const showsForkUpdate = action === "update-fork";
   const run = useUpdateEverythingRun();
   const isRunningEverything = run !== null;
   const showCheckIcon = shouldShowDesktopUpdateCheckIcon({
@@ -244,22 +251,23 @@ function SidebarUpdateControl() {
   });
   const { iconStatus, showUpdateDetails, showUpdateIconState } = resolveSidebarUpdatePresentation({
     action,
-    showsEverything: runsEverything,
+    showsEverything: runsEverything && !showsForkUpdate,
     run,
     isDownloading,
     showCheckIcon,
   });
   const idleTooltip =
     !showUpdateDetails && !showCheckIcon ? getDesktopUpdateIdleTooltip(state, updatesDenial) : null;
-  const tooltip = runsEverything
-    ? everything.summary
-    : showUpdateDetails
-      ? state
-        ? getDesktopUpdateButtonTooltip(state)
-        : "Update available"
-      : showCheckIcon
-        ? "Checking for updates…"
-        : (idleTooltip?.title ?? "Check for updates");
+  const tooltip =
+    runsEverything && !showsForkUpdate
+      ? everything.summary
+      : showUpdateDetails
+        ? state
+          ? getDesktopUpdateButtonTooltip(state)
+          : "Update available"
+        : showCheckIcon
+          ? "Checking for updates…"
+          : (idleTooltip?.title ?? "Check for updates");
   const disabled = showCheckIcon
     ? true
     : runsEverything
@@ -281,20 +289,29 @@ function SidebarUpdateControl() {
     setReleaseNotesOpen(showReleaseNotesPopover && releaseNotesTriggerFocusVisible);
   }
 
+  const confirmEverything = () => {
+    setIsConfirmingEverything(true);
+    setProviderCheck("dialog");
+    void checkProviderUpdates({ quiet: true }).finally(() => setProviderCheck(null));
+  };
+
   const handleAction = async () => {
     const bridge = window.desktopBridge;
     if (isInteractionDisabled) return;
 
-    if (runsEverything) {
-      setIsConfirmingEverything(true);
-      // Machines that still cache an older latest version add their rows while the dialog is open.
-      setProviderCheck("dialog");
-      void checkProviderUpdates({ quiet: true }).finally(() => setProviderCheck(null));
+    if (runsEverything && !showsForkUpdate) {
+      confirmEverything();
       return;
     }
 
     if (!bridge || !state) return;
     setIsActionPending(true);
+
+    if (action === "update-fork") {
+      await updateFork();
+      setIsActionPending(false);
+      return;
+    }
 
     if (action === "download") {
       void downloadLocalUpdate(bridge, { notifyDownloaded: true }).finally(() =>
@@ -373,7 +390,7 @@ function SidebarUpdateControl() {
                 downloadLocalUpdate(bridge, { notifyDownloaded: false, reportError }),
             }
           : {}),
-        ...(bridge && action !== "none"
+        ...(bridge && (action === "download" || action === "install")
           ? { installLocal: (reportError) => installLocalUpdate(bridge, reportError) }
           : {}),
       }),
@@ -507,7 +524,7 @@ function SidebarUpdateControl() {
   );
 
   return (
-    <SidebarMenuItem className="ml-auto shrink-0">
+    <SidebarMenuItem className="ml-auto flex shrink-0">
       <Popover
         handle={releaseNotesPopoverHandle}
         open={releaseNotesOpen && showReleaseNotesPopover}
@@ -583,6 +600,24 @@ function SidebarUpdateControl() {
           </PopoverPopup>
         ) : null}
       </Popover>
+      {showsForkUpdate && runsEverything ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-label={everything.summary}
+                disabled={isActionPending || isRunningEverything}
+                className="inline-flex size-8 cursor-pointer items-center justify-center rounded-full text-(--sidebar-icon-color) outline-hidden ring-ring hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-inset disabled:cursor-not-allowed"
+                onClick={confirmEverything}
+              >
+                <DesktopUpdateStatusIcon status="everything" />
+              </button>
+            }
+          />
+          <TooltipPopup>{everything.summary}</TooltipPopup>
+        </Tooltip>
+      ) : null}
       {confirmDialog}
     </SidebarMenuItem>
   );

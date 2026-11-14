@@ -1,5 +1,11 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
-import { CheckIcon, CircleArrowUpIcon, DownloadIcon, RotateCwIcon } from "lucide-react";
+import {
+  CheckIcon,
+  CircleArrowUpIcon,
+  DownloadIcon,
+  RotateCwIcon,
+  GitForkIcon,
+} from "lucide-react";
 import type { AnimationEventHandler } from "react";
 
 const DOWNLOAD_PROGRESS_RADIUS = 14;
@@ -11,7 +17,8 @@ export type DesktopUpdateStatusIconState =
   | "available"
   | "downloading"
   | "downloaded"
-  | "everything";
+  | "everything"
+  | "update-fork";
 
 function normalizeDesktopUpdateDownloadPercent(percent: number | null): number {
   if (percent === null || !Number.isFinite(percent)) return 0;
@@ -111,6 +118,7 @@ export function DesktopUpdateStatusIcon({
   readonly onCheckAnimationIteration?: AnimationEventHandler<SVGSVGElement>;
   readonly status: DesktopUpdateStatusIconState;
 }) {
+  if (status === "update-fork") return <GitForkIcon className="size-4" />;
   if (status === "available") return <DesktopUpdateAvailableIcon />;
   if (status === "downloading") {
     return <DesktopUpdateDownloadingIcon percent={downloadPercent ?? null} />;

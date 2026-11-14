@@ -1,3 +1,4 @@
+import { useForkUpdateAutoSend } from "../../hooks/useForkUpdateAction";
 import { VoiceInputSetup } from "./VoiceInputSetup";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { insertAttachmentReferencesForDraft } from "./composerAttachmentReferences";
@@ -2156,6 +2157,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return true;
   };
   const submitComposerStable = useStableCallback(submitComposer);
+  useForkUpdateAutoSend({
+    draftId,
+    prompt,
+    disabled: isSendDisabled || noProviderAvailable,
+    submit: submitComposerStable,
+  });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- publishes the committed submission handler to the asynchronous dictation completion
   useLayoutEffect(() => {
     submitComposerRef.current = (mode, intent) => submitComposerStable(undefined, mode, intent);
