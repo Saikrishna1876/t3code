@@ -36,6 +36,18 @@ The confirmation counts the running threads that the restarts will interrupt,
 and how many can resume afterwards. See **Continue threads after restarts**
 below.
 
+## Update a fork
+
+Fork desktop builds check their own release feed first. When no fork update is
+available, they check `pingdotgg/t3code` for the selected Stable or Nightly track.
+A fork icon on the update button means an upstream release is missing from the
+installed fork build.
+
+Set **Fork update project** and **Fork update prompt** in **Settings, About**.
+Clicking the update button opens a new draft in that project with your saved
+prompt. Press Enter to send it. **Review fork update prompt before sending** is
+on by default. Turn it off to send the prompt as soon as the thread opens.
+
 ## Switch between Stable and Nightly
 
 In the desktop app, change **Settings → About → Update track**. T3 Code shows each

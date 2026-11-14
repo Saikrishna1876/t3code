@@ -325,6 +325,22 @@ describe.each([
 });
 
 describe("useNewThreadHandler", () => {
+  it("opens a fresh prompted draft without reusing the project's existing draft", async () => {
+    const stored = {
+      draftId: "existing",
+      environmentId: "environment-ssh",
+      threadId: "old-thread",
+      promotedTo: null,
+    };
+    testState.reset(stored as never);
+    const opened = await useNewThreadHandler()(
+      { environmentId: "environment-ssh", projectId: "project-remote" } as never,
+      { prompt: "Update my fork", forceNew: true, envMode: "local" },
+    );
+    expect(opened?.draftId).not.toBe("existing");
+    expect(testState.draftStore.setPrompt).toHaveBeenCalledWith(opened?.draftId, "Update my fork");
+  });
+
   it("keeps the text of a draft that gained some while it waited", async () => {
     testState.reset(null);
     const raced = {

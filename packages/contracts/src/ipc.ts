@@ -285,6 +285,7 @@ export interface DesktopUpdateState {
   errorContext: "check" | "download" | "install" | null;
   canRetry: boolean;
   notAppliedVersion?: string;
+  upstreamRelease?: { readonly version: string; readonly url: string } | undefined;
   /** Off only because a managed policy rules out this channel; switching channels turns it on. */
   channelBlockedByPolicy?: true;
 }
@@ -330,6 +331,7 @@ export const DesktopUpdateStateSchema = Schema.Struct({
   errorContext: Schema.NullOr(Schema.Literals(["check", "download", "install"])),
   canRetry: Schema.Boolean,
   notAppliedVersion: Schema.optionalKey(Schema.String),
+  upstreamRelease: Schema.optional(Schema.Struct({ version: Schema.String, url: Schema.String })),
 });
 
 export const DesktopCliCommandStateSchema = Schema.Struct({

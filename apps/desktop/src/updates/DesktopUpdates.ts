@@ -24,6 +24,8 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import * as HttpClient from "effect/http/HttpClient";
+import { checkUpstreamRelease } from "./upstreamRelease.ts";
 
 import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
@@ -367,6 +369,7 @@ function isArm64HostRunningIntelBuild(runtimeInfo: DesktopRuntimeInfo): boolean 
 
 /** @public */
 export const make = Effect.gen(function* () {
+  const httpClient = yield* HttpClient.HttpClient;
   const config = yield* DesktopConfig.DesktopConfig;
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
   const desktopState = yield* DesktopState.DesktopState;
@@ -532,6 +535,43 @@ export const make = Effect.gen(function* () {
     });
   });
 
+  const handleUpdateNotAvailable = Effect.gen(function* () {
+    const checkedAt = yield* currentIsoTimestamp;
+    const state = yield* Ref.get(updateStateRef);
+    const next = reduceDesktopUpdateStateOnNoUpdate(state, checkedAt);
+    const feed = yield* Ref.get(appUpdateYmlConfigRef);
+    const repository =
+      Option.isSome(feed) && feed.value.provider === "github"
+        ? `${feed.value.owner}/${feed.value.repo}`
+        : null;
+    if (repository && !policy.feedUrl && next.downloadedVersion === null) {
+      const result = yield* checkUpstreamRelease(
+        repository,
+        environment.appVersion,
+        state.channel,
+      ).pipe(
+        Effect.provideService(HttpClient.HttpClient, httpClient),
+        Effect.timeout("15 seconds"),
+        Effect.result,
+      );
+      if (result._tag === "Failure") {
+        yield* setState(
+          reduceDesktopUpdateStateOnCheckFailure(
+            next,
+            "No fork update is available, but the upstream release check failed. Try again.",
+            checkedAt,
+          ),
+        );
+      } else {
+        yield* setState({ ...next, upstreamRelease: result.success });
+      }
+    } else {
+      yield* setState(next);
+    }
+    yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);
+    yield* logUpdaterInfo("no fork updates available");
+  }).pipe(Effect.withSpan("desktop.updates.handleUpdateNotAvailable"));
+
   const checkForUpdates = Effect.fn("desktop.updates.checkForUpdates")(function* (
     reason: string,
     actionReservation: "acquire" | "held" = "acquire",
@@ -563,12 +603,37 @@ export const make = Effect.gen(function* () {
       const restoreDowngrade = yield* electronUpdater.allowDowngrade;
       if (allowDowngrade) yield* electronUpdater.setAllowDowngrade(true);
       return yield* electronUpdater.checkForUpdates.pipe(
+        Effect.tap(
+          Effect.fn("desktop.updates.checkUpstreamFallback")(function* (result) {
+            if (result && (!result.available || !(yield* offerable(result.version, state)))) {
+              yield* handleUpdateNotAvailable;
+            }
+          }),
+        ),
         Effect.ensuring(electronUpdater.setAllowDowngrade(restoreDowngrade).pipe(Effect.ignore)),
         Effect.as(true),
         Effect.catchTags({
           ElectronUpdaterCheckForUpdatesError: Effect.fn(
             "desktop.updates.handleCheckForUpdatesFailure",
           )(function* (error) {
+            const feed = yield* Ref.get(appUpdateYmlConfigRef);
+            const cause = error.cause;
+            const missingChannel =
+              typeof cause === "object" &&
+              cause !== null &&
+              "code" in cause &&
+              (cause.code === "ERR_UPDATER_CHANNEL_FILE_NOT_FOUND" ||
+                cause.code === "ERR_UPDATER_NO_PUBLISHED_VERSIONS");
+            if (
+              missingChannel &&
+              Option.isSome(feed) &&
+              feed.value.provider === "github" &&
+              feed.value.owner?.toLowerCase() !== "pingdotgg" &&
+              !policy.feedUrl
+            ) {
+              yield* handleUpdateNotAvailable;
+              return true;
+            }
             const failedAt = yield* currentIsoTimestamp;
             yield* updateState((current) =>
               reduceDesktopUpdateStateOnCheckFailure(current, error.message, failedAt),
@@ -979,14 +1044,6 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const handleUpdateNotAvailable = Effect.gen(function* () {
-    const checkedAt = yield* currentIsoTimestamp;
-    const state = yield* Ref.get(updateStateRef);
-    yield* setState(reduceDesktopUpdateStateOnNoUpdate(state, checkedAt));
-    yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);
-    yield* logUpdaterInfo("no updates available");
-  }).pipe(Effect.withSpan("desktop.updates.handleUpdateNotAvailable"));
-
   const handleUpdaterError = Effect.fn("desktop.updates.handleUpdaterError")(function* (
     cause: unknown,
   ) {
@@ -1185,7 +1242,12 @@ export const make = Effect.gen(function* () {
         runEffect(handleUpdateAvailable(info));
       });
       yield* electronUpdater.on("update-not-available", () => {
-        runEffect(handleUpdateNotAvailable);
+        runEffect(
+          Effect.gen(function* () {
+            const action = yield* activeUpdateAction;
+            if (Option.isNone(action)) yield* handleUpdateNotAvailable;
+          }),
+        );
       });
       yield* electronUpdater.on("error", (error: unknown) => {
         runEffect(handleUpdaterError(error));

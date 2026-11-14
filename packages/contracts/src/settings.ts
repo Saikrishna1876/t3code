@@ -390,7 +390,14 @@ export const VoiceTranscriptionDestination = Schema.Union([
 ]);
 export type VoiceTranscriptionDestination = typeof VoiceTranscriptionDestination.Type;
 
+const ForkUpdateProject = Schema.NullOr(
+  Schema.Struct({ environmentId: EnvironmentId, projectId: ProjectId }),
+);
+
 export const ClientSettingsSchema = Schema.Struct({
+  forkUpdateProject: ForkUpdateProject.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  forkUpdatePrompt: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  forkUpdateDraftOnly: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   notificationMode: NotificationMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("off" as const)),
   ),
@@ -1981,6 +1988,9 @@ export function requiredScopesForProjectMutation(
 }
 
 export const ClientSettingsPatch = Schema.Struct({
+  forkUpdateProject: Schema.optionalKey(ForkUpdateProject),
+  forkUpdatePrompt: Schema.optionalKey(Schema.String),
+  forkUpdateDraftOnly: Schema.optionalKey(Schema.Boolean),
   notificationMode: Schema.optionalKey(NotificationMode),
   inAppNotificationsEnabled: Schema.optionalKey(Schema.Boolean),
   diffColorScheme: Schema.optionalKey(DiffColorScheme),

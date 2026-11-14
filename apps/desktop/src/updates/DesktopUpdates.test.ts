@@ -77,6 +77,57 @@ const stableUpdateInfo = (
 };
 
 describe("DesktopUpdates", () => {
+  it.effect(
+    "checks upstream only after the fork reports no update and never downloads upstream",
+    () =>
+      Effect.gen(function* () {
+        for (const available of [true, false, "missing-channel", "wrong-channel"] as const) {
+          const requests: string[] = [];
+          const harness = makeHarness({
+            updateAvailable: available === true || available === "wrong-channel",
+            offeredVersion: available === "wrong-channel" ? "1.3.0-nightly.20261114.1" : "1.2.4",
+            ...(available === "missing-channel"
+              ? {
+                  checkForUpdates: Effect.fail(
+                    new ElectronUpdater.ElectronUpdaterCheckForUpdatesError({
+                      channel: "nightly",
+                      cause: Object.assign(new Error("No nightly manifest"), {
+                        code: "ERR_UPDATER_CHANNEL_FILE_NOT_FOUND",
+                      }),
+                    }),
+                  ),
+                }
+              : {}),
+            updateRepository: "Saikrishna1876/t3code",
+            githubResponse: (url) => {
+              requests.push(url);
+              return url.includes("/compare/")
+                ? { status: "behind" }
+                : { tag_name: "v1.3.0", draft: false, prerelease: false };
+            },
+          });
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const updates = yield* DesktopUpdates.DesktopUpdates;
+              yield* updates.configure;
+              const result = yield* updates.check("manual");
+              assert.equal(
+                result.state.upstreamRelease?.version,
+                available === true ? undefined : "1.3.0",
+              );
+              assert.equal(requests.length, available === true ? 0 : 2);
+              assert.equal((yield* updates.download).accepted, false);
+              assert.equal(harness.downloadCount(), 0);
+              if (available !== true) {
+                yield* updates.setChannel("nightly");
+                assert.equal((yield* updates.getState).upstreamRelease, undefined);
+              }
+            }).pipe(Effect.provide(harness.layer)),
+          );
+        }
+      }),
+  );
+
   it.effect("updates Linux .deb installs and leaves other non-AppImage installs off", () =>
     Effect.gen(function* () {
       const linuxState = (packageType: string | undefined) =>

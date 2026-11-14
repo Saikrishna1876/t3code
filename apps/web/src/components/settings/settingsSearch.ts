@@ -847,6 +847,27 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["about check for updates download install upgrade release"],
   },
   {
+    id: "fork-update-project",
+    title: "Fork update project",
+    to: "/settings/about",
+    searchTerms: ["upstream fork release thread workspace"],
+    desktopOnly: true,
+  },
+  {
+    id: "fork-update-prompt",
+    title: "Fork update prompt",
+    to: "/settings/about",
+    searchTerms: ["upstream fork release instructions thread"],
+    desktopOnly: true,
+  },
+  {
+    id: "fork-update-draft-only",
+    title: "Review fork update prompt before sending",
+    to: "/settings/about",
+    searchTerms: ["upstream fork draft automatic start send thread"],
+    desktopOnly: true,
+  },
+  {
     id: "update-track",
     title: "Update track",
     to: "/settings/about",

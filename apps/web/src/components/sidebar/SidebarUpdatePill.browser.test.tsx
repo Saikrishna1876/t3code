@@ -118,16 +118,35 @@ describe("SidebarUpdatePill release notes", () => {
 
 describe("SidebarUpdatePill update everything", () => {
   it("does not refocus the update button after a pointer cancel", async () => {
-    setup(null, { hasUpdates: true });
-    await using screen = await render(<SidebarUpdatePill />);
-    const button = screen.getByRole("button", { name: "Update everything" });
-    await userEvent.click(button);
-    const cancel = page.getByRole("button", { name: "Cancel" });
-    await expect.element(cancel).toBeVisible();
-
-    await userEvent.click(cancel);
-    await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')).toBeNull());
-    expect(document.activeElement).not.toBe(button.element());
+    for (const upstreamAvailable of [false, true]) {
+      setup(
+        upstreamAvailable
+          ? {
+              ...nightlyUpdate([]),
+              status: "up-to-date",
+              availableVersion: null,
+              upstreamRelease: {
+                version: "0.1.10",
+                url: "https://github.com/pingdotgg/t3code/releases/tag/v0.1.10",
+              },
+            }
+          : null,
+        { hasUpdates: true },
+      );
+      await using screen = await render(<SidebarUpdatePill />);
+      if (upstreamAvailable) {
+        await expect
+          .element(screen.getByRole("button", { name: /missing from fork/ }))
+          .toBeVisible();
+      }
+      const button = screen.getByRole("button", { name: "Update everything" });
+      await userEvent.click(button);
+      const cancel = page.getByRole("button", { name: "Cancel" });
+      await expect.element(cancel).toBeVisible();
+      await userEvent.click(cancel);
+      await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')).toBeNull());
+      expect(document.activeElement).not.toBe(button.element());
+    }
   });
 
   it("returns focus to the update button after Escape", async () => {

@@ -1,4 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
+import { ForkUpdateSettings } from "./ForkUpdateSettings";
+import { useForkUpdateAction } from "../../hooks/useForkUpdateAction";
 import { NotificationSettings } from "./NotificationSettings";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
 import { CheckIcon } from "lucide-react";
@@ -153,6 +155,7 @@ const QUIT_CONFIRMATION_MODE_LABELS: Record<QuitConfirmationMode, string> = {
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 function AboutVersionSection() {
+  const updateFork = useForkUpdateAction();
   const updateState = useDesktopUpdateState();
   const [switchChannel, setSwitchChannel] = useState<DesktopUpdateChannel | null>(null);
   const [isUpdateActionPending, setIsUpdateActionPending] = useState(false);
@@ -201,6 +204,13 @@ function AboutVersionSection() {
 
     const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
 
+    if (action === "update-fork") {
+      if (isUpdateActionPending) return;
+      setIsUpdateActionPending(true);
+      await updateFork();
+      setIsUpdateActionPending(false);
+      return;
+    }
     if (action === "download") {
       void bridge.downloadUpdate().catch((error: unknown) => {
         toastManager.add(
@@ -290,7 +300,11 @@ function AboutVersionSection() {
       ? !canCheckForUpdate(updateState)
       : isDesktopUpdateButtonDisabled(updateState);
 
-  const actionLabel: Record<string, string> = { download: "Download", install: "Install" };
+  const actionLabel: Record<string, string> = {
+    download: "Download",
+    install: "Install",
+    "update-fork": "Update fork",
+  };
   const statusLabel: Record<string, string> = {
     checking: "Checking…",
     downloading: "Downloading…",
@@ -302,8 +316,10 @@ function AboutVersionSection() {
   const description =
     action === "download" || action === "install"
       ? "Update available."
-      : (getDesktopUpdateDisabledReason(updateState, updatesDenial) ??
-        "Current version of the application.");
+      : action === "update-fork"
+        ? `Upstream ${updateState?.upstreamRelease?.version} is available. The fork has no release yet.`
+        : (getDesktopUpdateDisabledReason(updateState, updatesDenial) ??
+          "Current version of the application.");
 
   return (
     <>
@@ -330,6 +346,7 @@ function AboutVersionSection() {
           </Tooltip>
         }
       />
+      {hasDesktopBridge ? <ForkUpdateSettings /> : null}
       {hasDesktopBridge ? (
         <SettingsRow
           {...searchableSetting("update-track")}

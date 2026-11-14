@@ -1,6 +1,6 @@
 import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
 
-export type DesktopUpdateButtonAction = "download" | "install" | "none";
+export type DesktopUpdateButtonAction = "download" | "install" | "update-fork" | "none";
 
 const DEFAULT_DESKTOP_RELEASE_REPOSITORY = "pingdotgg/t3code";
 const GITHUB_REPOSITORY_SEGMENT = /^[A-Za-z0-9._-]+$/u;
@@ -60,6 +60,7 @@ export function resolveDesktopUpdateButtonAction(
       return "download";
     }
   }
+  if (state.enabled && state.status === "up-to-date" && state.upstreamRelease) return "update-fork";
   return "none";
 }
 
@@ -116,6 +117,9 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
       return `Update ${state.downloadedVersion} downloaded. Click to restart and install.`;
     }
     return state.message ?? "Update failed";
+  }
+  if (state.upstreamRelease) {
+    return `Upstream ${state.upstreamRelease.version} available, missing from fork. Click to update fork.`;
   }
   return "Up to date";
 }

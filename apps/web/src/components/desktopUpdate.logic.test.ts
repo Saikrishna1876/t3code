@@ -52,6 +52,34 @@ describe("desktop update button state", () => {
     expect(resolveDesktopUpdateButtonAction(state)).toBe("download");
   });
 
+  it("opens fork updates only when no fork installer is available", () => {
+    const state: DesktopUpdateState = {
+      ...baseState,
+      status: "up-to-date",
+      upstreamRelease: {
+        version: "1.2.0",
+        url: "https://github.com/pingdotgg/t3code/releases/tag/v1.2.0",
+      },
+    };
+    expect(resolveDesktopUpdateButtonAction(state)).toBe("update-fork");
+    expect(getDesktopUpdateButtonTooltip(state)).toContain("missing from fork");
+    expect(
+      resolveDesktopUpdateButtonAction({
+        ...state,
+        status: "available",
+        availableVersion: "1.1.1",
+      }),
+    ).toBe("download");
+    expect(
+      resolveDesktopUpdateButtonAction({
+        ...state,
+        status: "downloaded",
+        downloadedVersion: "1.1.1",
+      }),
+    ).toBe("install");
+    expect(resolveDesktopUpdateButtonAction({ ...state, enabled: false })).toBe("none");
+  });
+
   it("hides the install action while checking for a newer release", () => {
     const state: DesktopUpdateState = {
       ...baseState,
