@@ -18,8 +18,8 @@ Keep project Codespaces work available with the user's existing local provider l
 
 ## Baseline
 
-- Fork/main integrated upstream baseline: stable `v0.1.6`, `2359643cffa6ba9ee84d6f2694b935de54a8013e`, landed through PR #9 at fork/main `4bc7fce0ee`. PR #12 merged the v0.1.7 candidate into the former feature branch after main had already taken that feature; main did not inherit its integration. This update recovers that reviewed merge before v0.1.9. Hardware acceptance remains separate.
-- Previous integrated upstream baseline: stable `v0.1.5`, `6d450a4284852af137b2f3407fddd89eb76e7644`, included in PR #9 before its v0.1.6 update.
+- Fork/main integrated upstream baseline: stable `v0.1.9`, `24e77473ecf41bc1f7142529c7911c1c1aae1d76`, landed through PR #19 at `e6b749f8f8b1c51afec50fb508a38a81bff5b7c8`. PR #20 added the fork updater prompt at `c70267e52a3e7a58ce95c6a731b39d21e0f12f18`.
+- Previous integrated upstream baseline: stable `v0.1.6`, `2359643cffa6ba9ee84d6f2694b935de54a8013e`. PR #19 recovered PR #12's reviewed v0.1.7 integration before merging v0.1.9.
 - Compatibility patches, including PR #2, are committed. Superseded local Codespaces drafts were stashed before the 2026-10-13 integration; see Previous update, 2026-10-18.
 - Last behaviorally verified baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda` (release `0.0.42` built locally on 2026-09-18 with Electron `43.6.0` was extracted and interactively confirmed working by the user on the target Intel Mac macOS 15 system).
 
@@ -123,6 +123,16 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Prior successful release: 2026-10-07, version `0.0.45`, source `49b07dc3cb8e105c69ed93885ba0e6e80990762b`. DMG and ZIP integrity, packaged Electron `43.6.0`, x64 architecture, and fork feed checks passed. CodeRabbit had zero findings; Greptile's merged review was unavailable because reviews were disabled for the organization.
 
 ## Latest attempt
+
+- Date: 2026-11-17. Candidate for upstream stable `v0.1.10`, exact commit `7d32075e3757ded707914e2450c3e392a9665765`. Published release API and fetched tag agree; neither draft nor prerelease. The candidate is not merged or published.
+- Starting fork/main and rollback reference: `c70267e52a3e7a58ce95c6a731b39d21e0f12f18`. Branch `chore/fork-release-v0-1-10` in the task worktree. Preserve P001 through P009 and PR #20's upstream release prompt. Electron remains exactly `43.6.0`.
+- Incoming migrations 82 through 96 register as 83 through 97 because fork migration 77 already shipped. Recovery follows each thread's pinned workspace. Local and remote cleanup share nested-repository inspection and linked-worktree detection, including annexed checkouts. Preview comment jobs retain trusted base scripts, no build-job comment grants, and a queued writer shared across platforms. Stale builds can add matching clients without replacing a newer update.
+- Context measurements remain below starting main's ceilings: Claude 6,196/6,202 bytes, Codex 7,588/7,930 bytes, MCP JSON 51,450/51,454 bytes. Measured-budget and always-load tests pass without an exception label or weakened gate. Both harness eval requests build. Live model comparisons cannot start because the configured Codex eval backend is absent.
+- Focused checks pass desktop updater 54 cases, packaged asset serving 9 cases, migration reconciliation 3 cases, context 2 cases and preview-comment policy/state 7 cases. The annexed orphan case first failed during integration, then passed with shared detection. Additional workspace checks and final affected-package types are pending. Scoped formatting and lint pass with existing worker/projection loop warnings.
+- Review profile `personal`. Whole-tree CodeRabbit review exceeded the payload limit; the server-only uncommitted review exceeded its file limit. Committed directory reviews and Greptile remain pending. The initial changed-file run overlapped hook restoration and is invalid; rerun against stable files before pushing.
+- No browser, native client, live app, or cloud release launched. Hardware graphics, native clipboard, packaged startup, permission persistence and updater installation acceptance remain separate.
+
+## Previous attempt, 2026-11-11
 
 - Date: 2026-11-11. Preparing stable `v0.1.9`, exact commit `24e77473ecf41bc1f7142529c7911c1c1aae1d76`, published at 11:33:49 UTC. Release API and fetched tag agree; neither draft nor prerelease. Newer upstream main commits are excluded.
 - Starting fork/main and rollback reference: `8c682b0ba4b7dee10e8f814ff50aa941423dc5da`. Branch: `chore/sync-fork-main-0-1-9`. Recovered PR #12's reviewed v0.1.7 merge in `b2ff842c7b`, then merged the exact v0.1.9 tag. The user will merge the PR before release publication.

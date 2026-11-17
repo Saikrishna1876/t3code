@@ -1,4 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { isMacPlatform } from "~/lib/utils";
+import {
+  useEffect,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 import { ThreadFindBar } from "../chat/ThreadFindBar";
 import { MarkdownFindContext } from "../chat/markdownFindContext";
 import { stepThreadFindIndex } from "../chat/threadFind";
@@ -101,6 +107,8 @@ export function MarkdownPreview({ children }: { children: ReactNode }) {
       }}
     >
       <ThreadFindBar
+        navigationId={0}
+        settled={true}
         label="Find in file"
         open={open}
         query={query}
@@ -117,7 +125,7 @@ export function MarkdownPreview({ children }: { children: ReactNode }) {
         onPrevious={() => setIndex((current) => stepThreadFindIndex(current, matchCount, -1))}
         onClose={close}
       />
-      <ScrollArea className="min-h-0 flex-1">
+      <ScrollArea className="min-h-0 flex-1" onKeyDown={selectRenderedContentOnSelectAll}>
         <div ref={setContent}>
           <div data-timeline-row-id="markdown-file">
             <div data-thread-find-text>
@@ -130,4 +138,23 @@ export function MarkdownPreview({ children }: { children: ReactNode }) {
       </ScrollArea>
     </div>
   );
+}
+
+function selectRenderedContentOnSelectAll(event: ReactKeyboardEvent<HTMLElement>) {
+  const mac = isMacPlatform(navigator.platform);
+  const selectAll =
+    event.key.toLowerCase() === "a" &&
+    (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) &&
+    !event.shiftKey &&
+    !event.altKey;
+  // React bubbles keys from portaled children (the image dialog) through this surface.
+  if (
+    !selectAll ||
+    !(event.target instanceof Node) ||
+    !event.currentTarget.contains(event.target)
+  ) {
+    return;
+  }
+  event.preventDefault();
+  window.getSelection()?.selectAllChildren(event.currentTarget);
 }

@@ -12,6 +12,7 @@ const threadId = ThreadId.make("preview-thread");
 const projectId = ProjectId.make("project:mcp-test");
 const project = Schema.decodeSync(Project.ProjectRow)({
   projectId,
+  hasCustomTitle: false,
   title: "Project",
   workspaceRoot: "/local/repo",
   defaultModelSelection: null,

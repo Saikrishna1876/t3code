@@ -1,19 +1,25 @@
-// The per-PR workflow lock covers the whole read/merge/write, including comment creation.
-const MARKER = "mobile-preview-android";
 const PROJECT_ID = "d763fcb8-d37c-41ea-a773-b54a0ab4a454";
 const APP_SCHEME = "t3-code";
 
 function readState(body) {
-  const match = new RegExp(`^<!-- ${MARKER} (\\{.*\\}) -->`).exec(body ?? "");
+  const match = /^<!-- mobile-preview(?:-(android|ios))? (\{.*\}) -->/.exec(body ?? "");
   if (!match) return null;
   try {
-    const state = JSON.parse(match[1]);
+    const parsed = JSON.parse(match[2]);
+    const state = match[1] ? { [match[1]]: parsed } : parsed;
     const text = (value) => (typeof value === "string" ? value : "");
-    return {
-      fingerprint: text(state.fingerprint),
-      client: text(state.client),
-      group: text(state.group),
-    };
+    return Object.fromEntries(
+      ["android", "ios"]
+        .filter((platform) => state?.[platform])
+        .map((platform) => [
+          platform,
+          {
+            fingerprint: text(state[platform].fingerprint),
+            client: text(state[platform].client),
+            group: text(state[platform].group),
+          },
+        ]),
+    );
   } catch {
     return null;
   }
@@ -25,6 +31,7 @@ function readState(body) {
  * the comment now shows.
  */
 function mergeState(previous, next) {
+  if (!next.client && !next.group) return previous;
   const buildOnly = Boolean(next.client) && !next.group;
   if (
     buildOnly &&
@@ -44,22 +51,23 @@ function mergeState(previous, next) {
 }
 
 function render(state, runUrl) {
-  const qr = `https://qr.expo.dev/eas-update?appScheme=${APP_SCHEME}&projectId=${PROJECT_ID}&groupId=${state.group}`;
+  const platforms = ["android", "ios"];
+  const cells = (value) => platforms.map((platform) => value(state[platform]));
   const rows = [
-    `<!-- ${MARKER} ${JSON.stringify(state)} -->`,
-    "🤖 Android preview",
+    `<!-- mobile-preview ${JSON.stringify(state)} -->`,
+    "🚀 Mobile preview",
     "",
-    "&nbsp; | 🤖 Android",
-    "--- | ---",
-    `Fingerprint | ${state.fingerprint || "n/a"}`,
-    `Dev client | ${state.client ? `[Install](${state.client})` : `Building on Blacksmith ([run](${runUrl})); this comment gets the install link when it finishes`}`,
+    "&nbsp; | 🤖 Android | 🍎 iOS",
+    "--- | --- | ---",
+    `Fingerprint | ${cells((entry) => entry?.fingerprint || "n/a").join(" | ")}`,
+    `Dev client | ${cells((entry) => (entry?.client ? `[Install](${entry.client})` : entry?.fingerprint ? `Client unavailable ([build run](${runUrl}))` : "n/a")).join(" | ")}`,
+    `Update Details | ${cells((entry) => (entry?.group ? `[Update Permalink](https://expo.dev/projects/${PROJECT_ID}/updates/${entry.group})` : "n/a")).join(" | ")}`,
+    `Update QR | ${cells((entry) => {
+      if (!entry?.group) return "n/a";
+      const qr = `https://qr.expo.dev/eas-update?appScheme=${APP_SCHEME}&projectId=${PROJECT_ID}&groupId=${entry.group}`;
+      return `<a href="${qr}"><img src="${qr}" width="250px" height="250px" /></a>`;
+    }).join(" | ")}`,
   ];
-  if (state.group) {
-    rows.push(
-      `Update Details | [Update Permalink](https://expo.dev/projects/${PROJECT_ID}/updates/${state.group})`,
-      `Update QR | <a href="${qr}"><img src="${qr}" width="250px" height="250px" /></a>`,
-    );
-  }
   return rows.join("\n");
 }
 
@@ -78,7 +86,7 @@ async function github(path, init = {}) {
       `GitHub ${init.method ?? "GET"} ${path}: ${response.status} ${await response.text()}`,
     );
   }
-  return response.json();
+  return response.status === 204 ? null : response.json();
 }
 
 async function main({ env = process.env, request = github } = {}) {
@@ -87,38 +95,62 @@ async function main({ env = process.env, request = github } = {}) {
   if (!repository || !pr || !env.GH_TOKEN) {
     throw new Error("GITHUB_REPOSITORY, PR and GH_TOKEN are required.");
   }
-  if (env.GROUP) {
-    if (!env.HEAD_SHA) throw new Error("HEAD_SHA is required for update comments.");
+  if (!env.ANDROID_FINGERPRINT && !env.IOS_FINGERPRINT) return;
+  const hasUpdate = Boolean(env.ANDROID_GROUP || env.IOS_GROUP);
+  if (!hasUpdate && !env.ANDROID_CLIENT && !env.IOS_CLIENT) return;
+  if (hasUpdate && !env.PR_HEAD_SHA)
+    throw new Error("PR_HEAD_SHA is required for update comments.");
+  if (hasUpdate) {
     const pull = await request(`/repos/${repository}/pulls/${pr}`);
-    if (pull.head.sha !== env.HEAD_SHA) {
-      console.log("Skipping preview update for an outdated PR head.");
-      return;
+    if (pull.head.sha !== env.PR_HEAD_SHA) {
+      if (!env.ANDROID_CLIENT && !env.IOS_CLIENT) return;
+      env = { ...env, ANDROID_GROUP: "", IOS_GROUP: "" };
     }
   }
   const runUrl = `${env.GITHUB_SERVER_URL}/${repository}/actions/runs/${env.GITHUB_RUN_ID}`;
-  let existing = null;
-  for (let page = 1; existing === null; page++) {
+  const previews = [];
+  for (let page = 1; ; page++) {
     const comments = await request(
       `/repos/${repository}/issues/${pr}/comments?per_page=100&page=${page}`,
     );
-    // Only this workflow's own comment: anyone can post the marker, and nobody else's is editable.
-    existing =
-      comments.find(
+    previews.push(
+      ...comments.filter(
         (comment) =>
-          comment.user?.login === "github-actions[bot]" && readState(comment.body) !== null,
-      ) ?? null;
+          comment.user?.login === "github-actions[bot]" &&
+          (readState(comment.body) !== null ||
+            comment.body?.startsWith(
+              `<!-- continuous-deploy-fingerprint-projectId:${PROJECT_ID} -->`,
+            )),
+      ),
+    );
     if (comments.length < 100) break;
   }
-  const state = mergeState(readState(existing?.body), {
-    fingerprint: env.FINGERPRINT ?? "",
-    client: env.CLIENT ?? "",
-    group: env.GROUP ?? "",
-  });
+  const existing =
+    previews.find((comment) => comment.body.startsWith("<!-- mobile-preview ")) ?? previews[0];
+  const state = Object.assign(
+    {},
+    ...previews.map((comment) => readState(comment.body)),
+    readState(existing?.body),
+  );
+  for (const platform of ["android", "ios"]) {
+    const prefix = platform.toUpperCase();
+    const next = {
+      fingerprint: env[`${prefix}_FINGERPRINT`] ?? "",
+      client: env[`${prefix}_CLIENT`] ?? "",
+      group: env[`${prefix}_GROUP`] ?? "",
+    };
+    if (next.fingerprint) state[platform] = mergeState(state[platform], next);
+  }
   const body = JSON.stringify({ body: render(state, runUrl) });
   if (existing) {
     await request(`/repos/${repository}/issues/comments/${existing.id}`, { method: "PATCH", body });
   } else {
     await request(`/repos/${repository}/issues/${pr}/comments`, { method: "POST", body });
+  }
+  for (const comment of previews) {
+    if (comment.id !== existing?.id) {
+      await request(`/repos/${repository}/issues/comments/${comment.id}`, { method: "DELETE" });
+    }
   }
 }
 

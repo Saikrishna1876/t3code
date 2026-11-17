@@ -19,6 +19,7 @@ import { terminalEnvironment } from "../../state/terminal";
 import { useKnownTerminalSessions } from "../../state/terminalSessions";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../../terminalUiStateStore";
+import { closingTerminalIds, holdTerminalIdWhileClosing } from "./closingTerminals";
 
 /** Where a new terminal starts. Omitted fields fall back to the thread's project and worktree. */
 export interface TerminalLaunchLocation {
@@ -66,6 +67,7 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
       ...panelSurfaces.flatMap((surface) =>
         surface.kind === "terminal" ? surface.terminalIds : [],
       ),
+      ...(threadRef ? closingTerminalIds(threadRef) : []),
     ]);
     const canReuse =
       knownSessions !== null &&
@@ -131,7 +133,7 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
     if (!target || !readEnvironmentScope(target.environmentId, AuthTerminalOperateScope)) return;
     const environmentId = target.environmentId;
     const threadId = target.threadId;
-    void (async () => {
+    void holdTerminalIdWhileClosing(target, terminalId, async () => {
       const closeResult = await closeTerminalCommand({
         environmentId,
         input: { threadId, terminalId, deleteHistory: true },
@@ -143,7 +145,7 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
       ) {
         await writeTerminal({ environmentId, input: { threadId, terminalId, data: "exit\n" } });
       }
-    })();
+    });
   };
 
   const writeToTerminal = (terminalId: string, data: string) => {

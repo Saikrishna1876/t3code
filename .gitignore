@@ -51,3 +51,4 @@ node_modules/
 .pnpm-store/
 
 apps/server/dist-workspace/
+/packages/ssh/.ssh-launcher-test-*/

@@ -22,6 +22,7 @@ const threadId = ThreadId.make("discovery-thread");
 const projectId = ProjectId.make("project:mcp-test");
 const project = Schema.decodeSync(Projects.ProjectRow)({
   projectId,
+  hasCustomTitle: false,
   title: "Project",
   workspaceRoot: "/local/repo",
   defaultModelSelection: null,
