@@ -1510,10 +1510,13 @@ const make = Effect.gen(function* () {
               const changes = yield* localChangesReason(worktreePath, settings);
               if (changes !== null) return keep(changes);
             }
-            const repository = yield* worktreeRepository(worktreePath);
+            const remoteTarget = workspace ? yield* workspace.lookup(worktreePath) : null;
+            const repository = remoteTarget
+              ? threadWorkspaceRoot(thread, project.workspaceRoot)
+              : yield* worktreeRepository(worktreePath);
             if (settings.worktreeKeepWhen === "tracked-changes" && !submodules.force)
               yield* cleanupGit(worktreePath, ["clean", "-ffdx"], "git clean");
-            if (workspace && (yield* workspace.lookup(worktreePath))) {
+            if (remoteTarget) {
               yield* git.removeWorktree({
                 cwd: repository,
                 path: worktreePath,

@@ -788,6 +788,10 @@ it.effect("keeps invalid regex searches in plain mode across pages", () =>
       });
       const finder = {
         destroy: vi.fn(),
+        getScanProgressAsync: async () => ({
+          ok: true as const,
+          value: { isScanning: false, isWarmupComplete: true },
+        }),
         waitForIndexReady: vi.fn(async () => ({ ok: true as const, value: true })),
         grepAsync: async (query: string, options?: GrepOptions) => grep(query, options),
       } as unknown as FileFinder;
