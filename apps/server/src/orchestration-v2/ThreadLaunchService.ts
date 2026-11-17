@@ -1431,7 +1431,13 @@ const make = Effect.gen(function* () {
                     }
                   : workspaceStrategy;
             yield* schedulePreparation(
-              { ...input, workspaceStrategy: preparationStrategy },
+              {
+                ...input,
+                codespaceName: current
+                  ? (current.thread.codespaceName ?? null)
+                  : (input.codespaceName ?? null),
+                workspaceStrategy: preparationStrategy,
+              },
               threadId,
               runId,
             );

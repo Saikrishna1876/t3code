@@ -3068,7 +3068,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               worktreePath: nextWorktreePath,
               codespaceName:
                 options.codespaceName === undefined
-                  ? workspaceChanged
+                  ? nextProjectRef.environmentId !== existing.environmentId
                     ? null
                     : (existing.codespaceName ?? null)
                   : options.codespaceName,

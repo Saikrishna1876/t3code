@@ -84,10 +84,34 @@ describe("DesktopUpdates", () => {
     "checks upstream only after the fork reports no update and never downloads upstream",
     () =>
       Effect.gen(function* () {
-        for (const available of [true, false, "missing-channel", "wrong-channel"] as const) {
+        for (const available of [
+          true,
+          false,
+          "missing-channel",
+          "wrong-channel",
+          "download-refresh",
+        ] as const) {
           const requests: string[] = [];
+          const forkOffered = available === true || available === "download-refresh";
+          let checks = 0;
           const harness = makeHarness({
-            updateAvailable: available === true || available === "wrong-channel",
+            ...(available === "download-refresh"
+              ? {}
+              : { updateAvailable: available === true || available === "wrong-channel" }),
+            ...(forkOffered || available === "wrong-channel"
+              ? {
+                  checkForUpdates: Effect.sync(() => {
+                    checks++;
+                    if (available === "download-refresh" && checks > 1)
+                      harness.emit("update-not-available");
+                    else
+                      harness.emit("update-available", {
+                        version:
+                          available === "wrong-channel" ? "1.3.0-nightly.20261114.1" : "1.2.4",
+                      });
+                  }),
+                }
+              : {}),
             offeredVersion: available === "wrong-channel" ? "1.3.0-nightly.20261114.1" : "1.2.4",
             ...(available === "missing-channel"
               ? {
@@ -104,6 +128,7 @@ describe("DesktopUpdates", () => {
             updateRepository: "Saikrishna1876/t3code",
             githubResponse: (url) => {
               requests.push(url);
+              if (url.includes("/releases?")) return [];
               return url.includes("/compare/")
                 ? { status: "behind" }
                 : { tag_name: "v1.3.0", draft: false, prerelease: false };
@@ -116,14 +141,21 @@ describe("DesktopUpdates", () => {
               const result = yield* updates.check("manual");
               assert.equal(
                 result.state.upstreamRelease?.version,
-                available === true ? undefined : "1.3.0",
+                forkOffered ? undefined : "1.3.0",
               );
-              assert.equal(requests.length, available === true ? 0 : 2);
-              assert.equal((yield* updates.download).accepted, false);
-              assert.equal(harness.downloadCount(), 0);
+              assert.equal(result.state.status, forkOffered ? "available" : "up-to-date");
+              assert.equal(requests.length, forkOffered ? 0 : 2);
+              assert.equal((yield* updates.download).accepted, forkOffered);
+              assert.equal(harness.downloadCount(), available === true ? 1 : 0);
+              if (available === "download-refresh") {
+                assert.equal((yield* updates.getState).upstreamRelease?.version, "1.3.0");
+                assert.equal((yield* updates.getState).status, "up-to-date");
+              }
               if (available !== true) {
                 yield* updates.setChannel("nightly");
-                assert.equal((yield* updates.getState).upstreamRelease, undefined);
+                const afterChannel = yield* updates.getState;
+                assert.equal(afterChannel.upstreamRelease, undefined);
+                assert.equal(afterChannel.status, "up-to-date");
               }
             }).pipe(Effect.provide(harness.layer)),
           );

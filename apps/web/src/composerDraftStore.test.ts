@@ -1302,6 +1302,10 @@ describe("composerDraftStore project draft thread mapping", () => {
       { threadId },
     );
     expect(store.getDraftThread(draftId)?.codespaceName).toBe("other-computer");
+    store.setDraftThreadContext(draftId, {
+      projectRef: scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("same-environment-member")),
+    });
+    expect(store.getDraftThread(draftId)?.codespaceName).toBe("other-computer");
     store.setDraftThreadContext(draftId, { loadBalancedEnvironmentId: TEST_ENVIRONMENT_ID });
     store.setProjectDraftThreadId(remoteProjectRef, draftId, { threadId });
     expect(store.getDraftThread(draftId)).toMatchObject({

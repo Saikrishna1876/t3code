@@ -1,3 +1,4 @@
+import { isEditableFocused } from "~/lib/editableFocus";
 import { isMacPlatform } from "~/lib/utils";
 import {
   useEffect,
@@ -99,6 +100,7 @@ export function MarkdownPreview({ children }: { children: ReactNode }) {
         if (!interactive || interactive === preview) preview?.focus({ preventScroll: true });
       }}
       onKeyDown={(event) => {
+        selectRenderedContentOnSelectAll(event, content);
         if (open && event.key === "Escape" && !event.nativeEvent.isComposing) {
           event.preventDefault();
           event.stopPropagation();
@@ -125,7 +127,7 @@ export function MarkdownPreview({ children }: { children: ReactNode }) {
         onPrevious={() => setIndex((current) => stepThreadFindIndex(current, matchCount, -1))}
         onClose={close}
       />
-      <ScrollArea className="min-h-0 flex-1" onKeyDown={selectRenderedContentOnSelectAll}>
+      <ScrollArea className="min-h-0 flex-1">
         <div ref={setContent}>
           <div data-timeline-row-id="markdown-file">
             <div data-thread-find-text>
@@ -140,7 +142,10 @@ export function MarkdownPreview({ children }: { children: ReactNode }) {
   );
 }
 
-function selectRenderedContentOnSelectAll(event: ReactKeyboardEvent<HTMLElement>) {
+function selectRenderedContentOnSelectAll(
+  event: ReactKeyboardEvent<HTMLElement>,
+  content: HTMLElement | null,
+) {
   const mac = isMacPlatform(navigator.platform);
   const selectAll =
     event.key.toLowerCase() === "a" &&
@@ -150,11 +155,13 @@ function selectRenderedContentOnSelectAll(event: ReactKeyboardEvent<HTMLElement>
   // React bubbles keys from portaled children (the image dialog) through this surface.
   if (
     !selectAll ||
+    content === null ||
+    isEditableFocused(event.target) ||
     !(event.target instanceof Node) ||
     !event.currentTarget.contains(event.target)
   ) {
     return;
   }
   event.preventDefault();
-  window.getSelection()?.selectAllChildren(event.currentTarget);
+  window.getSelection()?.selectAllChildren(content);
 }

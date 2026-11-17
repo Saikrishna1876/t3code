@@ -269,10 +269,25 @@ export function PreviewView({
     runtimeTabId ? (state.byTabId[runtimeTabId]?.rect ?? null) : null,
   );
 
+  const reportNavigationError = (error: unknown) => {
+    toastManager.add({
+      type: "error",
+      title: "Could not open this address",
+      description: isPreviewUrlNormalizationError(error)
+        ? "Enter an http or https URL."
+        : error instanceof Error
+          ? error.message
+          : "An error occurred.",
+    });
+  };
+
   const navigateToResolvedUrl = async (requestedUrl: string) => {
     let resolvedUrl = requestedUrl;
     if (supportsWorkspaceUrlResolution) {
-      if (!canResolveUrl) return null;
+      if (!canResolveUrl) {
+        reportNavigationError(new Error("Workspace URL access is unavailable."));
+        return null;
+      }
       const resolution = await resolveUrl({
         environmentId: threadRef.environmentId,
         input: { threadId: threadRef.threadId, url: requestedUrl },
@@ -350,15 +365,7 @@ export function PreviewView({
         recordVisitForThread(threadRef, resolved);
       }
     } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Could not open this address",
-        description: isPreviewUrlNormalizationError(error)
-          ? "Enter an http or https URL."
-          : error instanceof Error
-            ? error.message
-            : "An error occurred.",
-      });
+      reportNavigationError(error);
     }
   };
 
@@ -372,25 +379,18 @@ export function PreviewView({
         recordVisitForThread(threadRef, next);
       }
     } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Could not open this address",
-        description: isPreviewUrlNormalizationError(error)
-          ? "Enter an http or https URL."
-          : error instanceof Error
-            ? error.message
-            : "An error occurred.",
-      });
+      reportNavigationError(error);
     }
   };
 
   const handleRefresh = () => {
     if (supportsWorkspaceUrlResolution && sourceUrl && sourceUrl !== url) {
-      void navigateToResolvedUrl(sourceUrl);
+      void navigateToResolvedUrl(sourceUrl).catch(reportNavigationError);
       return;
     }
     if (isServerTab) serverSurfaceRef.current?.reload();
-    else if (previewBridge && runtimeTabId) void previewBridge.refresh(runtimeTabId);
+    else if (previewBridge && runtimeTabId)
+      void previewBridge.refresh(runtimeTabId).catch(reportNavigationError);
   };
 
   const handleStopLoading = () => {
@@ -576,9 +576,9 @@ export function PreviewView({
                 : undefined
             : undefined,
         )
-        .catch(() => undefined);
+        .catch(reportNavigationError);
     } else {
-      void reload().catch(() => undefined);
+      void reload().catch(reportNavigationError);
     }
   };
   const moreMenuActions: PreviewMoreMenuActions | null = serverOwnsRendering

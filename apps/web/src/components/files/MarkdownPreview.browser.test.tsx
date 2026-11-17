@@ -119,6 +119,7 @@ describe("Markdown preview find", () => {
         <button data-thread-find-ignore>first match ignored</button>
       </MarkdownPreview>,
     );
+    using _platform = vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
     const host = screen.container;
     await act(async () => {
       expect(requestMarkdownFindOpen(host.querySelector("p"))).toBe(true);
@@ -140,7 +141,22 @@ describe("Markdown preview find", () => {
     await key("Escape", false, input(host));
     expect(input(host)).toBeNull();
     expect(CSS.highlights.has("t3-markdown-find-active")).toBe(false);
-    expect(document.activeElement).toBe(host.querySelector("[data-markdown-preview]"));
+    const preview = host.querySelector<HTMLElement>("[data-markdown-preview]")!;
+    expect(document.activeElement).toBe(preview);
+    window.getSelection()?.removeAllRanges();
+    const selectAll = new KeyboardEvent("keydown", {
+      key: "a",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => {
+      preview.dispatchEvent(selectAll);
+    });
+    expect(selectAll.defaultPrevented).toBe(true);
+    expect(window.getSelection()?.toString().replace(/\s+/g, " ").trim()).toBe(
+      "First match here. first match again. first match ignored",
+    );
   });
 
   it("reveals folded Markdown and preserves chat highlights", async () => {

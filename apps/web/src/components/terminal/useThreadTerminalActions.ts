@@ -60,7 +60,7 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
     threadRef !== null && readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope);
 
   // Server lists lag and colliding ids share a PTY; without read access, suffix ids to avoid unseen sessions.
-  const allocateTerminalId = () => {
+  const allocateTerminalId = (excludedId?: string) => {
     const ids = new Set([
       ...(knownSessions ?? []).map((session) => session.target.terminalId),
       ...drawerTerminalIds,
@@ -69,6 +69,7 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
       ),
       ...(threadRef ? closingTerminalIds(threadRef) : []),
     ]);
+    if (excludedId) ids.add(excludedId);
     const canReuse =
       knownSessions !== null &&
       threadRef !== null &&
@@ -104,10 +105,10 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
     );
     const terminalId =
       input.terminalId &&
-      (!requestedSession?.state.summary ||
-        terminalMatchesWorkspace(requestedSession.state.summary.cwd, projectRoot))
+      requestedSession?.state.summary &&
+      terminalMatchesWorkspace(requestedSession.state.summary.cwd, projectRoot)
         ? input.terminalId
-        : allocateTerminalId();
+        : allocateTerminalId(input.terminalId);
     input.place(terminalId);
     const result = openTerminalCommand({
       environmentId: threadRef.environmentId,

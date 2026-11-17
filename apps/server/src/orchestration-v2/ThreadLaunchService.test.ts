@@ -1,3 +1,4 @@
+import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import * as DocumentText from "../provider/DocumentText.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
@@ -27,6 +28,8 @@ import {
   ScheduledTaskId,
   type ServerProvider,
   ThreadId,
+  threadWorkspaceRoot,
+  codespaceWorkspaceRoot,
   TextGenerationError,
   ServerSettingsError,
   VcsProcessExitError,
@@ -123,6 +126,7 @@ const claudeAdapter = {
 } as ProviderAdapter.ProviderAdapterV2["Service"];
 
 interface HarnessOptions {
+  readonly codespaceName?: string | null;
   readonly closeTerminal?: TerminalManager.TerminalManager["Service"]["close"];
   readonly adapters?: ReadonlyArray<ProviderAdapter.ProviderAdapterV2["Service"]>;
   readonly managedFolders?: Layer.Layer<ManagedProjectFolders.ManagedProjectFolders>;
@@ -151,7 +155,33 @@ function makeHarness(options: HarnessOptions = {}) {
   );
   const layerServerSettings = ServerSettings.layerTest(options.serverSettings);
   const layerReceipts = CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase));
+  const codespaceName = options.codespaceName;
+  const workspaceRoot = codespaceName ? codespaceWorkspaceRoot("/repo", codespaceName) : null;
+  const layerWorkspace =
+    codespaceName && workspaceRoot
+      ? Layer.mock(CodespacesWorkspace.CodespacesWorkspace)({
+          bindings: Effect.succeed([
+            { projectId, name: codespaceName, localRoot: workspaceRoot, hostRoot: "/repo" },
+          ]),
+          lookup: () =>
+            Effect.succeed({
+              projectId,
+              name: codespaceName,
+              localRoot: workspaceRoot,
+              hostRoot: "/repo",
+              remoteCwd: "/remote/repo",
+              executor: {
+                name: codespaceName,
+                remoteRoot: "/remote/repo",
+                workerUrl: "http://worker",
+                execServerUrl: "http://exec",
+                token: "test",
+              },
+            }),
+        })
+      : Layer.empty;
   const layerThreadManagement = ThreadManagement.layer.pipe(
+    Layer.provide(layerWorkspace),
     Layer.provide(layerOrchestrator),
     Layer.provide(layerServerSettings),
     Layer.provide(layerReceipts),
@@ -161,7 +191,11 @@ function makeHarness(options: HarnessOptions = {}) {
     options.createWorktree ??
       ((input) =>
         Effect.succeed({
-          worktree: { path: "/repo-worktrees/feature", refName: input.newRefName, headSha: "abc" },
+          worktree: {
+            path: workspaceRoot ? `${workspaceRoot}/feature` : "/repo-worktrees/feature",
+            refName: input.newRefName,
+            headSha: "abc",
+          },
         } as never)),
   );
   const renameBranch = vi.fn(
@@ -2312,14 +2346,15 @@ it.effect(
     }),
 );
 
-it.effect(
-  "schedules an accepted preparing message exactly once, from its accepted worktree base",
-  () =>
+it.effect.each([null, "cloud-computer"])(
+  "schedules an accepted preparing message exactly once, from its accepted worktree base on %s",
+  (codespaceName) =>
     Effect.gen(function* () {
       const setupEntered = yield* Deferred.make<void>();
       const allowSetup = yield* Deferred.make<void>();
       const fetched: Array<string> = [];
       const harness = makeHarness({
+        codespaceName,
         fetchWorktreeBaseCommit: ({ refName }) =>
           Effect.sync(() => {
             fetched.push(refName);
@@ -2345,6 +2380,7 @@ it.effect(
 
         yield* threads.dispatch({
           type: "thread.create",
+          codespaceName,
           commandId: input.commandId,
           threadId: input.threadId,
           projectId: input.projectId,
@@ -2386,6 +2422,10 @@ it.effect(
         assert.isTrue(second.resumed);
         assert.equal(harness.runSetup.mock.calls.length, 1);
         assert.deepEqual(fetched, ["main"]);
+        assert.equal(
+          harness.createWorktree.mock.calls[0]?.[0].cwd,
+          threadWorkspaceRoot(preparing.thread, "/repo"),
+        );
         yield* Deferred.succeed(allowSetup, undefined);
       }).pipe(Effect.provide(harness.layer));
     }),

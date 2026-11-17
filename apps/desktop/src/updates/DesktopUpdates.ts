@@ -596,13 +596,33 @@ export const make = Effect.gen(function* () {
     yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);
     yield* logUpdaterInfo("no fork updates available");
   }).pipe(Effect.withSpan("desktop.updates.handleUpdateNotAvailable"));
-  // The flag is shared updater state, so callers flip it only while holding a reservation.
+  // Native no-update events may be the only result when the updater returns null.
+  let checkingUpdater = false;
+  let checkReportedNoUpdate = false;
   const runUpdaterCheck = Effect.fn("desktop.updates.runUpdaterCheck")(function* (
     allowDowngrade: boolean,
   ) {
     const restoreDowngrade = yield* electronUpdater.allowDowngrade;
     if (allowDowngrade) yield* electronUpdater.setAllowDowngrade(true);
+    const state = yield* Ref.get(updateStateRef);
+    checkingUpdater = true;
+    checkReportedNoUpdate = false;
     return yield* electronUpdater.checkForUpdates.pipe(
+      Effect.tap(
+        Effect.fn("desktop.updates.checkUpstreamFallback")(function* (result) {
+          if (
+            checkReportedNoUpdate ||
+            (result && (!result.available || !(yield* offerable(result.version, state))))
+          ) {
+            yield* handleUpdateNotAvailable;
+          }
+        }),
+      ),
+      Effect.ensuring(
+        Effect.sync(() => {
+          checkingUpdater = false;
+        }),
+      ),
       Effect.ensuring(electronUpdater.setAllowDowngrade(restoreDowngrade).pipe(Effect.ignore)),
     );
   });
@@ -637,13 +657,6 @@ export const make = Effect.gen(function* () {
       yield* logUpdaterInfo("checking for updates", { reason });
 
       return yield* runUpdaterCheck(allowDowngrade).pipe(
-        Effect.tap(
-          Effect.fn("desktop.updates.checkUpstreamFallback")(function* (result) {
-            if (result && (!result.available || !(yield* offerable(result.version, state)))) {
-              yield* handleUpdateNotAvailable;
-            }
-          }),
-        ),
         Effect.as(true),
         Effect.catchTags({
           ElectronUpdaterCheckForUpdatesError: Effect.fn(
@@ -1380,6 +1393,10 @@ export const make = Effect.gen(function* () {
         runEffect(handleUpdateAvailable(info));
       });
       yield* electronUpdater.on("update-not-available", () => {
+        if (checkingUpdater) {
+          checkReportedNoUpdate = true;
+          return;
+        }
         runEffect(
           Effect.gen(function* () {
             const action = yield* activeUpdateAction;

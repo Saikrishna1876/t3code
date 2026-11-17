@@ -328,11 +328,15 @@ describe("PreviewView", () => {
     setup();
     mocks.supportsCodespaces = true;
     mocks.canResolveUrl = false;
-    await using _screen = await render(view());
+    mocks.sourceUrl = "http://localhost:4173/page";
+    await using _screen = await render(<ToastProvider timeout={0}>{view()}</ToastProvider>);
     await expect.element(page.getByPlaceholder("Search or enter URL")).toBeDisabled();
     expect(mocks.resolveUrl).not.toHaveBeenCalled();
     expect(mocks.navigate).not.toHaveBeenCalled();
     expect(mocks.openPreviewSession).not.toHaveBeenCalled();
+    await userEvent.click(page.getByRole("button", { name: "Refresh", exact: true }));
+    await expect.element(page.getByText("Workspace URL access is unavailable.")).toBeVisible();
+    expect(mocks.refresh).not.toHaveBeenCalled();
   });
   it("resolves workspace URLs only when the host advertises Codespaces", async () => {
     setup();
@@ -360,7 +364,7 @@ describe("PreviewView", () => {
         _tag: "Success",
         value: "http://127.0.0.1:61000/page",
       });
-      await using _screen = await render(view());
+      await using _screen = await render(<ToastProvider timeout={0}>{view()}</ToastProvider>);
       if (trigger === "button") {
         await userEvent.click(page.getByRole("button", { name: "Refresh", exact: true }));
       } else if (trigger === "desktop shortcut") {
@@ -378,6 +382,16 @@ describe("PreviewView", () => {
         "http://127.0.0.1:61000/page",
       );
       expect(mocks.refresh).not.toHaveBeenCalled();
+      mocks.navigate.mockRejectedValueOnce(new Error("Navigation failed"));
+      if (trigger === "button") {
+        await userEvent.click(page.getByRole("button", { name: "Refresh", exact: true }));
+      } else if (trigger === "desktop shortcut") {
+        await act(async () => dispatchPreviewAction("refresh"));
+      } else {
+        await userEvent.click(page.getByRole("button", { name: "Preview menu" }));
+        await userEvent.click(page.getByRole("menuitem", { name: "Hard reload" }));
+      }
+      await expect.element(page.getByText("Navigation failed")).toBeVisible();
     },
   );
 
