@@ -3407,7 +3407,12 @@ const make = Effect.gen(function* () {
     } satisfies ServerBrowserViewer;
   });
 
-  yield* manager.events.pipe(Stream.runForEach(mirrorManagerEvent), Effect.forkScoped);
+  // A tab can open as soon as the server layer is ready.
+  const managerEvents = yield* manager.subscribeEvents;
+  yield* Stream.fromSubscription(managerEvents).pipe(
+    Stream.runForEach(mirrorManagerEvent),
+    Effect.forkScoped,
+  );
   if (
     !PreviewBrowserHost.sandboxDisabled(yield* HostProcess.Environment) &&
     (yield* PreviewBrowserHost.sandboxBlocked)
