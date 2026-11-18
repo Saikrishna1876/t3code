@@ -1,6 +1,8 @@
 import { expect, it } from "@effect/vitest";
 import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Cause from "effect/Cause";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import { McpSchema, McpServer } from "effect/ai";
@@ -103,7 +105,12 @@ it.effect("registers four host tools and enforces thread permissions before host
           client: { sessionId: "readonly", label: "Read only", access: "read-only" },
         })).isError,
       ).toBe(true);
-      expect((yield* call("host_skills_list", { ...scope, thread: undefined })).isError).toBe(true);
+      const outside = yield* call("host_skills_list", { ...scope, thread: undefined }).pipe(
+        Effect.exit,
+      );
+      expect(Exit.isFailure(outside) && Cause.pretty(outside.cause)).toContain(
+        "Tool 'host_skills_list' not found",
+      );
       expect((yield* call("host_skills_list", { ...scope, capabilities: new Set() })).isError).toBe(
         true,
       );

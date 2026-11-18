@@ -168,7 +168,7 @@ describe("runMigrations", () => {
       assert.isTrue(Exit.isFailure(exit));
       assert.deepStrictEqual(
         yield* history,
-        migrationManifest.filter(([id]) => id <= 84),
+        migrationManifest.filter(([id]) => id <= 85),
       );
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
