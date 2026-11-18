@@ -810,8 +810,9 @@ function withConfigReadBeforeTurnStart(
 ): Array<CodexReplay.CodexAppServerReplayEntry> {
   const result: Array<CodexReplay.CodexAppServerReplayEntry> = [];
   let offset = 0;
+  let configRead = false;
   let clientIds = new Map<number, number>();
-  for (const entry of entries) {
+  for (const [index, entry] of entries.entries()) {
     const frame = entry.type === "runtime_exit" ? undefined : entry.frame;
     if (!Predicate.isObject(frame) || typeof frame.id !== "number") {
       result.push(entry);
@@ -820,11 +821,23 @@ function withConfigReadBeforeTurnStart(
     if (entry.type === "expect_outbound" && typeof frame.method === "string") {
       if (frame.method === "initialize") {
         offset = 0;
+        configRead = false;
         clientIds = new Map();
       }
-      if (frame.method === "turn/start") {
+      const nextRequest = entries.slice(index + 1).find((next) => next.type === "expect_outbound");
+      const nextFrame =
+        nextRequest && nextRequest.type === "expect_outbound" ? nextRequest.frame : undefined;
+      const turnFrame =
+        frame.method === "turn/start"
+          ? frame
+          : frame.method === "environment/add" &&
+              Predicate.isObject(nextFrame) &&
+              nextFrame.method === "turn/start"
+            ? nextFrame
+            : undefined;
+      if (turnFrame && !configRead) {
         const id = frame.id + offset;
-        const params = Predicate.isObject(frame.params) ? frame.params : {};
+        const params = Predicate.isObject(turnFrame.params) ? turnFrame.params : {};
         result.push(
           {
             type: "expect_outbound",
@@ -838,7 +851,9 @@ function withConfigReadBeforeTurnStart(
           },
         );
         offset += 1;
+        configRead = true;
       }
+      if (frame.method === "turn/start") configRead = false;
       clientIds.set(frame.id, frame.id + offset);
       result.push(withReplayRequestId(entry, frame.id + offset));
       continue;
@@ -12122,7 +12137,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                         approvalPolicy: "never",
                         approvalsReviewer: "user",
                         sandboxPolicy: { type: "dangerFullAccess" },
-                        summary: "detailed",
+                        summary: "auto",
                         collaborationMode: { mode: "default", settings: { model: "gpt-5.4" } },
                         environments: [
                           {

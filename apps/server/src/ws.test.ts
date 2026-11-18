@@ -2746,6 +2746,7 @@ it.live.each(["thread", "shell"] as const)(
 it.effect("thread launch RPC preserves the selected computer for every workspace strategy", () =>
   Effect.gen(function* () {
     const launches = yield* Queue.unbounded<ThreadLaunchService.ThreadLaunchInput>();
+    const failed = yield* Deferred.make<never, string>();
     const services = Layer.mergeAll(
       layerUnusedConfigRpcServices,
       Layer.mock(ExternalLauncher.ExternalLauncher)({}),
@@ -2759,6 +2760,7 @@ it.effect("thread launch RPC preserves the selected computer for every workspace
       Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
       Layer.mock(ServerRuntimeStartup.ServerRuntimeStartup)({ enqueueCommand: (effect) => effect }),
       Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+        checkWorktreeBase: () => Effect.void,
         launch: (input) => Queue.offer(launches, input).pipe(Effect.andThen(Effect.never)),
       }),
     );
@@ -2768,7 +2770,13 @@ it.effect("thread launch RPC preserves the selected computer for every workspace
           (rpc) => rpc._tag === ORCHESTRATION_V2_WS_METHODS.launchThread,
         ),
       ),
-      { ...WS_RPC_SERVER_OPTIONS, onFromServer: () => Effect.void },
+      {
+        ...WS_RPC_SERVER_OPTIONS,
+        onFromServer: (response) =>
+          response._tag === "Exit" && Exit.isFailure(response.exit)
+            ? Deferred.fail(failed, Cause.pretty(response.exit.cause))
+            : Effect.void,
+      },
     ).pipe(
       Effect.provide(
         layerWsRpc(
@@ -2813,7 +2821,7 @@ it.effect("thread launch RPC preserves the selected computer for every workspace
           },
           headers: Headers.empty,
         });
-        const launch = yield* Queue.take(launches);
+        const launch = yield* Effect.raceFirst(Queue.take(launches), Deferred.await(failed));
         assert.equal(launch.codespaceName, codespaceName);
         assert.deepEqual(launch.workspaceStrategy, workspaceStrategy);
         yield* server.write(0, { _tag: "Interrupt", requestId: id, interruptors: [] });
