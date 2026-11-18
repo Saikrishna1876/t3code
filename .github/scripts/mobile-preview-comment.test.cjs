@@ -174,9 +174,15 @@ test("publishing consolidates platform comments and preserves unrelated comments
 test("preview comments serialize trusted writers without granting build jobs comment access", () => {
   for (const name of ["mobile-eas-preview", "mobile-eas-preview-fork"]) {
     const workflow = readFileSync(join(__dirname, `../workflows/${name}.yml`), "utf8");
-    const [builds, writer] = workflow.split("  comment:\n");
+    const [jobs, writer] = workflow.split("  comment:\n");
+    const builds = jobs.slice(jobs.indexOf(name.endsWith("-fork") ? "  preview:\n" : "  ios:\n"));
     assert.doesNotMatch(builds, /pull-requests: write/);
-    assert.doesNotMatch(builds, /^      GH_TOKEN:/m);
+    assert.doesNotMatch(builds, /^    env:\n(?:      .*\n)*      GH_TOKEN:/m);
+    if (name.endsWith("-fork")) {
+      assert.match(jobs, /  consume:[\s\S]*pull-requests: write/);
+      assert.match(builds, /needs: consume/);
+      assert.doesNotMatch(builds, /issues.removeLabel/);
+    }
     assert.match(
       writer,
       /group: mobile-preview-comment-\$\{\{ github.event.pull_request.number \}\}/,

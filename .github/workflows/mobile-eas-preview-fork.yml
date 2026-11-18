@@ -17,30 +17,16 @@ permissions:
   contents: read
 
 jobs:
-  preview:
-    name: EAS Preview
+  consume:
+    name: Consume deployment label
     if: >-
       github.event.pull_request.head.repo.full_name != github.repository &&
       github.event.label.name == '🚀 Mobile Continuous Deployment'
-    runs-on: ${{ github.repository == 'pingdotgg/t3code' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
-    concurrency:
-      group: mobile-eas-preview-fork-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
+    runs-on: ubuntu-24.04
     permissions:
-      contents: read
+      pull-requests: write
     outputs:
-      ios_group: ${{ steps.ios_update.outputs.group }}
-      ios_client: ${{ steps.ios_client.outputs.link }}
-      group: ${{ steps.update.outputs.group }}
-      client: ${{ steps.client.outputs.link }}
-      ios_build: ${{ steps.ios_client.outputs.build }}
-      ios_fingerprint: ${{ steps.ios_client.outputs.fingerprint }}
-      build: ${{ steps.client.outputs.build }}
-      fingerprint: ${{ steps.client.outputs.fingerprint }}
-    env:
-      APP_VARIANT: preview
-      NODE_OPTIONS: --max-old-space-size=8192
-      MOBILE_VERSION_POLICY: fingerprint
+      consumed: ${{ steps.consume.outputs.consumed }}
     steps:
       # If a maintainer removed the label first, that removal wins.
       - id: consume
@@ -62,9 +48,34 @@ jobs:
               core.setOutput("consumed", "false");
             }
 
+  preview:
+    needs: consume
+    name: EAS Preview
+    if: >-
+      github.event.pull_request.head.repo.full_name != github.repository &&
+      needs.consume.outputs.consumed == 'true'
+    runs-on: ${{ github.repository == 'pingdotgg/t3code' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
+    concurrency:
+      group: mobile-eas-preview-fork-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    outputs:
+      ios_group: ${{ steps.ios_update.outputs.group }}
+      ios_client: ${{ steps.ios_client.outputs.link }}
+      group: ${{ steps.update.outputs.group }}
+      client: ${{ steps.client.outputs.link }}
+      ios_build: ${{ steps.ios_client.outputs.build }}
+      ios_fingerprint: ${{ steps.ios_client.outputs.fingerprint }}
+      build: ${{ steps.client.outputs.build }}
+      fingerprint: ${{ steps.client.outputs.fingerprint }}
+    env:
+      APP_VARIANT: preview
+      NODE_OPTIONS: --max-old-space-size=8192
+      MOBILE_VERSION_POLICY: fingerprint
+    steps:
       - id: expo-token
         name: Check for EXPO_PREVIEW_TOKEN
-        if: steps.consume.outputs.consumed == 'true'
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_PREVIEW_TOKEN }}
         run: |

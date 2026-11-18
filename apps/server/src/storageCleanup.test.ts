@@ -738,11 +738,18 @@ const runCleanupTest = <A, E>(
 const legacyCheckpointRef = (threadId: string, turn: number) =>
   `refs/t3/checkpoints/${Base64Url.encode(threadId)}/turn/${turn}`;
 
-const checkpointCleanupFixture = Effect.fn("test.checkpointCleanupFixture")(function* () {
+const checkpointCleanupFixture = Effect.fn("test.checkpointCleanupFixture")(function* (
+  remote = false,
+) {
   const sql = yield* SqlClient.SqlClient;
   const git = yield* GitVcsDriver.GitVcsDriver;
-  const fixture = yield* cleanupFixture(DEFAULT_SERVER_SETTINGS.storageCleanup, false, sql);
-  const { repo, worktree, command } = fixture;
+  const fixture = yield* cleanupFixture(DEFAULT_SERVER_SETTINGS.storageCleanup, remote, sql);
+  const { repo, worktree } = fixture;
+  const command = (cwd: string, args: string[]) =>
+    fixture.command(
+      cwd === repo ? fixture.physicalRepo : cwd === worktree ? fixture.physicalWorktree : cwd,
+      args.map((arg) => (arg === worktree ? fixture.physicalWorktree : arg)),
+    );
   const timestamp = DateTime.formatIso(at(0));
   yield* sql`INSERT INTO projection_projects ${sql.insert({
     project_id: "project-1",
@@ -799,34 +806,36 @@ const checkpointCleanupFixture = Effect.fn("test.checkpointCleanupFixture")(func
     git
       .execute({
         operation: "cleanup-test.list-checkpoints",
-        cwd: repo,
+        cwd: fixture.physicalRepo,
         args: ["for-each-ref", "--format=%(refname)", "refs/t3/"],
         maxOutputBytes: 16 * 1024 * 1024,
       })
       .pipe(Effect.map(({ stdout }) => stdout.trim().split("\n").filter(Boolean).sort()));
-  return { ...fixture, sql, addThread, listRefs };
+  return { ...fixture, command, sql, addThread, listRefs };
 });
 
 describe("checkpoint ref cleanup", () => {
-  it.live("prunes refs owned by deleted threads after their worktree is removed", () =>
-    runCleanupTest(
-      Effect.gen(function* () {
-        const { service, repo, worktree, command, addThread, listRefs } =
-          yield* checkpointCleanupFixture();
-        yield* addThread("deleted", { deleted: true });
-        yield* addThread("imported-deleted", { deleted: true, legacyOnly: true });
-        const retained = [
-          ...(yield* addThread("active")),
-          ...(yield* addThread("archived", { archived: true })),
-          legacyCheckpointRef("unknown-owner", 0),
-        ];
-        yield* command(repo, ["update-ref", retained.at(-1)!, "HEAD"]);
-        yield* command(repo, ["pack-refs", "--all"]);
-        yield* command(repo, ["worktree", "remove", worktree]);
-        yield* service.runNow;
-        expect(yield* listRefs()).toEqual(retained.sort());
-      }).pipe(Effect.provide(Sqlite.layerMemory)),
-    ),
+  it.live.each([false, true])(
+    "prunes refs owned by deleted threads after their worktree is removed, remote=%s",
+    (remote) =>
+      runCleanupTest(
+        Effect.gen(function* () {
+          const { service, repo, worktree, command, addThread, listRefs } =
+            yield* checkpointCleanupFixture(remote);
+          yield* addThread("deleted", { deleted: true });
+          yield* addThread("imported-deleted", { deleted: true, legacyOnly: true });
+          const retained = [
+            ...(yield* addThread("active")),
+            ...(yield* addThread("archived", { archived: true })),
+            legacyCheckpointRef("unknown-owner", 0),
+          ];
+          yield* command(repo, ["update-ref", retained.at(-1)!, "HEAD"]);
+          yield* command(repo, ["pack-refs", "--all"]);
+          yield* command(repo, ["worktree", "remove", worktree]);
+          yield* service.runNow;
+          expect(yield* listRefs()).toEqual(retained.sort());
+        }).pipe(Effect.provide(Sqlite.layerMemory)),
+      ),
   );
 
   it.live("keeps deleted fork ancestry while a live or archived descendant needs it", () =>
@@ -3787,7 +3796,7 @@ describe("storage cleanup reports and local file policies", () => {
       ),
   );
 
-  it.live("still removes a worktree when measuring its size fails", () =>
+  it.live("keeps a worktree when its filesystem cannot be fully inspected", () =>
     runCleanupTest(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -3798,9 +3807,14 @@ describe("storage cleanup reports and local file policies", () => {
           }),
         );
         const report = yield* service.runNow;
-        expect(report.entries[0]).toMatchObject({ outcome: "removed", bytes: null, files: null });
+        expect(report.entries[0]).toMatchObject({
+          outcome: "kept",
+          reason: "Worktree could not be fully inspected",
+          bytes: null,
+          files: null,
+        });
         expect(report.bytesFreed).toBe(0);
-        expect(yield* fs.exists(worktree)).toBe(false);
+        expect(yield* fs.exists(worktree)).toBe(true);
       }),
     ),
   );

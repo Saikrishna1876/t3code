@@ -1610,6 +1610,7 @@ const make = Effect.gen(function* () {
     const rows = yield* sql<{
       threadId: string;
       worktreePath: string | null;
+      codespaceName: string | null;
       workspaceRoot: string | null;
       scopeId: string | null;
       cwd: string | null;
@@ -1624,6 +1625,7 @@ const make = Effect.gen(function* () {
       )
       SELECT t.thread_id AS "threadId",
         json_extract(t.payload_json, '$.worktreePath') AS "worktreePath",
+        json_extract(t.payload_json, '$.codespaceName') AS "codespaceName",
         p.workspace_root AS "workspaceRoot", s.scope_id AS "scopeId",
         json_extract(s.payload_json, '$.cwd') AS cwd
       FROM orchestration_v2_projection_threads t
@@ -1650,7 +1652,11 @@ const make = Effect.gen(function* () {
         );
       }
       // A worktree may already be gone; its refs live in the shared repository.
-      for (const cwd of [row.cwd, row.worktreePath, row.workspaceRoot]) {
+      for (const cwd of [
+        row.cwd,
+        row.worktreePath,
+        row.workspaceRoot === null ? null : threadWorkspaceRoot(row, row.workspaceRoot),
+      ]) {
         if (cwd === null) continue;
         const key = path.resolve(cwd);
         const owned = targets.get(key) ?? new Set<string>();
@@ -1661,7 +1667,7 @@ const make = Effect.gen(function* () {
     const repositories = new Map<string, { cwd: string; prefixes: Set<string> }>();
     for (const [cwd, prefixes] of targets) {
       yield* Effect.gen(function* () {
-        if (!(yield* fs.exists(cwd))) return;
+        if (!(yield* worktreeFs.exists(cwd))) return;
         const result = yield* git.execute({
           operation: "StorageCleanup.checkpointRepository",
           cwd,
@@ -1669,7 +1675,10 @@ const make = Effect.gen(function* () {
           allowNonZeroExit: true,
         });
         if (result.exitCode !== 0) return;
-        const commonDir = yield* fs.realPath(result.stdout.trim());
+        const target = workspace ? yield* workspace.lookup(cwd) : null;
+        const commonDir = target
+          ? `${target.name}\0${result.stdout.trim()}`
+          : yield* fs.realPath(result.stdout.trim());
         const repository = repositories.get(commonDir) ?? { cwd, prefixes: new Set<string>() };
         for (const prefix of prefixes) repository.prefixes.add(prefix);
         repositories.set(commonDir, repository);
