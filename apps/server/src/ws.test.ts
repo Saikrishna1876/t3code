@@ -2747,6 +2747,7 @@ it.effect("thread launch RPC preserves the selected computer for every workspace
   Effect.gen(function* () {
     const launches = yield* Queue.unbounded<ThreadLaunchService.ThreadLaunchInput>();
     const failed = yield* Deferred.make<never, string>();
+    const replies = yield* Queue.unbounded<RpcMessage.RequestId>();
     const services = Layer.mergeAll(
       layerUnusedConfigRpcServices,
       Layer.mock(ExternalLauncher.ExternalLauncher)({}),
@@ -2773,8 +2774,11 @@ it.effect("thread launch RPC preserves the selected computer for every workspace
       {
         ...WS_RPC_SERVER_OPTIONS,
         onFromServer: (response) =>
-          response._tag === "Exit" && Exit.isFailure(response.exit)
-            ? Deferred.fail(failed, Cause.pretty(response.exit.cause))
+          response._tag === "Exit"
+            ? (Exit.isFailure(response.exit) && !Cause.hasInterruptsOnly(response.exit.cause)
+                ? Deferred.fail(failed, Cause.pretty(response.exit.cause))
+                : Effect.void
+              ).pipe(Effect.andThen(Queue.offer(replies, response.requestId)), Effect.asVoid)
             : Effect.void,
       },
     ).pipe(
@@ -2825,6 +2829,8 @@ it.effect("thread launch RPC preserves the selected computer for every workspace
         assert.equal(launch.codespaceName, codespaceName);
         assert.deepEqual(launch.workspaceStrategy, workspaceStrategy);
         yield* server.write(0, { _tag: "Interrupt", requestId: id, interruptors: [] });
+        assert.equal(yield* Queue.take(replies), id);
+        assert.isFalse(yield* Deferred.isDone(failed));
       }
     }
   }).pipe(
