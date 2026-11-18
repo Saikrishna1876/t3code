@@ -196,7 +196,19 @@ it.each(["drawer", "panel"] as const)(
       env: { T3CODE_PROJECT_ROOT: "/repo/.git/t3-codespaces/cloud" },
     });
     expect(fixture.close).not.toHaveBeenCalled();
+    const hostSession = fixture.sessions[0]!;
+    fixture.sessions = [];
+    await screen.rerender(<Harness surface={surface} />);
     await userEvent.click(screen.getByRole("button", { name: "Reuse", exact: true }));
     expect(fixture.open.mock.lastCall?.[0].input.terminalId).not.toBe("term-1");
+    fixture.sessions = [
+      {
+        ...hostSession,
+        state: { summary: { ...hostSession.state.summary, cwd: "/repo/.git/t3-codespaces/cloud" } },
+      },
+    ];
+    await screen.rerender(<Harness surface={surface} />);
+    await userEvent.click(screen.getByRole("button", { name: "Reuse", exact: true }));
+    expect(fixture.open.mock.lastCall?.[0].input.terminalId).toBe("term-1");
   },
 );

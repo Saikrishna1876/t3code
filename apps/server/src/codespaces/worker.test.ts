@@ -1,3 +1,4 @@
+import * as VcsProcess from "../vcs/VcsProcess.ts";
 // @effect-diagnostics nodeBuiltinImport:off -- integration test owns real temporary repositories and HTTP boundaries.
 import { afterEach, describe, expect, it, vi } from "@effect/vitest";
 import * as NodeFSP from "node:fs/promises";
@@ -1280,7 +1281,7 @@ describe("Codespace workspace worker", () => {
           Effect.provide(
             WorkspaceSearchIndex.layer(
               WorkspaceSearchIndex.workspaceSearchIndexKey(test.remote, "content"),
-            ),
+            ).pipe(Layer.provide(VcsProcess.layer), Layer.provide(NodeServices.layer)),
           ),
         );
       }),

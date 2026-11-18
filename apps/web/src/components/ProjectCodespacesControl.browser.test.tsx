@@ -305,29 +305,37 @@ it("opens an unsent cloud setup draft while preserving existing text", async () 
   expect(state.run).not.toHaveBeenCalled();
 });
 
-it("keeps the optimistic agent toggle through a delayed subscription", async () => {
-  setup();
-  const save = deferred<AsyncResult.AsyncResult<CodespacesSnapshot, Error>>();
-  state.configure.mockReturnValue(save.promise);
-  await using screen = await render(view());
-  await act(async () => switchControl(screen.container).click());
-  expect(switchControl(screen.container).getAttribute("aria-checked")).toBe("true");
-  expect(switchControl(screen.container).matches('[aria-disabled="true"]')).toBe(true);
-  const saved = {
-    ...state.snapshot!,
-    configuration: { ...state.snapshot!.configuration, agentAccessEnabled: true },
-  };
-  await act(async () => save.resolve(AsyncResult.success(saved)));
-  expect(switchControl(screen.container).getAttribute("aria-checked")).toBe("true");
-  state.snapshot = saved;
-  await screen.rerender(view());
-  state.snapshot = {
-    ...saved,
-    configuration: { ...saved.configuration, agentAccessEnabled: false },
-  };
-  await screen.rerender(view());
-  expect(switchControl(screen.container).getAttribute("aria-checked")).toBe("false");
-});
+it.each(["ack-first", "subscription-first"] as const)(
+  "reconciles the optimistic agent toggle with %s delivery",
+  async (order) => {
+    setup();
+    const save = deferred<AsyncResult.AsyncResult<CodespacesSnapshot, Error>>();
+    state.configure.mockReturnValue(save.promise);
+    await using screen = await render(view());
+    await act(async () => switchControl(screen.container).click());
+    expect(switchControl(screen.container).getAttribute("aria-checked")).toBe("true");
+    expect(switchControl(screen.container).matches('[aria-disabled="true"]')).toBe(true);
+    const saved = {
+      ...state.snapshot!,
+      configuration: { ...state.snapshot!.configuration, agentAccessEnabled: true },
+    };
+    if (order === "ack-first") {
+      await act(async () => save.resolve(AsyncResult.success(saved)));
+      expect(switchControl(screen.container).getAttribute("aria-checked")).toBe("true");
+    }
+    state.snapshot = saved;
+    await screen.rerender(view());
+    state.snapshot = {
+      ...saved,
+      configuration: { ...saved.configuration, agentAccessEnabled: false },
+    };
+    await screen.rerender(view());
+    if (order === "subscription-first") {
+      await act(async () => save.resolve(AsyncResult.success(saved)));
+    }
+    expect(switchControl(screen.container).getAttribute("aria-checked")).toBe("false");
+  },
+);
 
 it("rolls back failed agent access saves and allows retry", async () => {
   setup();

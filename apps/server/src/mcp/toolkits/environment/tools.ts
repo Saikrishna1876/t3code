@@ -83,7 +83,7 @@ const CodespacesListTool = Tool.make("codespaces_list", {
 const CodespacesRunTool = Tool.make("codespaces_run", {
   ...shared,
   description:
-    "Manage GitHub Codespaces computers. Create uses github/codespaces-blank, project optional; projects occupy separate /workspaces folders. projectId adds its committed branch without GitHub origin/devcontainer. Optional devcontainer lifecycle needs enforceable memory limits; setup failure leaves files usable. Threads may target only their project/bound Codespace. Needs full-access caller and Settings > Environments > Codespaces agent management enabled. Create/start may cost money; delete loses unpushed files. New clientRequestId per request; reuse for retries. Durable operation: codespaces_status for completion. Project-bound lifecycle needs ALL project turns idle, including yours; force cannot bypass. Ask user to use Settings or Run on > named computer after your turn.",
+    "Manage Codespaces. Create: github/codespaces-blank, project optional. projectId transfers committed branch to separate /workspaces checkout; no GitHub origin/devcontainer. Lifecycle setup requires memory limits; failures keep files. Only this project/bound computer. Requires full-access + Settings > Environments > Codespaces agent management. Create/start may cost; delete loses unpushed files. New clientRequestId per request, reuse retries; await codespaces_status. Project lifecycle requires ALL turns idle, yours too; force cannot bypass. After turn, user can use Settings/Run on > named computer.",
   parameters: Schema.Struct({ input: CodespacesRunInput }),
   success: CodespacesOperation,
 }).annotate(Tool.Destructive, true);

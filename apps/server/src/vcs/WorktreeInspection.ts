@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFSP from "node:fs/promises";
 import { GitCommandError, type WorktreeCleanupRules } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -10,6 +12,16 @@ import { isNetworkPath } from "@t3tools/shared/path";
 import { parse as parseYaml } from "yaml";
 import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
+import { isLinkedWorktree as detectLinkedWorktree } from "./worktreeRemoval.ts";
+
+class WorktreeDirectoryReadError extends Schema.TaggedError<WorktreeDirectoryReadError>()(
+  "WorktreeDirectoryReadError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Could not read a worktree directory.";
+  }
+}
 
 class WorktreeInspection extends Context.Service<
   WorktreeInspection,
@@ -24,6 +36,14 @@ class WorktreeInspection extends Context.Service<
     readonly managedDirectory: (
       cwd: string,
     ) => Effect.Effect<{ readonly path: string }, GitCommandError>;
+    readonly isLinkedWorktree: (cwd: string) => Effect.Effect<boolean, GitCommandError>;
+    readonly inspectWorktree: (
+      cwd: string,
+      inspectRepositories?: boolean | "plain-folder",
+    ) => Effect.Effect<
+      { readonly bytes: number | null; readonly reason: string | null },
+      GitCommandError
+    >;
     readonly measure: (cwd: string) => Effect.Effect<number | null, GitCommandError>;
     readonly branchChanged: (
       cwd: string,
@@ -120,53 +140,108 @@ export const make = Effect.gen(function* () {
     Effect.orElseSucceed(() => null),
   );
 
-  const measureWorktree = Effect.fn("storageCleanup.measureWorktree")(
-    function* (worktreePath: string) {
+  const inspectWorktree = Effect.fn("storageCleanup.measureWorktree")(
+    function* (worktreePath: string, inspectRepositories: boolean | "plain-folder" = false) {
       const root = yield* fs.realPath(worktreePath);
       const skipped = yield* sharedPnpmVirtualStore(root);
+      const incomplete = { bytes: null, reason: "worktree could not be fully inspected" };
+      // A plain folder is not a checkout, so a repository at its root counts like one below it.
+      const repositories = new Set(inspectRepositories === "plain-folder" ? [] : [pathKey(root)]);
+      const moduleStores: string[] = [];
+      if (inspectRepositories === true && (yield* fs.exists(path.join(root, ".gitmodules")))) {
+        const submodules = yield* git.execute({
+          operation: "StorageCleanup.nestedRepositories",
+          cwd: root,
+          args: [
+            "submodule",
+            "foreach",
+            "--recursive",
+            "--quiet",
+            'printf "%s\\0" "$toplevel/$sm_path"',
+          ],
+          maxOutputBytes: 64 * 1024,
+        });
+        if (submodules.stdoutTruncated || submodules.stderrTruncated) return incomplete;
+        for (const submodule of submodules.stdout.split("\0").filter(Boolean)) {
+          repositories.add(pathKey(path.resolve(submodule)));
+          repositories.add(pathKey(path.resolve(submodule, ".git")));
+          moduleStores.push(pathKey(path.resolve(submodule, ".git", "modules")));
+        }
+      }
+      // Git status omits ignored repositories, and worktree remove deletes them.
+      // Registered submodules have their own recursive safety checks.
+      const isNestedRepository = (target: string, names: ReadonlyArray<string>) => {
+        const key = pathKey(target);
+        if (
+          repositories.has(key) ||
+          moduleStores.some((store) => key === store || inside(store, key))
+        )
+          return false;
+        const markers = new Set(names.map((name) => name.toLowerCase()));
+        return (
+          markers.has(".git") ||
+          (markers.has("head") && markers.has("objects") && markers.has("refs"))
+        );
+      };
       const pending = [root];
       let entries = 1;
       let bytes = 0;
       while (pending.length > 0) {
-        const target = pending.pop()!;
-        if (target === skipped) continue;
-        // Effect's stat follows links. Probe with readLink first to get lstat
-        // semantics, including skipping dangling links and directory links.
-        const isLink = yield* fs.readLink(target).pipe(
-          Effect.as(true),
-          Effect.catchIf(
-            (error) =>
-              error.cause instanceof Error &&
-              "code" in error.cause &&
-              error.cause.code === "EINVAL",
-            () => Effect.succeed(false),
-          ),
+        const inspected = yield* Effect.forEach(
+          pending.splice(-8),
+          // Untraced: this runs once per entry, and a worktree can hold millions.
+          Effect.fnUntraced(function* (target) {
+            const empty = { target, bytes: 0, names: [], children: [] };
+            const inStore = skipped !== null && (target === skipped || inside(skipped, target));
+            if (inStore && !inspectRepositories) return empty;
+            const stat = yield* fs.lstat(target);
+            if (stat.type === "SymbolicLink") return empty;
+            if ((yield* fs.realPath(target)) !== target) return null;
+            if (stat.type === "Directory") {
+              if (!inStore) {
+                const names = yield* fs.readDirectory(target);
+                return { target, bytes: 0, names, children: names };
+              }
+              // The store is excluded from reclaimed bytes; only walk its directories.
+              const dirents = yield* Effect.tryPromise({
+                try: () => NodeFSP.readdir(target, { withFileTypes: true }),
+                catch: (cause) => new WorktreeDirectoryReadError({ cause }),
+              });
+              return {
+                target,
+                bytes: 0,
+                names: dirents.map((entry) => entry.name),
+                children: dirents.filter((entry) => entry.isDirectory()).map((entry) => entry.name),
+              };
+            }
+            // Removing a shared hardlink leaves its blocks allocated.
+            if (stat.type !== "File" || Option.getOrElse(stat.nlink, () => 1n) !== 1n) return empty;
+            const bytes = Option.match(stat.blocks, {
+              onNone: () => Number(stat.size),
+              onSome: (blocks) => Number(blocks * 512n),
+            });
+            return { ...empty, bytes };
+          }),
+          { concurrency: "unbounded" },
         );
-        if (isLink) continue;
-        if ((yield* fs.realPath(target)) !== target) return null;
-        const stat = yield* fs.stat(target);
-        if (stat.type === "File") {
-          // Removing a shared hardlink leaves its blocks allocated.
-          if (Option.getOrElse(stat.nlink, () => 1n) !== 1n) continue;
-          bytes += Option.match(stat.blocks, {
-            onNone: () => Number(stat.size),
-            onSome: (blocks) => Number(blocks * 512n),
-          });
-        } else if (stat.type === "Directory") {
-          const names = yield* fs.readDirectory(target);
-          entries += names.length;
-          if (entries > 2_000_000) return null;
-          for (const name of names) {
-            const child = path.join(target, name);
-            if (!inside(root, child)) return null;
+        for (const result of inspected) {
+          if (result === null) return incomplete;
+          if (inspectRepositories && isNestedRepository(result.target, result.names))
+            return { bytes: null, reason: "contains a nested Git repository" };
+          bytes += result.bytes;
+          entries += result.names.length;
+          if (entries > 2_000_000) return incomplete;
+          for (const name of result.children) {
+            const child = path.join(result.target, name);
+            if (!inside(root, child)) return incomplete;
             pending.push(child);
           }
         }
       }
-      return bytes;
+      return { bytes, reason: null };
     },
     Effect.timeout("30 seconds"),
-    Effect.orElseSucceed(() => null),
+    Effect.orElseSucceed(() => ({ bytes: null, reason: "worktree could not be fully inspected" })),
   );
 
   // Use two small Git reads: statusDetailsLocal also diffs and counts for every worktree.
@@ -416,8 +491,23 @@ export const make = Effect.gen(function* () {
           });
           return { path: path.join(common.stdout.trim(), "t3-worktrees") };
         }),
+        isLinkedWorktree: Effect.fn("WorktreeInspection.isLinkedWorktree")((cwd: string) =>
+          guard(
+            "isLinkedWorktree",
+            cwd,
+            detectLinkedWorktree(cwd).pipe(
+              Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(false)),
+              Effect.provideService(FileSystem.FileSystem, fs),
+              Effect.provideService(Path.Path, path),
+            ),
+          ),
+        ),
+        inspectWorktree: Effect.fn("WorktreeInspection.inspectWorktree.routed")(
+          (cwd: string, inspectRepositories: boolean | "plain-folder" = false) =>
+            guard("inspectWorktree", cwd, inspectWorktree(cwd, inspectRepositories)),
+        ),
         measure: Effect.fn("WorktreeInspection.measure")((cwd: string) =>
-          guard("measure", cwd, measureWorktree(cwd)),
+          guard("measure", cwd, inspectWorktree(cwd).pipe(Effect.map((result) => result.bytes))),
         ),
         branchChanged: Effect.fn("WorktreeInspection.branchChanged")(
           (cwd: string, branch: string | null) =>

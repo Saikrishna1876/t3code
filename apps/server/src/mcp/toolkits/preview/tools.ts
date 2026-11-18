@@ -16,13 +16,14 @@ import {
   PreviewAutomationSetColorSchemeInput,
   PreviewAutomationSetColorSchemeResult,
   PreviewAutomationSnapshot,
+  PreviewAutomationSnapshotMetadata,
   PreviewAutomationStatus,
   PreviewAutomationTabTargetInput,
   PreviewAutomationWaitForInput,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as FileSystem from "effect/FileSystem";
-import { Tool, Toolkit } from "effect/ai";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
@@ -42,17 +43,23 @@ const presentationFields = { toolIcon: Schema.optional(ToolActivityIcon) };
 const PreviewActionResult = Schema.Struct(presentationFields);
 
 const browserTool = <T extends Tool.Any>(tool: T): T =>
-  tool.annotate(Tool.OpenWorld, true).annotate(Tool.Destructive, true) as T;
+  tool
+    .annotate(Tool.OpenWorld, true)
+    .annotate(Tool.Destructive, true)
+    .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients) as T;
 
 const safeBrowserTool = <T extends Tool.Any>(tool: T): T =>
-  tool.annotate(Tool.OpenWorld, true).annotate(Tool.Destructive, false) as T;
+  tool
+    .annotate(Tool.OpenWorld, true)
+    .annotate(Tool.Destructive, false)
+    .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients) as T;
 
 const readonlyBrowserTool = <T extends Tool.Any>(tool: T): T =>
   safeBrowserTool(tool).annotate(Tool.Readonly, true).annotate(Tool.Idempotent, true) as T;
 
 const PreviewStatusTool = Tool.make("preview_status", {
   description:
-    "Report preview tab state: owner, pending dialog, URL, title, loading, viewport, and size. `tabs` lists this thread's tabs. `profiles` lists logins for `preview_open`. Read any listed tab. Act only on your tab, or an unclaimed tab with no human in control.",
+    "List thread preview tabs. Automate only runtime:'server' via preview_*; never send other tabIds. Other tabs belong to user's local desktop. Tell user those tabs cannot be reached from this environment.",
   parameters: PreviewAutomationTabTargetInput,
   success: PreviewAutomationStatus,
   failure: PreviewToolFailure,
@@ -61,7 +68,8 @@ const PreviewStatusTool = Tool.make("preview_status", {
   .annotate(Tool.Title, "Get preview status")
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, true);
+  .annotate(Tool.Idempotent, true)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 // `url` already covers websites, so open only adds the dev-server target.
 const EnvironmentPortTarget = BrowserNavigationTarget.members[1];
@@ -137,7 +145,7 @@ const PreviewSetAppearanceTool = safeBrowserTool(
 export const PreviewSnapshotTool = safeBrowserTool(
   Tool.make("preview_snapshot", {
     description:
-      "Only for browser work asked this turn, including checking edits. Never verify edits unasked or repeat earlier-turn snapshots. Works on human-driven tabs. Returns state, elements, diagnostics, screenshot size. Target accessibilityTree refs with locator='aria-ref=<ref>', including frames. Navigation, snapshot or handoff expires refs. Text caps near 20 KB; preview_evaluate reads more on own/unclaimed tabs. Asked screenshot: save=true, embed ![alt](screenshotPath).",
+      "Requested browser work only, including edit checks. No unasked edits/earlier snapshots. Human-driven tabs supported. Returns state/elements/diagnostics/screenshot size. Use accessibilityTree refs, including frames: locator='aria-ref=<ref>'. Navigation/snapshot/handoff expires refs. Text ~20 KB; preview_evaluate reads more on own/unclaimed tabs. Requested screenshot: save=true, embed ![alt](screenshotPath).",
     parameters: Schema.Struct({
       ...PreviewAutomationTabTargetInput.fields,
       includeImage: Schema.optional(
@@ -151,7 +159,7 @@ export const PreviewSnapshotTool = safeBrowserTool(
         }),
       ),
     }),
-    success: PreviewAutomationSnapshot,
+    success: Schema.Union([PreviewAutomationSnapshot, PreviewAutomationSnapshotMetadata]),
     failure: PreviewToolFailure,
     dependencies,
   }).annotate(Tool.Title, "Inspect browser page"),
@@ -160,7 +168,7 @@ export const PreviewSnapshotTool = safeBrowserTool(
 const PreviewActTool = browserTool(
   Tool.make("preview_act", {
     description:
-      "Act on tab. locator='aria-ref=<ref>' from preview_snapshot, or x AND y. timeoutMs default 15000. click: button, clickCount 1–3. type: literal text; clear=true replaces. hover: menus/tooltips. select: native <select> values/labels; custom dropdown: click open then option. drag: source onto target. upload: absolute paths for reported file picker, [] cancels; locator for <input type=file>. press: key, e.g. Enter, with modifiers on focused element; click field first. scroll: tab or locator container; positive deltaY down, deltaX right.",
+      "Act on tab: locator='aria-ref=<ref>' from preview_snapshot, or x AND y. timeoutMs=15000 default. click: button/clickCount 1–3. type literal text; clear replaces. hover: menus/tooltips. select native values/labels; custom dropdown: open then click option. drag source to target. upload absolute paths for reported picker, [] cancels; locator for <input type=file>. press key+modifiers on focus; click field first. scroll tab/locator; positive deltaY down, deltaX right.",
     parameters: PreviewAutomationActInput,
     success: Schema.Union([
       Schema.Struct({ ...PreviewAutomationSelectResult.fields, ...presentationFields }),
@@ -182,7 +190,7 @@ export const PreviewEvaluateResult = Schema.Struct({
 const PreviewEvaluateTool = browserTool(
   Tool.make("preview_evaluate", {
     description:
-      "Run JavaScript in the page. It can change page state. Returns `{value}`, up to 64 KB. Needs your tab, or an unclaimed one. To read a tab the user drives, use `preview_snapshot`. Page tools write only on user request. Show results with `html_render`, never page tools.",
+      "Run page JavaScript; may mutate state. Returns {value}, capped 64 KB. Requires own/unclaimed tab. Human-driven tab reads: preview_snapshot. Page tools write only on user request; show results via html_render, never page tools.",
     parameters: PreviewAutomationEvaluateInput,
     success: PreviewEvaluateResult,
     failure: PreviewToolFailure,

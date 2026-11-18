@@ -1,4 +1,11 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { isEditableFocused } from "~/lib/editableFocus";
+import { isMacPlatform } from "~/lib/utils";
+import {
+  useEffect,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 import { ThreadFindBar } from "../chat/ThreadFindBar";
 import { MarkdownFindContext } from "../chat/markdownFindContext";
 import { stepThreadFindIndex } from "../chat/threadFind";
@@ -14,7 +21,10 @@ export function MarkdownPreview({ children }: { children: ReactNode }) {
   const [focusRequestId, setFocusRequestId] = useState(0);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
-  const [matchCount, setMatchCount] = useState(0);
+  const [matches, setMatches] = useState({ query: "", count: 0 });
+  const [navigationId, setNavigationId] = useState(0);
+  const findQuery = open ? query.trim() : "";
+  const matchCount = matches.count;
   const activeIndex = Math.min(index, Math.max(0, matchCount - 1));
   const close = () => {
     setOpen(false);
@@ -69,11 +79,16 @@ export function MarkdownPreview({ children }: { children: ReactNode }) {
   });
   useThreadFindHighlights({
     container: content,
-    query: open ? query.trim() : "",
+    query: findQuery,
     activeRowId: "markdown-file",
     activeOccurrence: activeIndex,
     highlightPrefix: "t3-markdown-find",
-    onMatchCountChange: setMatchCount,
+    onMatchCountChange: (count) =>
+      setMatches((current) =>
+        current.query === findQuery && current.count === count
+          ? current
+          : { query: findQuery, count },
+      ),
     onActiveRange: reveal,
   });
 
@@ -93,6 +108,7 @@ export function MarkdownPreview({ children }: { children: ReactNode }) {
         if (!interactive || interactive === preview) preview?.focus({ preventScroll: true });
       }}
       onKeyDown={(event) => {
+        selectRenderedContentOnSelectAll(event, content);
         if (open && event.key === "Escape" && !event.nativeEvent.isComposing) {
           event.preventDefault();
           event.stopPropagation();
@@ -101,6 +117,8 @@ export function MarkdownPreview({ children }: { children: ReactNode }) {
       }}
     >
       <ThreadFindBar
+        navigationId={navigationId}
+        settled={matches.query === findQuery}
         label="Find in file"
         open={open}
         query={query}
@@ -112,9 +130,16 @@ export function MarkdownPreview({ children }: { children: ReactNode }) {
         onQueryChange={(value) => {
           setQuery(value);
           setIndex(0);
+          setNavigationId((current) => current + 1);
         }}
-        onNext={() => setIndex((current) => stepThreadFindIndex(current, matchCount, 1))}
-        onPrevious={() => setIndex((current) => stepThreadFindIndex(current, matchCount, -1))}
+        onNext={() => {
+          setIndex((current) => stepThreadFindIndex(current, matchCount, 1));
+          setNavigationId((current) => current + 1);
+        }}
+        onPrevious={() => {
+          setIndex((current) => stepThreadFindIndex(current, matchCount, -1));
+          setNavigationId((current) => current + 1);
+        }}
         onClose={close}
       />
       <ScrollArea className="min-h-0 flex-1">
@@ -130,4 +155,28 @@ export function MarkdownPreview({ children }: { children: ReactNode }) {
       </ScrollArea>
     </div>
   );
+}
+
+function selectRenderedContentOnSelectAll(
+  event: ReactKeyboardEvent<HTMLElement>,
+  content: HTMLElement | null,
+) {
+  const mac = isMacPlatform(navigator.platform);
+  const selectAll =
+    event.key.toLowerCase() === "a" &&
+    (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) &&
+    !event.shiftKey &&
+    !event.altKey;
+  // React bubbles keys from portaled children (the image dialog) through this surface.
+  if (
+    !selectAll ||
+    content === null ||
+    isEditableFocused(event.target) ||
+    !(event.target instanceof Node) ||
+    !event.currentTarget.contains(event.target)
+  ) {
+    return;
+  }
+  event.preventDefault();
+  window.getSelection()?.selectAllChildren(content);
 }

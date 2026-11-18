@@ -623,8 +623,8 @@ function CodespacesAgentAccess({
   const [optimisticValue, setOptimisticValue] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Keep the acknowledged choice until the live subscription catches up.
-  if (!saving && optimisticValue !== null && optimisticValue === configuration.agentAccessEnabled) {
+  // The live subscription supersedes an optimistic choice as soon as it is observed.
+  if (optimisticValue !== null && optimisticValue === configuration.agentAccessEnabled) {
     setOptimisticValue(null);
   }
   const update = async (enabled: boolean) => {
@@ -640,8 +640,6 @@ function CodespacesAgentAccess({
         setOptimisticValue(null);
         const cause = squashAtomCommandFailure(result);
         setError(cause instanceof Error ? cause.message : "Could not update agent access.");
-      } else {
-        setOptimisticValue(result.value.configuration.agentAccessEnabled);
       }
     } catch (cause) {
       setOptimisticValue(null);
