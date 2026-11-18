@@ -15,6 +15,7 @@ const { Children, mocks } = vi.hoisted(() => ({
   Children: ({ children }: { children?: ReactNode }) => children,
   mocks: { upsert: vi.fn(), alert: vi.fn(), tasks: [] as ScheduledTask[] },
 }));
+vi.mock("../connection/CodespacesSettings", () => ({ CodespacesPickerRows: () => null }));
 vi.mock("react-native", () => ({
   Platform: { OS: "ios" },
   View: Children,

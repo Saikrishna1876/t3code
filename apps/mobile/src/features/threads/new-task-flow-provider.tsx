@@ -370,8 +370,9 @@ export function NewTaskFlowProvider(
   const activeNewTask = props.active === false ? null : { pendingKey: activePendingKey };
   const selectedProjectDraft = useComposerDraft(selectedProjectDraftKey);
   const codespaceName = selectedProjectDraft.codespaceName ?? null;
+  // Keep cwd primitive across hooks so React Compiler can cache model-option derivation.
   const projectCwd = selectedProject
-    ? threadWorkspaceRoot({ codespaceName }, selectedProject.workspaceRoot)
+    ? String(threadWorkspaceRoot({ codespaceName }, selectedProject.workspaceRoot))
     : null;
   const selectCodespace = (name: string | null) => {
     if (!selectedProjectDraftKey) return;
