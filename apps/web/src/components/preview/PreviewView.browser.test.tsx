@@ -4,6 +4,7 @@ import {
   DEFAULT_PREVIEW_APPEARANCE,
   DEFAULT_PREVIEW_ZOOM_FACTOR,
   EnvironmentId,
+  type PreviewAdjustInput,
   FILL_PREVIEW_VIEWPORT,
   ThreadId,
 } from "@t3tools/contracts";
@@ -26,7 +27,17 @@ const mocks = vi.hoisted(() => ({
   openPreviewSession: vi.fn(),
   closePreviewSession: vi.fn(),
   openBrowser: vi.fn(),
-  adjust: vi.fn(async () => ({ _tag: "Success" as const })),
+  adjust: vi.fn(async ({ input }: { environmentId: EnvironmentId; input: PreviewAdjustInput }) => ({
+    _tag: "Success" as const,
+    value: {
+      threadId: input.threadId,
+      tabId: input.tabId,
+      navStatus: { _tag: "Idle" as const },
+      canGoBack: false,
+      canGoForward: false,
+      updatedAt: "2026-07-13T00:00:00.000Z",
+    },
+  })),
   resolveUrl: vi.fn(async () => ({ _tag: "Success", value: "http://localhost:14528/app" })),
   navigate: vi.fn(async (_tabId: string, _url: string): Promise<void> => undefined),
   rememberPreviewUrl: vi.fn(),
@@ -337,6 +348,10 @@ describe("PreviewView", () => {
     await userEvent.click(page.getByRole("button", { name: "Refresh", exact: true }));
     await expect.element(page.getByText("Workspace URL access is unavailable.")).toBeVisible();
     expect(mocks.refresh).not.toHaveBeenCalled();
+    await userEvent.click(page.getByRole("button", { name: "Dismiss notification" }));
+    await expect
+      .element(page.getByText("Workspace URL access is unavailable."))
+      .not.toBeInTheDocument();
   });
   it("resolves workspace URLs only when the host advertises Codespaces", async () => {
     setup();
@@ -392,6 +407,8 @@ describe("PreviewView", () => {
         await userEvent.click(page.getByRole("menuitem", { name: "Hard reload" }));
       }
       await expect.element(page.getByText("Navigation failed")).toBeVisible();
+      await userEvent.click(page.getByRole("button", { name: "Dismiss notification" }));
+      await expect.element(page.getByText("Navigation failed")).not.toBeInTheDocument();
     },
   );
 
@@ -469,6 +486,7 @@ describe("PreviewView", () => {
       expect(mocks.navigate).not.toHaveBeenCalled();
       expect(mocks.recordVisitForThread).not.toHaveBeenCalled();
       await userEvent.click(page.getByRole("button", { name: "Dismiss notification" }));
+      await expect.element(page.getByText("Could not open this address")).not.toBeInTheDocument();
     },
   );
 

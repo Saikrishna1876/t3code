@@ -8,7 +8,9 @@ const highlights = (name = "t3-markdown-find-active") =>
   [...(CSS.highlights.get(name) ?? [])].map((range) => (range as Range).toString());
 const input = (host: HTMLElement) =>
   host.querySelector<HTMLInputElement>('input[aria-label="Find in file"]')!;
-const count = (host: HTMLElement) => host.querySelector('[aria-live="polite"]')?.textContent;
+const count = (host: HTMLElement) =>
+  host.querySelector('[data-thread-find-bar] span[aria-hidden="true"]')?.textContent;
+const announcement = (host: HTMLElement) => host.querySelector('[aria-live="polite"]')?.textContent;
 
 async function search(query: string, field: HTMLInputElement) {
   await act(async () => {
@@ -127,9 +129,11 @@ describe("Markdown preview find", () => {
     expect(document.activeElement).toBe(input(host));
     await search("first match", input(host));
     expect(count(host)).toBe("1/2");
+    expect(announcement(host)).toBe("1/2");
     expect(highlights()).toEqual(["First match"]);
     await key("Enter", false, input(host));
     expect(count(host)).toBe("2/2");
+    expect(announcement(host)).toBe("2/2");
     expect(highlights()).toEqual(["first match"]);
     await key("Enter", false, input(host));
     expect(count(host)).toBe("1/2");
@@ -137,6 +141,7 @@ describe("Markdown preview find", () => {
     expect(count(host)).toBe("2/2");
     await search("missing", input(host));
     expect(count(host)).toBe("0/0");
+    expect(announcement(host)).toBe("0/0");
     expect(host.querySelector<HTMLButtonElement>('[aria-label="Next match"]')?.disabled).toBe(true);
     await key("Escape", false, input(host));
     expect(input(host)).toBeNull();
