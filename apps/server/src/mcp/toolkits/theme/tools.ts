@@ -55,7 +55,7 @@ const ThemeReadTool = Tool.make("t3_theme_read", {
 const ThemeSetTool = Tool.make("t3_theme_set", {
   ...shared,
   description:
-    "Restyle T3 on user request. theme publishes/updates themeId, switching this server's web + this machine's desktop, never remote desktops. No theme: switch built-in/published themeId. appearance: light/dark/system. Live full-access/default caller required.",
+    "Restyle T3 on user request. `theme` publishes/updates `themeId` on this server's web and this machine's desktop, never remote. Without `theme`, switch built-in/published `themeId`. `appearance`: light/dark/system. Live full-access/default caller.",
   parameters: Schema.Struct({
     themeId: Schema.optionalKey(EnvironmentThemeId),
     theme: Schema.optionalKey(EnvironmentThemeFile),

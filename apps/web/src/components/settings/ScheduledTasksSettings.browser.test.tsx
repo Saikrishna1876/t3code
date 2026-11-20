@@ -1,5 +1,6 @@
 import { MenuItem } from "../ui/menu";
 import { RegistryContext } from "@effect/atom-react";
+import * as Effect from "effect/Effect";
 import { Atom, AtomRegistry } from "effect/reactivity";
 import {
   DEFAULT_UNIFIED_SETTINGS,
@@ -68,7 +69,7 @@ const permissions = new Map<string, Atom.Writable<boolean>>();
 function setup() {
   state.connected = true;
   state.tasksLoaded = true;
-  state.remove.mockReset().mockResolvedValue({ _tag: "Success", value: { id: task.id } });
+  state.remove.mockReset().mockReturnValue(Effect.succeed({ id: task.id }));
   state.secondary = false;
   state.codespaces = false;
   permissions.clear();

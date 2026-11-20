@@ -1,8 +1,15 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, PreviewRuntime, PreviewSessionSnapshot } from "@t3tools/contracts";
+import {
+  allowsPreviewTunnel,
+  type EnvironmentId,
+  type PreviewRuntime,
+  type PreviewSessionSnapshot,
+} from "@t3tools/contracts";
+import { Atom } from "effect/reactivity";
 
 import { isLoopbackHost, normalizePreviewUrl } from "@t3tools/shared/preview";
 
+import { environmentCatalog } from "~/connection/catalog";
 import { isElectron } from "~/env";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
@@ -11,6 +18,19 @@ import {
   readEnvironmentSupportsServerBrowser,
   useEnvironmentSupportsServerBrowser,
 } from "~/state/entities";
+import { environmentServerConfigsAtom } from "~/state/server";
+
+import { tunnelsEnvironmentLoopback } from "./browserTargetResolver";
+
+/** Whether this desktop loads the environment's localhost itself: it is local, or its tunnel is on. */
+const desktopLoadsLoopbackAtom = Atom.family((environmentId: EnvironmentId) =>
+  Atom.make((get) => {
+    const target = get(environmentCatalog.catalogValueAtom).entries.get(environmentId)?.target;
+    if (!tunnelsEnvironmentLoopback(target)) return true;
+    const config = get(environmentServerConfigsAtom).get(environmentId);
+    return config !== undefined && allowsPreviewTunnel(config);
+  }).pipe(Atom.withLabel(`preview:desktop-loads-loopback:${environmentId}`)),
+);
 
 // Keep workspace loopback URLs on the environment that owns the port.
 export function previewRuntimeFor(
@@ -25,9 +45,11 @@ export function previewRuntimeFor(
       // The preview open command reports invalid URLs through its existing error channel.
     }
   }
+  // Without its tunnel, another environment's tabs stream from it, as on the web.
   if (
     isPreviewSupportedInRuntime() &&
-    environmentId !== appAtomRegistry.get(primaryEnvironmentIdAtom)
+    environmentId !== appAtomRegistry.get(primaryEnvironmentIdAtom) &&
+    appAtomRegistry.get(desktopLoadsLoopbackAtom(environmentId))
   ) {
     return undefined;
   }
@@ -38,11 +60,17 @@ export function alternatePreviewRuntime(
   environmentId: EnvironmentId,
   primaryEnvironmentId: EnvironmentId | null,
   serverBrowser: boolean,
+  desktopLoadsLoopback: boolean,
   snapshot: Pick<PreviewSessionSnapshot, "runtime"> | null | undefined,
 ): PreviewRuntime | null {
   if (!snapshot || !serverBrowser || !isPreviewSupportedInRuntime()) return null;
   if (environmentId === primaryEnvironmentId) return null;
-  return snapshot.runtime === "server" ? "desktop" : "server";
+  if (snapshot.runtime === "server") return desktopLoadsLoopback ? "desktop" : null;
+  return "server";
+}
+
+export function useDesktopLoadsLoopback(environmentId: EnvironmentId): boolean {
+  return useAtomValue(desktopLoadsLoopbackAtom(environmentId));
 }
 
 export function isPreviewAvailableFor(environmentId: EnvironmentId): boolean {

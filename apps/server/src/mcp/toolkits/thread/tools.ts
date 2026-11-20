@@ -32,7 +32,7 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
   description:
-    "Pin, snooze, settle, archive, or mark a thread unread. Omit `threadId` for this thread. `snooze` needs `snoozedUntil`. Settling this thread applies at turn end. A failed turn or queued message leaves it active.",
+    "Pin, snooze, settle, archive, or mark unread. Omit `threadId` for this thread. `snooze` needs `snoozedUntil`. Settling applies at turn end; failed turn or queued message leaves it active.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId),
@@ -84,7 +84,7 @@ const QUEUE_READ_ACTIONS = ["list", "read"] as const;
 const QueueTool = Tool.make("t3_queue", {
   ...commandTool,
   description:
-    "Queued messages; threadId defaults here. list: send order, cursor/limit. read: max 16,000 chars. edit: replace text, keep attachments. cancel. reorder before beforeRunId, null for end. promote_to_steer: now to active targetRunId. Writes require queued run.",
+    "Queued messages; `threadId` defaults here. `list`: order/cursor/limit. `read`: max 16000 chars. `edit`: replace text, keep attachments. `cancel`. `reorder` before `beforeRunId`, null for end. `promote_to_steer`: to active `targetRunId`. Needs a queued run.",
   parameters: Schema.Struct({
     action: Schema.Literals([
       ...QUEUE_READ_ACTIONS,
@@ -129,7 +129,7 @@ const question = Schema.Struct({
 const PendingRequestTool = Tool.make("t3_pending_request", {
   ...commandTool,
   description:
-    "Pending user questions in a thread. Omit `threadId` for this thread. list: their ids; approvals are not listed. read: one by `requestId`. respond: answer one with `answers`; this cannot approve a permission request.",
+    "Pending user questions in a thread. Omit `threadId` for this thread. `list`: ids (no approvals); `read`: by `requestId`; `respond`: answer with `answers`. Cannot approve permissions.",
   parameters: Schema.Struct({
     action: Schema.Literals(["list", "read", "respond"]),
     environmentId: OrchestratorMcpEnvironmentTarget,
@@ -155,7 +155,7 @@ const threadConfiguration = Schema.Struct({
 const ThreadConfigureTool = Tool.make("t3_thread_configure", {
   ...commandTool,
   description:
-    "Read a thread's provider, model, and modes, or set its provider, model, and options with `modelSelection`. Omit `threadId` for this thread. Permission modes stay. Values from `orchestrator_capabilities`.",
+    "Read a thread's provider/model/modes or set them with `modelSelection`. Omit `threadId` for this thread. Permission modes stay. Values: `orchestrator_capabilities`.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId),
@@ -167,7 +167,7 @@ const ThreadConfigureTool = Tool.make("t3_thread_configure", {
 const ThreadTransferTool = Tool.make("t3_thread_transfer", {
   ...commandTool,
   description:
-    "Context transfer; threadId defaults here. fork sourcePoint, default latest stable run, to new thread with same setup; no turn starts. merge_back sourcePoint into related targetThreadId in same project. status lists transfers.",
+    "Context transfer; `threadId` defaults here. `fork`: copy sourcePoint (default latest stable run) to a new thread, same setup, no turn. `merge_back`: into related `targetThreadId` in same project. `status` lists transfers.",
   parameters: Schema.Struct({
     action: Schema.Literals(["fork", "merge_back", "status"]),
     environmentId: OrchestratorMcpEnvironmentTarget,
@@ -194,7 +194,7 @@ const ThreadTransferTool = Tool.make("t3_thread_transfer", {
 const ThreadSearchTool = Tool.make("t3_thread_search", {
   ...commandTool,
   description:
-    "Search active threads by title, branch, PR, project, then message text. Skips subagent threads. `projectId`: one project, else yours, else all outside a thread. Not exhaustive.",
+    "Search active threads by title, branch, PR, project, then message text. Skips subagents. `projectId`: one project, else yours, else all outside a thread.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     ...OrchestrationSearchThreadsInput.fields,
@@ -222,7 +222,7 @@ const ThreadSearchTool = Tool.make("t3_thread_search", {
 const ScheduledTaskRunTool = Tool.make("run_scheduled_task_now", {
   ...commandTool,
   description:
-    "Run one scheduled task now. Needs a full-access or default caller. Returns its thread, or null if not started. Success means started, not finished.",
+    "Run a scheduled task now. Needs full-access/default caller. Returns thread or null. Started does not mean finished.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     taskId: ScheduledTaskId,

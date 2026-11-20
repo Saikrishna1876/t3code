@@ -1,4 +1,5 @@
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { T, useGT } from "gt-react";
 import { persistClientSettingsPatch, useClientSettings } from "../../hooks/useSettings";
 import { useEnvironments } from "../../state/environments";
 import { useProjects } from "../../state/entities";
@@ -6,10 +7,12 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { SettingsRow } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 
 export function ForkUpdateSettings() {
+  const gt = useGT();
   const settings = useClientSettings();
+  const searchableSetting = useSearchableSetting();
   const { environments } = useEnvironments();
   const projects = useProjects().filter((project) => !project.archivedAt);
   const selected = settings.forkUpdateProject;
@@ -21,7 +24,7 @@ export function ForkUpdateSettings() {
     <>
       <SettingsRow
         {...searchableSetting("fork-update-project")}
-        description="Project where the update button opens a thread to update your fork."
+        description={gt("Project where the update button opens a thread to update your fork.")}
         control={
           <Select
             value={selected ? scopedProjectKey(selected) : "none"}
@@ -39,13 +42,16 @@ export function ForkUpdateSettings() {
               });
             }}
           >
-            <SelectTrigger size="sm" aria-label="Fork update project">
+            <SelectTrigger size="sm" aria-label={gt("Fork update project")}>
               <SelectValue>
-                {selectedProject?.title ?? (selected ? "Project unavailable" : "Choose project")}
+                {selectedProject?.title ??
+                  (selected ? <T>Project unavailable</T> : <T>Choose project</T>)}
               </SelectValue>
             </SelectTrigger>
             <SelectPopup>
-              <SelectItem value="none">Choose project</SelectItem>
+              <SelectItem value="none">
+                <T>Choose project</T>
+              </SelectItem>
               {projects.map((project) => {
                 const key = scopedProjectKey(scopeProjectRef(project.environmentId, project.id));
                 return (
@@ -63,15 +69,15 @@ export function ForkUpdateSettings() {
       />
       <SettingsRow
         {...searchableSetting("fork-update-prompt")}
-        description="Instructions used when an upstream release is missing from your fork."
+        description={gt("Instructions used when an upstream release is missing from your fork.")}
       >
         <div className="mt-3 max-w-2xl pb-3.5">
           <Textarea
             key={settings.forkUpdatePrompt}
-            aria-label="Fork update prompt"
+            aria-label={gt("Fork update prompt")}
             rows={5}
             defaultValue={settings.forkUpdatePrompt}
-            placeholder="Enter instructions for updating your fork."
+            placeholder={gt("Enter instructions for updating your fork.")}
             onBlur={(event) => {
               void persistClientSettingsPatch({ forkUpdatePrompt: event.target.value });
             }}
@@ -80,11 +86,11 @@ export function ForkUpdateSettings() {
       </SettingsRow>
       <SettingsRow
         {...searchableSetting("fork-update-draft-only")}
-        description="On opens a draft for you to send. Off sends the prompt immediately."
+        description={gt("On opens a draft for you to send. Off sends the prompt immediately.")}
         control={
           <Switch
             checked={settings.forkUpdateDraftOnly}
-            aria-label="Review fork update prompt before sending"
+            aria-label={gt("Review fork update prompt before sending")}
             onCheckedChange={(checked) => {
               void persistClientSettingsPatch({ forkUpdateDraftOnly: checked });
             }}

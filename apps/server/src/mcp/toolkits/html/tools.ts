@@ -1,12 +1,10 @@
 import { OrchestratorMcpFailure } from "@t3tools/contracts";
 import {
   HTML_RENDER_COLUMN_WIDTH,
-  HTML_RENDER_LAYOUT_GUIDE,
   HTML_RENDER_MAX_FIT_HEIGHT,
   HTML_RENDER_MAX_HEIGHT,
   HTML_RENDER_MAX_TITLE_LENGTH,
   HTML_RENDER_MIN_HEIGHT,
-  HTML_RENDER_THEME_GUIDE,
   HTML_RENDER_TOOL_NAME,
 } from "@t3tools/shared/htmlRender";
 import * as Schema from "effect/Schema";
@@ -24,11 +22,8 @@ const HtmlPath = Schema.String.annotate({
   description: "Absolute .html file path.",
 });
 
-const PAGE_RULES =
-  "Self-contained: inline <style> and <script>. Local images as absolute paths are inlined. Remote URLs load as-is.";
-
 export const HtmlPreviewTool = Tool.make("html_preview", {
-  description: `Check an HTML page before html_render. Returns PNG, contentHeight, and console output. ${PAGE_RULES} Theme and layout rules are in html_render.`,
+  description: `Check HTML before html_render. Returns PNG, contentHeight, console output. Inline <style>/<script>; local images absolute; remote URLs as-is.`,
   parameters: Schema.Struct({
     path: Schema.optional(HtmlPath),
     html: Schema.optional(Html),
@@ -77,7 +72,7 @@ export const HtmlPreviewTool = Tool.make("html_preview", {
 
 // This affects only the caller's thread, not its workspace, so read-only sandboxes and plan mode may use it.
 const HtmlRenderTool = Tool.make(HTML_RENDER_TOOL_NAME, {
-  description: `Render HTML inline above final reply; don't announce/restate. Frame fits to ${HTML_RENDER_MAX_FIT_HEIGHT}px; mobile overflow scrolls. ${HTML_RENDER_LAYOUT_GUIDE} ${HTML_RENDER_THEME_GUIDE}`,
+  description: `Render HTML inline above final reply; don't announce. Frame fits to ${HTML_RENDER_MAX_FIT_HEIGHT}px; mobile scrolls. No html/body/outer background/card/border/banner/side padding. Fluid widths; 8px gutter. Background boxes: 16px padding, var(--radius). Charts fixed px. No vh/height:100%. Use theme vars, not fixed colors: --background --foreground --muted --card --popover --secondary --border --ring --primary --accent --destructive --warning --success --info --code-background --chart-1 to --chart-6 --radius --font-sans --font-mono.`,
   parameters: Schema.Struct({
     path: Schema.optional(HtmlPath),
     html: Schema.optional(Html),

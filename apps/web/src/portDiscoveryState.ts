@@ -81,3 +81,17 @@ export function useDiscoveredPortsState(
     error: query.data?.error,
   };
 }
+
+export function useThreadDiscoveredPorts(input: {
+  readonly environmentId: EnvironmentId | null;
+  readonly threadId: ThreadId | null;
+}): ReadonlyArray<DiscoveredLocalServer> {
+  const state = useDiscoveredPortsState(input.environmentId, undefined, input.threadId);
+  if (input.environmentId === null || input.threadId === null) return EMPTY_PORTS;
+  return state.servers.filter(
+    (server) =>
+      (state.codespaceName !== undefined && server.terminal === null && server.agent === null) ||
+      server.terminal?.threadId === input.threadId ||
+      server.agent?.threadId === input.threadId,
+  );
+}

@@ -62,7 +62,7 @@ import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
-import { toWslDrivePath } from "../workspace/wslDrivePath.ts";
+import { toHostDrivePath } from "../workspace/hostDrivePath.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 import { extractIcnsPng } from "./icns.ts";
@@ -119,6 +119,12 @@ const PREVIEW_ASSET_EXTENSIONS = new Set([
   ".woff",
   ".woff2",
 ]);
+
+const isPreviewDependencyPath = (filePath: string, path: Path.Path) =>
+  filePath.length > 0 &&
+  !filePath.includes("\0") &&
+  !filePath.split(/[\\/]/).some((segment) => segment.startsWith(".")) &&
+  PREVIEW_ASSET_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 
 const AssetClaimsSchema = Schema.Union([
   Schema.Struct({
@@ -221,7 +227,7 @@ export type ResolvedAsset =
           size: bigint,
         ) => Stream.Stream<Uint8Array, CodespacesError>;
       };
-      readonly renderIntent?: "mcp-app";
+      readonly renderIntent?: "mcp-app" | "file-preview";
     }
   | {
       readonly kind: "bytes";
@@ -318,7 +324,12 @@ const resolveCanonicalFile = Effect.fn("AssetAccess.resolveCanonicalFile")(funct
 });
 
 const resolveCanonicalWorkspaceFile = Effect.fn("AssetAccess.resolveCanonicalWorkspaceFile")(
-  function* (input: { readonly workspaceRoot: string; readonly relativePath: string }) {
+  function* (input: {
+    readonly workspaceRoot: string;
+    readonly relativePath: string;
+    /** The HTML entry's folder, relative to the root, when serving one of its dependencies. */
+    readonly previewBaseRelativePath?: string;
+  }) {
     const fileSystem = yield* FileSystem.FileSystem;
     const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
     const resolved = yield* workspacePaths.resolveRelativePathWithinRoot(input).pipe(
@@ -339,6 +350,19 @@ const resolveCanonicalWorkspaceFile = Effect.fn("AssetAccess.resolveCanonicalWor
     const relative = path.relative(canonicalRoot.value, canonicalFile.value);
     if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) return null;
 
+    if (input.previewBaseRelativePath !== undefined) {
+      // The opened entry's own folder may be hidden; nothing below it, or reached outside it, may.
+      const canonicalBase = yield* ProjectFaviconResolver.optionOnNotFound(
+        fileSystem.realPath(path.join(canonicalRoot.value, input.previewBaseRelativePath)),
+      );
+      const belowBase = Option.isSome(canonicalBase)
+        ? path.relative(canonicalBase.value, canonicalFile.value)
+        : "..";
+      const dependency =
+        belowBase.startsWith("..") || path.isAbsolute(belowBase) ? relative : belowBase;
+      if (!isPreviewDependencyPath(dependency, path)) return null;
+    }
+
     const info = yield* ProjectFaviconResolver.optionOnNotFound(
       fileSystem.stat(canonicalFile.value),
     );
@@ -351,6 +375,7 @@ const resolveCanonicalWorkspaceFile = Effect.fn("AssetAccess.resolveCanonicalWor
 const resolveCanonicalWorkspaceFileForRequest = (input: {
   readonly workspaceRoot: string;
   readonly relativePath: string;
+  readonly previewBaseRelativePath?: string;
 }) =>
   resolveCanonicalWorkspaceFile(input).pipe(
     Effect.tapError((cause) =>
@@ -664,6 +689,12 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
         expectedCanonicalPath: canonicalFile,
       });
     }
+    // The response type follows the file a link points at, so that file must be previewable too.
+    if (!isWorkspacePreviewEntryPath(canonicalFile)) {
+      return yield* new AssetPreviewTypeValidationError({
+        resource: input.resource,
+      });
+    }
     const canonicalWorkspaceRoot = yield* fileSystem.realPath(input.workspaceRoot).pipe(
       Effect.mapError(
         (cause) =>
@@ -721,7 +752,7 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
   switch (input.resource._tag) {
     case "media-file": {
       let requestedPath = expandHomePath(
-        yield* toWslDrivePath(input.resource.path),
+        yield* toHostDrivePath(input.resource.path),
         yield* HostProcess.HomeDirectory,
       );
       if (!path.isAbsolute(requestedPath)) {
@@ -788,7 +819,7 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       const hostPath =
         input.resource.path.startsWith("~/") || input.resource.path.startsWith("~\\")
           ? expandHomePath(input.resource.path, yield* HostProcess.HomeDirectory)
-          : yield* toWslDrivePath(input.resource.path);
+          : yield* toHostDrivePath(input.resource.path);
       if (path.isAbsolute(hostPath)) {
         // An absolute draft path serves exactly like an absolute media path.
         const remoteResource = yield* remoteWorkspaceResource(draftWorkspaceRoot, hostPath);
@@ -1228,21 +1259,22 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
   }
   if (claims.kind === "workspace-file-exact") {
     if (decodedPath !== path.basename(claims.relativePath)) return null;
-    return yield* resolveWorkspaceAsset(
-      claims.workspaceRoot,
-      claims.relativePath,
-      claims.codespaceName,
-      claims.download,
-    );
-  }
-  const segments = decodedPath.split(/[\\/]/);
-  if (
-    decodedPath.length === 0 ||
-    decodedPath.includes("\0") ||
-    segments.some((segment) => segment === "." || segment === ".." || segment.startsWith(".")) ||
-    !PREVIEW_ASSET_EXTENSIONS.has(path.extname(decodedPath).toLowerCase())
-  ) {
-    return null;
+    if (claims.codespaceName !== undefined) {
+      return yield* resolveWorkspaceAsset(
+        claims.workspaceRoot,
+        claims.relativePath,
+        claims.codespaceName,
+        claims.download,
+      );
+    }
+    const exactWorkspaceFile = yield* resolveCanonicalWorkspaceFileForRequest({
+      workspaceRoot: claims.workspaceRoot,
+      relativePath: claims.relativePath,
+    });
+    // Checked again here: a link can be repointed after its URL was issued.
+    return exactWorkspaceFile && isWorkspacePreviewEntryPath(exactWorkspaceFile)
+      ? ({ kind: "file", path: exactWorkspaceFile } satisfies ResolvedAsset)
+      : null;
   }
   // Signed Codespace assets are Linux paths even when the T3 host runs Windows.
   const isRemote = claims.codespaceName !== undefined;
@@ -1251,11 +1283,22 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
     ? claims.baseRelativePath.replaceAll("\\", "/")
     : claims.baseRelativePath;
   const requestedPath = isRemote ? decodedPath.replaceAll("\\", "/") : decodedPath;
+  if (!isPreviewDependencyPath(requestedPath, assetPath)) return null;
   const joinedRelativePath =
     baseRelativePath === "." ? requestedPath : assetPath.join(baseRelativePath, requestedPath);
-  return yield* resolveWorkspaceAsset(
-    claims.workspaceRoot,
-    joinedRelativePath,
-    claims.codespaceName,
-  );
+  if (isRemote) {
+    return yield* resolveWorkspaceAsset(
+      claims.workspaceRoot,
+      joinedRelativePath,
+      claims.codespaceName,
+    );
+  }
+  const workspaceFile = yield* resolveCanonicalWorkspaceFileForRequest({
+    workspaceRoot: claims.workspaceRoot,
+    relativePath: joinedRelativePath,
+    previewBaseRelativePath: claims.baseRelativePath,
+  });
+  return workspaceFile
+    ? ({ kind: "file", path: workspaceFile, renderIntent: "file-preview" } satisfies ResolvedAsset)
+    : null;
 });

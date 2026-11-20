@@ -18,8 +18,8 @@ Keep project Codespaces work available with the user's existing local provider l
 
 ## Baseline
 
-- Fork/main integrated upstream baseline: stable `v0.1.9`, `24e77473ecf41bc1f7142529c7911c1c1aae1d76`, landed through PR #19 at `e6b749f8f8b1c51afec50fb508a38a81bff5b7c8`. PR #20 added the fork updater prompt at `c70267e52a3e7a58ce95c6a731b39d21e0f12f18`.
-- Previous integrated upstream baseline: stable `v0.1.6`, `2359643cffa6ba9ee84d6f2694b935de54a8013e`. PR #19 recovered PR #12's reviewed v0.1.7 integration before merging v0.1.9.
+- Fork/main integrated upstream baseline: stable `v0.1.10`, `7d32075e3757ded707914e2450c3e392a9665765`, landed through PR #21 at `b19928ff03` with upstream ancestry preserved at `0e1c422794`. PR #20 added the fork updater prompt at `c70267e52a3e7a58ce95c6a731b39d21e0f12f18`; PR #22 installed Chromium for release checks and PR #23 subscribed before the first browser tab opens. Fork release `0.1.10` was published 2026-11-18.
+- Previous integrated upstream baseline: stable `v0.1.9`, `24e77473ecf41bc1f7142529c7911c1c1aae1d76`, landed through PR #19 at `e6b749f8f8b1c51afec50fb508a38a81bff5b7c8`. PR #19 recovered PR #12's reviewed v0.1.7 integration before merging v0.1.9.
 - Compatibility patches, including PR #2, are committed. Superseded local Codespaces drafts were stashed before the 2026-10-13 integration; see Previous update, 2026-10-18.
 - Last behaviorally verified baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda` (release `0.0.42` built locally on 2026-09-18 with Electron `43.6.0` was extracted and interactively confirmed working by the user on the target Intel Mac macOS 15 system).
 
@@ -124,6 +124,17 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 
 ## Latest attempt
 
+- Date: 2026-11-20. Integrating upstream stable `v0.1.11`, exact commit `59651c1761f6c63e9b6056839067066968e6a406`. Published release API and fetched tag agree; `draft=false`, `prerelease=false`, published 07:38:08 UTC. Nightly and preview tags are excluded.
+- Starting fork/main and rollback reference: `4c0eb0452bcd3e74fafc12d545b4e9c9f9717e9e`. Branch `chore/fork-release-v0-1-11` in the task worktree. Preserve P001 through P009, PR #20's upstream release prompt, PR #22's Chromium install and PR #23's browser subscribe fix. Electron remains exactly `43.6.0` in the manifest, workspace exception, regenerated lockfile and installed binary.
+- Merged the exact tag with `--no-ff --no-commit`, resolved 61 conflicts by semantic merge, and restored upstream `useThreadDiscoveredPorts` adapted to fork Codespace discovery. Kept fork remote workspace attachment staging, terminal reconciliation helpers and Codespace server URL resolution while accepting upstream port forwarding, Issues, Antigravity, i18n and thread-name changes. Fork migration 77 stays registered; incoming migrations through 103 follow it.
+- Regenerated lockfile and i18n catalogs with repository tools. `vp run i18n:check` passes for web, mobile and desktop. No GT project ID is configured, so `gt translate` cannot translate new keys; upstream catalogs already carry their new strings and `gt generate` merged them into every locale.
+- Context budget gate passes without an exception label or weakened check. Model-facing tool and instruction text was compacted to measured Claude 6,196, Codex 7,588 and MCP JSON 50,382 bytes, all at or below starting main's ceilings. `AgentContextBudget.test.ts`, advertised-schema tests and HTTP server tests pass.
+- Focused checks pass: 128 clipboard/asset/migration cases, 212 Codex adapter cases, 119 Codespaces cases, plus scoped server, web, desktop, mobile, contracts and client-runtime typechecks. The Codex replay fixture was reordered to match upstream's thread-name-before-config sequence while retaining fork's remote attachment case. A `storageCleanup.test.ts` run was aborted after git commands timed out under concurrent load; it is not counted as a pass.
+- Greptile app review on `d026a164` found two real issues. iOS HTTPS loopback now stays in the streamed browser because the tunnel's stand-in host breaks certificate identity; a focused browser-tab test covers iOS and Android. Issue-list errors now carry the failed tracker and host through the contract and group under that tracker, with tests for Linear failures on GitHub projects and unmatched hosts. A follow-up review found a stuck iOS error overlay; a supported webview navigation now clears it, with component tests for that path and for keeping device-wide failure advice until navigation starts.
+- `check:changed` fast stages pass unused-patch validation, formatting, lint, both Knip passes and generated GraphQL. An MCP tool-use eval request builds and `--context` reports 7,921 system chars, 13,421 tool-description chars and 51,852 schema chars across 98 tools. No `.env` or model backend is configured here, so live model comparisons are unavailable; CI owns full suites. Hardware graphics, native clipboard, packaged startup, permission persistence and updater installation acceptance remain separate and unverified. No interactive browser, native client, live app or cloud release launched by this preparation.
+
+## Previous attempt, 2026-11-17
+
 - Date: 2026-11-17. Candidate for upstream stable `v0.1.10`, exact commit `7d32075e3757ded707914e2450c3e392a9665765`. Published release API and fetched tag agree; neither draft nor prerelease. The candidate is not merged or published.
 - Starting fork/main and rollback reference: `c70267e52a3e7a58ce95c6a731b39d21e0f12f18`. Branch `chore/fork-release-v0-1-10` in the task worktree. Preserve P001 through P009 and PR #20's upstream release prompt. Electron remains exactly `43.6.0`.
 - Incoming migrations 82 through 96 register as 83 through 97 because fork migration 77 already shipped. Recovery follows each thread's pinned workspace. Local and remote cleanup share nested-repository inspection and linked-worktree detection, including annexed checkouts. Preview comment jobs retain trusted base scripts, no build-job comment grants, and a queued writer shared across platforms. Stale builds can add matching clients without replacing a newer update.
@@ -137,7 +148,7 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 
 - Follow-up gate passed lint, both Knip passes, GraphQL, 41 affected-package typechecks, 239 tests and seven script cases. Its formatting finding was corrected and checked. One older test expected removal on failed filesystem inspection, contrary to upstream PR #25241; it now asserts the checkout is kept. No full green integration gate is claimed.
 
-## Previous attempt, 2026-11-11
+## Earlier attempt, 2026-11-11
 
 - Date: 2026-11-11. Preparing stable `v0.1.9`, exact commit `24e77473ecf41bc1f7142529c7911c1c1aae1d76`, published at 11:33:49 UTC. Release API and fetched tag agree; neither draft nor prerelease. Newer upstream main commits are excluded.
 - Starting fork/main and rollback reference: `8c682b0ba4b7dee10e8f814ff50aa941423dc5da`. Branch: `chore/sync-fork-main-0-1-9`. Recovered PR #12's reviewed v0.1.7 merge in `b2ff842c7b`, then merged the exact v0.1.9 tag. The user will merge the PR before release publication.

@@ -8,25 +8,31 @@ import type {
   ProviderInteractionMode,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import { msg } from "gt-react-native";
 
-export function draftThreadShell(input: {
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-  readonly projectId: ProjectId;
-  readonly codespaceName?: string | null;
-  readonly modelSelection: ModelSelection;
-  readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
-  readonly branch: string | null;
-  readonly worktreePath: string | null;
-  readonly createdAt: string;
-}) {
+import { m, type MessageResolver } from "../../i18n/messages";
+
+export function draftThreadShell(
+  input: {
+    readonly environmentId: EnvironmentId;
+    readonly threadId: ThreadId;
+    readonly projectId: ProjectId;
+    readonly codespaceName?: string | null;
+    readonly modelSelection: ModelSelection;
+    readonly runtimeMode: RuntimeMode;
+    readonly interactionMode: ProviderInteractionMode;
+    readonly branch: string | null;
+    readonly worktreePath: string | null;
+    readonly createdAt: string;
+  },
+  resolve: MessageResolver = m,
+) {
   const timestamp = DateTime.makeUnsafe(input.createdAt);
   return presentThreadShell(input.environmentId, {
     id: input.threadId,
     projectId: input.projectId,
     codespaceName: input.codespaceName ?? null,
-    title: "New thread",
+    title: resolve(msg("New thread")),
     providerInstanceId: input.modelSelection.instanceId,
     modelSelection: input.modelSelection,
     runtimeMode: input.runtimeMode,
