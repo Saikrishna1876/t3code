@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@react-navigation/native", () => ({ useNavigation: () => mocks.navigation }));
 vi.mock("react-native", () => ({
+  Platform: { OS: "ios" },
   View: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
 }));
 vi.mock("react-native-safe-area-context", () => ({
@@ -135,15 +136,27 @@ function refuseHttpsLoopback() {
 }
 
 describe("LocalPreviewScreen unsupported overlay", () => {
-  it("clears on an address submission so a supported HTTP page is visible", () => {
+  it("keeps device-wide advice until the submitted address actually navigates", () => {
     using view = setup();
     refuseHttpsLoopback();
     expect(view.container.textContent).toContain(UNSUPPORTED_TITLE);
 
     act(() => mocks.submit!("http://localhost:3000/"));
 
-    expect(view.container.textContent).not.toContain(UNSUPPORTED_TITLE);
+    expect(view.container.textContent).toContain(UNSUPPORTED_TITLE);
     expect(mocks.loadUrl).toHaveBeenCalledWith("http://localhost:3000/");
+
+    act(() =>
+      mocks.tunnelWebViewProps!.onNavigationChange({
+        url: "http://localhost:3000/",
+        title: "",
+        loading: true,
+        canGoBack: false,
+        canGoForward: false,
+      }),
+    );
+
+    expect(view.container.textContent).not.toContain(UNSUPPORTED_TITLE);
   });
 
   it("clears when the webview starts a supported navigation", () => {

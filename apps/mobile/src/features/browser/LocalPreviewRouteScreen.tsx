@@ -70,8 +70,6 @@ export function LocalPreviewScreen(props: {
       return;
     }
     setFailed(false);
-    // A refusal of one address (HTTPS loopback) must not hide the next supported page.
-    setUnsupported(null);
     setRequested(next);
     void webView.current?.loadUrl(next);
   };
