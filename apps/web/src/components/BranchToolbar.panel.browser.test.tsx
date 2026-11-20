@@ -236,7 +236,10 @@ it.each([
       expect(state.writeTextToClipboard).not.toHaveBeenCalled();
     } else {
       await vi.waitFor(() =>
-        expect(state.writeTextToClipboard).toHaveBeenCalledWith(copiedPath, "workspace path"),
+        expect(state.writeTextToClipboard).toHaveBeenCalledWith(
+          copiedPath,
+          expect.objectContaining({ target: "workspace path" }),
+        ),
       );
     }
   },
@@ -334,9 +337,9 @@ it("allows worktree selection for an unstarted server thread bound to a Codespac
   );
   await expect.element(screen.getByRole("button", { name: /^Run context:/ })).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: /^Run context:/ }));
-  expect(document.querySelector('[role="menuitemradio"][aria-checked="true"]')?.textContent).toBe(
-    "New worktree",
-  );
+  await expect
+    .element(page.getByRole("menuitemradio", { name: "New worktree" }))
+    .toHaveAttribute("aria-checked", "true");
   await expect
     .element(page.getByRole("menuitemradio", { name: "New worktree" }))
     .not.toHaveAttribute("aria-disabled", "true");

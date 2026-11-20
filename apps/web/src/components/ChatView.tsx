@@ -1306,6 +1306,7 @@ export default function ChatView(props: ChatViewProps) {
       ? serverConfig?.environment.capabilities
       : { codespaces: false },
     codespace,
+    messages,
   );
   const providerEnvironmentId = (activeThread ? activeEnvironment : primaryEnvironment)
     ?.environmentId;

@@ -423,8 +423,9 @@ function makeThreadFindHighlightPainter(
     if (selected && selected !== next && zoned.has(selected)) {
       if (foldsHiding(selected, container).length === 0) inactive.add(selected);
     }
+    // The active Highlight is shared by simultaneous finds; drop only this one's match.
+    if (selected) active.delete(selected);
     selected = next;
-    active.clear();
     if (next) inactive.delete(next);
     if (next && revealFolded(next, container)) {
       selection.onActiveRange(null);

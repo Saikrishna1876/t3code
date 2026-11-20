@@ -522,6 +522,15 @@ const remoteWorkspaceAsset = Effect.fn("AssetAccess.remoteWorkspaceAsset")(funct
     );
   return { name: target.name, info, remote };
 });
+/** A local-only URL stops resolving once its workspace is bound to a Codespace. */
+const isBoundToCodespace = Effect.fn("AssetAccess.isBoundToCodespace")(function* (
+  workspaceRoot: string,
+) {
+  const remote = Option.getOrUndefined(
+    yield* Effect.serviceOption(CodespacesWorkspace.CodespacesWorkspace),
+  );
+  return remote ? (yield* remote.lookup(workspaceRoot)) !== null : false;
+});
 const resolveWorkspaceAsset = Effect.fn("AssetAccess.resolveWorkspaceAsset")(
   function* (workspaceRoot: string, relativePath: string, expectedName?: string, download = false) {
     const remote = yield* remoteWorkspaceAsset(workspaceRoot, relativePath, expectedName ?? null);
@@ -1267,6 +1276,7 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
         claims.download,
       );
     }
+    if (yield* isBoundToCodespace(claims.workspaceRoot)) return null;
     const exactWorkspaceFile = yield* resolveCanonicalWorkspaceFileForRequest({
       workspaceRoot: claims.workspaceRoot,
       relativePath: claims.relativePath,
@@ -1293,6 +1303,7 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
       claims.codespaceName,
     );
   }
+  if (yield* isBoundToCodespace(claims.workspaceRoot)) return null;
   const workspaceFile = yield* resolveCanonicalWorkspaceFileForRequest({
     workspaceRoot: claims.workspaceRoot,
     relativePath: joinedRelativePath,

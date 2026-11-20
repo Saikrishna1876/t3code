@@ -1,119 +1,136 @@
 import type { CodespacesOperation } from "@t3tools/contracts";
+import { mFallback, msg } from "gt-i18n";
+import type { MFunctionType } from "gt-i18n/types";
 
 /** Missing capabilities wait for config; a loaded host without the flag is local-only. */
 export function codespacesProjectSendBlockReason(
   capabilities: { readonly codespaces?: boolean } | null | undefined,
   query: { data: unknown | null; error: string | null; isPending: boolean },
+  resolve: MFunctionType = mFallback,
 ): string | null {
-  if (capabilities == null) return "Checking execution location";
+  const checking = () => resolve(msg("Checking execution location"));
+  if (capabilities == null) return checking();
   if (capabilities.codespaces !== true) return null;
-  if (query.isPending || (query.data === null && query.error === null))
-    return "Checking execution location";
-  return query.error === null ? null : "Could not check execution location. Retry before sending.";
+  if (query.isPending || (query.data === null && query.error === null)) return checking();
+  return query.error === null
+    ? null
+    : resolve(msg("Could not check execution location. Retry before sending."));
 }
 
 const codespacesActionLabels = {
-  create: "Creating Codespace",
-  start: "Starting Codespace",
-  connect: "Connecting workspace",
-  stop: "Stopping Codespace",
-  delete: "Deleting Codespace",
-  rebuild: "Rebuilding Codespace",
-  update: "Updating Codespace",
+  create: msg("Creating Codespace"),
+  start: msg("Starting Codespace"),
+  connect: msg("Connecting workspace"),
+  stop: msg("Stopping Codespace"),
+  delete: msg("Deleting Codespace"),
+  rebuild: msg("Rebuilding Codespace"),
+  update: msg("Updating Codespace"),
 } as const;
 
+const codespacesSucceededLabels = {
+  create: msg("Codespace created"),
+  start: msg("Codespace resumed"),
+  connect: msg("Workspace connected"),
+  stop: msg("Codespace stopped"),
+  delete: msg("Codespace deleted"),
+  rebuild: msg("Codespace rebuilt"),
+  update: msg("Codespace updated"),
+} as const;
+
+const codespacesStages: Record<string, { label: string; description: string }> = {
+  creating: {
+    label: msg("Creating Codespace"),
+    description: msg("GitHub is building your container. This can take a few minutes."),
+  },
+  starting: {
+    label: msg("Starting Codespace"),
+    description: msg("Waiting for GitHub to start compute."),
+  },
+  bootstrapping: {
+    label: msg("Connecting workspace"),
+    description: msg("Preparing remote tools and connecting over SSH."),
+  },
+  stopping: {
+    label: msg("Stopping Codespace"),
+    description: msg("Waiting for GitHub to confirm compute has stopped."),
+  },
+  deleting: {
+    label: msg("Deleting Codespace"),
+    description: msg("Waiting for GitHub to delete this workspace."),
+  },
+  rebuilding: {
+    label: msg("Rebuilding Codespace"),
+    description: msg("Waiting for GitHub to rebuild the container."),
+  },
+};
+
 /** Copy follows persisted lifecycle stages; it never estimates progress. */
-export function codespacesOperationPresentation(operation: CodespacesOperation) {
+export function codespacesOperationPresentation(
+  operation: CodespacesOperation,
+  resolve: MFunctionType = mFallback,
+) {
   if (operation.status === "failed")
     return {
-      label: "Codespace needs attention",
+      label: resolve(msg("Codespace needs attention")),
       description: operation.message,
       tone: "error" as const,
       logHelpUrl: ["create", "start", "connect", "rebuild"].includes(operation.action)
         ? "https://docs.github.com/en/codespaces/troubleshooting/github-codespaces-logs#creation-logs"
         : null,
     };
-  if (operation.status === "succeeded") {
-    const labels = {
-      create: "Codespace created",
-      start: "Codespace resumed",
-      connect: "Workspace connected",
-      stop: "Codespace stopped",
-      delete: "Codespace deleted",
-      rebuild: "Codespace rebuilt",
-      update: "Codespace updated",
-    } as const;
+  if (operation.status === "succeeded")
     return {
-      label: labels[operation.action],
+      label: resolve(codespacesSucceededLabels[operation.action]),
       description:
         operation.action === "stop"
-          ? "Compute has stopped. Storage usage continues until deletion."
+          ? resolve(msg("Compute has stopped. Storage usage continues until deletion."))
           : operation.action === "delete"
-            ? "Your local thread history remains on this T3 host."
+            ? resolve(msg("Your local thread history remains on this T3 host."))
             : "",
       tone: "success" as const,
       logHelpUrl: null,
     };
-  }
-  const stages: Record<string, { label: string; description: string }> = {
-    accepted: {
-      label: codespacesActionLabels[operation.action],
-      description: "Request accepted by your T3 host.",
-    },
-    creating: {
-      label: "Creating Codespace",
-      description: "GitHub is building your container. This can take a few minutes.",
-    },
-    starting: { label: "Starting Codespace", description: "Waiting for GitHub to start compute." },
-    bootstrapping: {
-      label: "Connecting workspace",
-      description: "Preparing remote tools and connecting over SSH.",
-    },
-    stopping: {
-      label: "Stopping Codespace",
-      description: "Waiting for GitHub to confirm compute has stopped.",
-    },
-    deleting: {
-      label: "Deleting Codespace",
-      description: "Waiting for GitHub to delete this workspace.",
-    },
-    rebuilding: {
-      label: "Rebuilding Codespace",
-      description: "Waiting for GitHub to rebuild the container.",
-    },
-  };
+  const stage =
+    operation.stage === "accepted"
+      ? {
+          label: codespacesActionLabels[operation.action],
+          description: msg("Request accepted by your T3 host."),
+        }
+      : codespacesStages[operation.stage];
   return {
-    ...(stages[operation.stage] ?? {
-      label: codespacesActionLabels[operation.action],
-      description: operation.message,
-    }),
+    ...(stage
+      ? { label: resolve(stage.label), description: resolve(stage.description) }
+      : {
+          label: resolve(codespacesActionLabels[operation.action]),
+          description: operation.message,
+        }),
     tone: "info" as const,
     logHelpUrl: null,
   };
 }
 
-export function codespaceStateLabel(state: string | undefined) {
+export function codespaceStateLabel(state: string | undefined, resolve: MFunctionType = mFallback) {
   switch (state) {
     case "Available":
-      return "Running";
+      return resolve(msg("Running", { $context: "GitHub Codespace state" }));
     case "Shutdown":
-      return "Stopped";
+      return resolve(msg("Stopped", { $context: "GitHub Codespace state" }));
     case "ShuttingDown":
-      return "Stopping";
+      return resolve(msg("Stopping", { $context: "GitHub Codespace state" }));
     case "Starting":
-      return "Starting";
+      return resolve(msg("Starting", { $context: "GitHub Codespace state" }));
     case "Created":
     case "Queued":
     case "Provisioning":
-      return "Preparing";
+      return resolve(msg("Preparing", { $context: "GitHub Codespace state" }));
     case "Rebuilding":
-      return "Rebuilding";
+      return resolve(msg("Rebuilding", { $context: "GitHub Codespace state" }));
     case "Unavailable":
-      return "Unavailable";
+      return resolve(msg("Unavailable", { $context: "GitHub Codespace state" }));
     case "Failed":
-      return "Needs attention";
+      return resolve(msg("Needs attention", { $context: "GitHub Codespace state" }));
     default:
-      return state ?? "Disconnected";
+      return state ?? resolve(msg("Disconnected", { $context: "GitHub Codespace state" }));
   }
 }
 

@@ -1,12 +1,14 @@
 import { useEffect } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { create } from "zustand";
+import { msg } from "gt-react";
 import type { DraftId } from "../composerDraftStore";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { ensureClientSettingsHydrated, getClientSettings } from "./useSettings";
 import { readProjects } from "../state/entities";
 import { toastManager } from "../components/ui/toast";
+import { m } from "../i18n/messages";
 
 const useAutoSend = create<{
   request: { draftId: DraftId; prompt: string } | null;
@@ -34,7 +36,7 @@ export function useForkUpdateAction() {
         await navigate({ to: "/settings/about" });
         toastManager.add({
           type: "info",
-          title: "Choose a fork update project and enter a prompt in Settings.",
+          title: m(msg("Choose a fork update project and enter a prompt in Settings.")),
         });
         return;
       }
@@ -45,8 +47,8 @@ export function useForkUpdateAction() {
     } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Could not open fork update thread",
-        description: error instanceof Error ? error.message : "Try again.",
+        title: m(msg("Could not open fork update thread")),
+        description: error instanceof Error ? error.message : m(msg("Try again.")),
       });
     }
   };

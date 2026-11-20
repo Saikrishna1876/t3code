@@ -1,3 +1,4 @@
+import { useGT } from "gt-react";
 import { isEditableFocused } from "~/lib/editableFocus";
 import { isMacPlatform } from "~/lib/utils";
 import {
@@ -15,6 +16,7 @@ import { useStableCallback } from "~/hooks/useStableCallback";
 import { MARKDOWN_FIND_OPEN_EVENT } from "./markdownFindActionBus";
 
 export function MarkdownPreview({ children }: { children: ReactNode }) {
+  const gt = useGT();
   const [preview, setPreview] = useState<HTMLDivElement | null>(null);
   const [content, setContent] = useState<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -119,7 +121,7 @@ export function MarkdownPreview({ children }: { children: ReactNode }) {
       <ThreadFindBar
         navigationId={navigationId}
         settled={matches.query === findQuery}
-        label="Find in file"
+        label={gt("Find in file")}
         open={open}
         query={query}
         matchCount={matchCount}

@@ -42,6 +42,7 @@ vi.mock("../../state/session", async (original) => ({
 }));
 vi.mock("../../state/terminalSessions", () => ({
   useKnownTerminalSessions: () => fixture.sessions,
+  useTerminalDrawerSessions: () => ({ sessions: fixture.sessions, snapshotId: "fixture" }),
 }));
 vi.mock("../../state/terminal", () => ({
   terminalEnvironment: { open: "open", write: "write", close: "close" },
