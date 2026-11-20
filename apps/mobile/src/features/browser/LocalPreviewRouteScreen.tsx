@@ -70,6 +70,8 @@ export function LocalPreviewScreen(props: {
       return;
     }
     setFailed(false);
+    // A refusal of one address (HTTPS loopback) must not hide the next supported page.
+    setUnsupported(null);
     setRequested(next);
     void webView.current?.loadUrl(next);
   };
@@ -113,7 +115,10 @@ export function LocalPreviewScreen(props: {
               url={initialUrl}
               topInset={topInset}
               onNavigationChange={(next) => {
-                if (next.loading) setFailed(false);
+                if (next.loading) {
+                  setFailed(false);
+                  setUnsupported(null);
+                }
                 setPage(next);
               }}
               onScrollDirection={onScrollDirection}
