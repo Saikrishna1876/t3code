@@ -132,6 +132,12 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Focused checks pass: 128 clipboard/asset/migration cases, 212 Codex adapter cases, 119 Codespaces cases, plus scoped server, web, desktop, mobile, contracts and client-runtime typechecks. The Codex replay fixture was reordered to match upstream's thread-name-before-config sequence while retaining fork's remote attachment case. A `storageCleanup.test.ts` run was aborted after git commands timed out under concurrent load; it is not counted as a pass.
 - Greptile app review on `d026a164` found two real issues. iOS HTTPS loopback now stays in the streamed browser because the tunnel's stand-in host breaks certificate identity; a focused browser-tab test covers iOS and Android. Issue-list errors now carry the failed tracker and host through the contract and group under that tracker, with tests for Linear failures on GitHub projects and unmatched hosts. A follow-up review found a stuck iOS error overlay; a supported webview navigation now clears it, with component tests for that path and for keeping device-wide failure advice until navigation starts.
 - `check:changed` fast stages pass unused-patch validation, formatting, lint, both Knip passes and generated GraphQL. An MCP tool-use eval request builds and `--context` reports 7,921 system chars, 13,421 tool-description chars and 51,852 schema chars across 98 tools. No `.env` or model backend is configured here, so live model comparisons are unavailable; CI owns full suites. Hardware graphics, native clipboard, packaged startup, permission persistence and updater installation acceptance remain separate and unverified. No interactive browser, native client, live app or cloud release launched by this preparation.
+- PR #24 merged at `97d2bddc` while the `CI` workflow was disabled, so its full suites never ran. A post-merge CI run found real defects, fixed in a follow-up PR:
+  - Incoming migration files 97–102 were renamed 98–103 to match their registered IDs; the launcher reads the highest ID from file names.
+  - P004's check that local asset URLs stop resolving once the workspace binds to a Codespace was restored on upstream's new local paths.
+  - Drafts bound to a cloud computer use the Codespaces menu again instead of a Select showing the host.
+  - P008's simultaneous Markdown finds no longer clear each other's active match.
+  - Fork Codespaces and update copy is wrapped for `t3code/no-untranslated-copy` and translated in every web and mobile locale.
 
 ## Previous attempt, 2026-11-17
 

@@ -119,7 +119,8 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
 
   // Bound Codespace threads need the Codespaces menu, which offers named computers,
   // stopped-computer start, and the current checkout alongside remote worktrees.
-  if (codespacesProjectId) {
+  // A Select would show the host's label for a draft bound to a cloud computer.
+  if (codespacesProjectId || codespaceLabel) {
     const content = (
       <>
         {codespaceLabel ? (
@@ -189,13 +190,15 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
               </MenuItem>
             ) : null}
           </MenuGroup>
-          <CodespacesMenuItems
-            environmentId={environmentId}
-            projectId={codespacesProjectId}
-            codespaceName={codespaceName}
-            onCodespaceChange={onCodespaceChange}
-            locked={envLocked}
-          />
+          {codespacesProjectId ? (
+            <CodespacesMenuItems
+              environmentId={environmentId}
+              projectId={codespacesProjectId}
+              codespaceName={codespaceName}
+              onCodespaceChange={onCodespaceChange}
+              locked={envLocked}
+            />
+          ) : null}
         </MenuPopup>
       </Menu>
     );

@@ -419,6 +419,7 @@ export function NewTaskFlowProvider(
       ? projectDefaults.serverConfig?.environment.capabilities
       : { codespaces: false },
     codespace,
+    messages,
   );
   const canChooseWorkspace = !isScratchDraft && workspaceLocationBlockReason === null;
   const defaultWorkspaceMode: WorkspaceMode = canChooseWorkspace

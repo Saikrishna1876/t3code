@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
+import { T, useGT, useMessages } from "gt-react";
 import type {
   EnvironmentId,
   ProjectId,
@@ -29,6 +30,8 @@ function useProjectCodespaces(
   name: string | null,
   onSelect?: (name: string) => void,
 ) {
+  const gt = useGT();
+  const messages = useMessages();
   const environment = useEnvironment(environmentId);
   const supported = environment?.serverConfig?.environment.capabilities.codespaces === true;
   const canManage = useAtomValue(codespacesEnvironment.run.permissionAtom(environmentId));
@@ -49,7 +52,7 @@ function useProjectCodespaces(
     (entry) =>
       entry.projectId === projectId || (project.data?.name && entry.name === project.data.name),
   );
-  const feedback = operation ? codespacesOperationPresentation(operation) : null;
+  const feedback = operation ? codespacesOperationPresentation(operation, messages) : null;
   const busy = pending || operation?.status === "running";
   const managed = new Set(state.data?.environments.map((entry) => entry.name));
   const spaces =
@@ -70,7 +73,7 @@ function useProjectCodespaces(
           });
     if (result._tag === "Failure") {
       const cause = squashAtomCommandFailure(result);
-      setError(cause instanceof Error ? cause.message : "Codespace request failed.");
+      setError(cause instanceof Error ? cause.message : gt("Codespace request failed."));
     }
     setPending(false);
     project.refresh();
@@ -92,7 +95,7 @@ function useProjectCodespaces(
       environmentId,
       input: { projectId, name: project.data?.name ?? null, dismissSetupWarning },
     });
-    if (result._tag === "Failure") setError("Could not save setup notification preference.");
+    if (result._tag === "Failure") setError(gt("Could not save setup notification preference."));
     setPending(false);
     project.refresh();
   };
@@ -123,12 +126,16 @@ export function CodespacesMenuItems({
   onCodespaceChange?: ((name: string | null) => void) | undefined;
   locked?: boolean;
 }) {
+  const gt = useGT();
+  const messages = useMessages();
   const model = useProjectCodespaces(environmentId, projectId, codespaceName, onCodespaceChange);
   if (!model.supported || (!model.spaces.length && !model.error && !model.project.data?.name))
     return null;
   return (
     <MenuGroup>
-      <MenuGroupLabel>Cloud computers</MenuGroupLabel>
+      <MenuGroupLabel>
+        <T>Cloud computers</T>
+      </MenuGroupLabel>
       {model.spaces.map((space) => (
         <MenuItem
           key={space.name}
@@ -137,11 +144,14 @@ export function CodespacesMenuItems({
           onClick={() => model.select(space.name, space.state === "Shutdown")}
         >
           <span className="min-w-0 truncate">
-            {space.displayName || space.name}
-            {model.project.data?.name === space.name ? " (selected)" : ""}
+            {model.project.data?.name === space.name
+              ? gt("{name} (selected)", { name: space.displayName || space.name })
+              : space.displayName || space.name}
           </span>
           <span className="text-xs text-muted-foreground">
-            {space.state === "Shutdown" ? "Start" : codespaceStateLabel(space.state)}
+            {space.state === "Shutdown"
+              ? gt("Start", { $context: "verb, starts a stopped cloud computer" })
+              : codespaceStateLabel(space.state, messages)}
           </span>
         </MenuItem>
       ))}
@@ -151,14 +161,14 @@ export function CodespacesMenuItems({
         </p>
       ) : model.busy ? (
         <p role="status" className="px-2 py-1 text-xs text-muted-foreground">
-          {model.feedback?.label ?? "Connecting project…"}
+          {model.feedback?.label ?? gt("Connecting project…")}
         </p>
       ) : null}
       {model.feedback?.logHelpUrl ? (
         <MenuItem
           render={<a href={model.feedback.logHelpUrl} target="_blank" rel="noreferrer noopener" />}
         >
-          How to view creation logs
+          <T>How to view creation logs</T>
         </MenuItem>
       ) : null}
     </MenuGroup>
@@ -172,6 +182,8 @@ export function ProjectCodespacesControl({
   environmentId: EnvironmentId;
   projectId: ProjectId;
 }) {
+  const gt = useGT();
+  const messages = useMessages();
   const [name, setName] = useState<string | null>(null);
   const model = useProjectCodespaces(environmentId, projectId, name, setName);
   const info = model.project.data;
@@ -179,8 +191,10 @@ export function ProjectCodespacesControl({
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        Add computers in Settings, Environments, Codespaces. Several projects can share one
-        computer. Your provider login and history stay on this T3 host.
+        <T>
+          Add computers in Settings, Environments, Codespaces. Several projects can share one
+          computer. Your provider login and history stay on this T3 host.
+        </T>
       </p>
       {model.error ? (
         <p role="alert" className="text-sm text-destructive">
@@ -202,7 +216,7 @@ export function ProjectCodespacesControl({
             disabled={model.busy || !model.canManage}
             onClick={() => void model.dismissWarning(true)}
           >
-            Don't warn again for this project
+            <T>Don't warn again for this project</T>
           </Button>
         </div>
       ) : info?.setupWarningDismissed ? (
@@ -212,17 +226,20 @@ export function ProjectCodespacesControl({
           disabled={model.busy || !model.canManage}
           onClick={() => void model.dismissWarning(false)}
         >
-          Show setup warnings
+          <T>Show setup warnings</T>
         </Button>
       ) : null}
       {model.spaces.map((space) => (
         <div key={space.name} className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0 flex-1">
             <p className="break-words text-sm font-medium">
-              {space.displayName || space.name}
-              {info?.name === space.name ? " (selected)" : ""}
+              {info?.name === space.name
+                ? gt("{name} (selected)", { name: space.displayName || space.name })
+                : space.displayName || space.name}
             </p>
-            <p className="text-xs text-muted-foreground">{codespaceStateLabel(space.state)}</p>
+            <p className="text-xs text-muted-foreground">
+              {codespaceStateLabel(space.state, messages)}
+            </p>
           </div>
           <Button
             size="sm"
@@ -231,15 +248,17 @@ export function ProjectCodespacesControl({
             onClick={() => model.select(space.name, space.state === "Shutdown", true)}
           >
             {space.state === "Shutdown"
-              ? "Start"
+              ? gt("Start", { $context: "verb, starts a stopped cloud computer" })
               : info?.name === space.name && info.connected
-                ? "Reconnect"
-                : "Prepare project"}
+                ? gt("Reconnect")
+                : gt("Prepare project")}
           </Button>
         </div>
       ))}
       {!model.spaces.length ? (
-        <p className="text-sm text-muted-foreground">No computers added yet.</p>
+        <p className="text-sm text-muted-foreground">
+          <T>No computers added yet.</T>
+        </p>
       ) : null}
       {model.feedback ? (
         <div
@@ -253,8 +272,10 @@ export function ProjectCodespacesControl({
       ) : null}
       <ProjectCloudSetupButton environmentId={environmentId} projectId={projectId} />
       <p className="text-xs text-muted-foreground">
-        The first connection copies your current committed branch. Commit local changes before
-        adding a project. Codex and Claude Code can run here; other providers require local work.
+        <T>
+          The first connection copies your current committed branch. Commit local changes before
+          adding a project. Codex and Claude Code can run here; other providers require local work.
+        </T>
       </p>
     </div>
   );
@@ -267,7 +288,7 @@ export function CodespacesLogHelp({ url }: { url: string | null }) {
       variant="outline"
       render={<a href={url} target="_blank" rel="noreferrer noopener" />}
     >
-      How to view creation logs
+      <T>How to view creation logs</T>
     </Button>
   ) : null;
 }
@@ -279,6 +300,7 @@ function ProjectCloudSetupButton({
   environmentId: EnvironmentId;
   projectId: ProjectId;
 }) {
+  const gt = useGT();
   const openThread = useNewThreadHandler();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -301,11 +323,13 @@ function ProjectCloudSetupButton({
               codespacesSetupPrompt(store.getComposerDraft(draft.draftId)?.prompt ?? ""),
             );
           } else
-            setError("Could not open a setup draft. Open a new thread for this project and retry.");
+            setError(
+              gt("Could not open a setup draft. Open a new thread for this project and retry."),
+            );
           setPending(false);
         }}
       >
-        Prepare cloud setup
+        <T>Prepare cloud setup</T>
       </Button>
       {error ? (
         <p role="alert" className="text-xs text-destructive">
@@ -343,7 +367,7 @@ export function CodespacesSetupWarning({
           setPending(false);
         }}
       >
-        Don't warn again for this project
+        <T>Don't warn again for this project</T>
       </Button>
     </div>
   );

@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useId, useState } from "react";
+import { T, useGT, useMessages, Var } from "gt-react";
 import {
   InfoIcon,
   LogInIcon,
@@ -62,6 +63,7 @@ export function CodespacesSettings({
         <CodespacesComputerSettings
           key={environment.environmentId}
           environmentId={environment.environmentId}
+          // oxlint-disable-next-line t3code/no-untranslated-copy -- product name plus the environment's own label
           title={supported.length === 1 ? "Codespaces" : `Codespaces · ${environment.label}`}
           id={index === 0 ? "connections-codespaces" : undefined}
         />
@@ -79,6 +81,8 @@ function CodespacesComputerSettings({
   title: string;
   id: string | undefined;
 }) {
+  const gt = useGT();
+  const messages = useMessages();
   const inventory = useEnvironmentQuery(codespacesEnvironment.list({ environmentId, input: {} }));
   const state = useEnvironmentQuery(
     codespacesEnvironment.state({ environmentId, input: undefined }),
@@ -103,7 +107,7 @@ function CodespacesComputerSettings({
   } | null>(null);
   const formId = useId();
   const operation = state.data?.operations.at(-1);
-  const feedback = operation ? codespacesOperationPresentation(operation) : null;
+  const feedback = operation ? codespacesOperationPresentation(operation, messages) : null;
   const busy = pending || state.data?.operations.some((entry) => entry.status === "running");
   const authorization = state.data?.authorization;
   const authorizing = authorization?.phase === "starting" || authorization?.phase === "waiting";
@@ -113,7 +117,7 @@ function CodespacesComputerSettings({
   };
   const failure = (result: Parameters<typeof squashAtomCommandFailure>[0]) => {
     const cause = squashAtomCommandFailure(result);
-    setError(cause instanceof Error ? cause.message : "Codespace request failed.");
+    setError(cause instanceof Error ? cause.message : gt("Codespace request failed."));
   };
   const execute = async (input: CodespacesRunInput) => {
     setPending(true);
@@ -166,14 +170,16 @@ function CodespacesComputerSettings({
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button size="icon-micro" variant="ghost-muted" aria-label="About Codespaces" />
+              <Button size="icon-micro" variant="ghost-muted" aria-label={gt("About Codespaces")} />
             }
           >
             <InfoIcon />
           </TooltipTrigger>
           <TooltipPopup>
-            Codespaces are cloud computers. Create one from a blank template, then add projects in
-            separate /workspaces folders.
+            <T>
+              Codespaces are cloud computers. Create one from a blank template, then add projects in
+              separate /workspaces folders.
+            </T>
           </TooltipPopup>
         </Tooltip>
       }
@@ -182,8 +188,8 @@ function CodespacesComputerSettings({
           <Button
             size="icon-sm"
             variant="ghost-muted"
-            aria-label="Refresh status"
-            title="Refresh status"
+            aria-label={gt("Refresh status")}
+            title={gt("Refresh status")}
             disabled={pending}
             onClick={refresh}
           >
@@ -192,8 +198,10 @@ function CodespacesComputerSettings({
           <Button
             size="sm"
             variant="outline"
-            aria-label={authorizing ? "Cancel GitHub sign-in" : "Sign in for Codespaces access"}
-            title={authorizing ? "Cancel GitHub sign-in" : "Sign in for Codespaces access"}
+            aria-label={
+              authorizing ? gt("Cancel GitHub sign-in") : gt("Sign in for Codespaces access")
+            }
+            title={authorizing ? gt("Cancel GitHub sign-in") : gt("Sign in for Codespaces access")}
             disabled={pending || !canManage}
             onClick={async () => {
               setPending(true);
@@ -208,16 +216,18 @@ function CodespacesComputerSettings({
             }}
           >
             {authorizing ? <XIcon /> : <LogInIcon />}
-            <span className="hidden sm:inline">{authorizing ? "Cancel sign-in" : "Sign in"}</span>
+            <span className="hidden sm:inline">
+              {authorizing ? gt("Cancel sign-in") : gt("Sign in")}
+            </span>
           </Button>
           <Button
             size="sm"
-            aria-label="New Codespace"
+            aria-label={gt("New Codespace")}
             disabled={busy || !canManage}
             onClick={() => void setup()}
           >
             <PlusIcon />
-            New
+            <T context="button, creates a new cloud computer">New</T>
           </Button>
         </div>
       }
@@ -230,7 +240,12 @@ function CodespacesComputerSettings({
       {authorization?.code ? (
         <div className="space-y-2 px-4 py-4">
           <p className="text-sm">
-            GitHub code: <code className="select-all">{authorization.code}</code>
+            <T>
+              GitHub code:{" "}
+              <code className="select-all">
+                <Var>{authorization.code}</Var>
+              </code>
+            </T>
           </p>
           <Button
             size="sm"
@@ -239,11 +254,15 @@ function CodespacesComputerSettings({
               void ensureLocalApi()
                 .shell.openExternal("https://github.com/login/device")
                 .catch(() =>
-                  setError("Open https://github.com/login/device and enter the code above."),
+                  setError(
+                    gt("Open {url} and enter the code above.", {
+                      url: "https://github.com/login/device",
+                    }),
+                  ),
                 )
             }
           >
-            Open GitHub
+            <T>Open GitHub</T>
           </Button>
         </div>
       ) : null}
@@ -255,11 +274,17 @@ function CodespacesComputerSettings({
       {options ? (
         <div className="space-y-3 px-4 py-4">
           <label className="grid gap-1.5 text-sm">
-            Computer name
-            <Input value={displayName} onValueChange={setDisplayName} placeholder="Optional name" />
+            <T>Computer name</T>
+            <Input
+              value={displayName}
+              onValueChange={setDisplayName}
+              placeholder={gt("Optional name")}
+            />
           </label>
           <div className="grid gap-1.5 text-sm">
-            <label htmlFor={formId + "-machine"}>Machine</label>
+            <label htmlFor={formId + "-machine"}>
+              <T context="cloud computer hardware size">Machine</T>
+            </label>
             <Select
               value={machine}
               onValueChange={(value) => setMachine(value ?? "")}
@@ -269,7 +294,7 @@ function CodespacesComputerSettings({
               }))}
             >
               <SelectTrigger id={formId + "-machine"}>
-                <SelectValue placeholder="No machines available" />
+                <SelectValue placeholder={gt("No machines available")} />
               </SelectTrigger>
               <SelectPopup>
                 {options.machines.map((entry) => (
@@ -281,8 +306,10 @@ function CodespacesComputerSettings({
             </Select>
           </div>
           <p className="text-xs text-muted-foreground">
-            Stops after 30 idle minutes. Files are retained for one day after stopping. GitHub
-            compute and storage charges may apply.
+            <T>
+              Stops after 30 idle minutes. Files are retained for one day after stopping. GitHub
+              compute and storage charges may apply.
+            </T>
           </p>
           <div className="flex gap-2">
             <Button
@@ -299,10 +326,10 @@ function CodespacesComputerSettings({
                 })
               }
             >
-              Create blank computer
+              <T>Create blank computer</T>
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setOptions(null)}>
-              Cancel
+              <T>Cancel</T>
             </Button>
           </div>
         </div>
@@ -323,8 +350,15 @@ function CodespacesComputerSettings({
                     }
                   />
                   <span className="break-words">
-                    {codespaceStateLabel(space.state)}
-                    {managed?.connected ? " · Connected" : ""} · {space.machine}
+                    {managed?.connected
+                      ? gt("{state} · Connected · {machine}", {
+                          state: codespaceStateLabel(space.state, messages),
+                          machine: space.machine,
+                        })
+                      : gt("{state} · {machine}", {
+                          state: codespaceStateLabel(space.state, messages),
+                          machine: space.machine,
+                        })}
                   </span>
                 </p>
               </div>
@@ -342,14 +376,18 @@ function CodespacesComputerSettings({
                   }
                 >
                   <Repeat2Icon />
-                  {space.state === "Shutdown" ? "Start" : managed ? "Reconnect" : "Add computer"}
+                  {space.state === "Shutdown"
+                    ? gt("Start", { $context: "verb, starts a stopped cloud computer" })
+                    : managed
+                      ? gt("Reconnect")
+                      : gt("Add computer")}
                 </Button>
                 {space.state === "Available" && managed ? (
                   <Button
                     size="icon-sm"
                     variant="outline"
-                    aria-label={`Stop ${space.displayName || space.name}`}
-                    title="Stop computer"
+                    aria-label={gt("Stop {name}", { name: space.displayName || space.name })}
+                    title={gt("Stop computer")}
                     disabled={busy || !canManage}
                     onClick={() =>
                       void execute({
@@ -365,30 +403,32 @@ function CodespacesComputerSettings({
                 <Button
                   size="sm"
                   variant="outline"
-                  aria-label={`Rename ${space.displayName || space.name}`}
+                  aria-label={gt("Rename {name}", { name: space.displayName || space.name })}
                   disabled={busy || !canManage}
                   onClick={() => void editComputer(space, "rename")}
                 >
-                  Rename
+                  <T context="button, renames a cloud computer">Rename</T>
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
-                  aria-label={`Change machine for ${space.displayName || space.name}`}
+                  aria-label={gt("Change machine for {name}", {
+                    name: space.displayName || space.name,
+                  })}
                   title={
                     space.state === "Shutdown"
-                      ? "Change machine"
-                      : "Stop computer before changing its machine"
+                      ? gt("Change machine")
+                      : gt("Stop computer before changing its machine")
                   }
                   disabled={busy || !canManage || space.state !== "Shutdown"}
                   onClick={() => void editComputer(space, "resize")}
                 >
-                  Machine
+                  <T context="button, changes the cloud computer hardware size">Machine</T>
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
-                  aria-label={`Rebuild ${space.displayName || space.name}`}
+                  aria-label={gt("Rebuild {name}", { name: space.displayName || space.name })}
                   disabled={busy || !canManage || (!managed && space.state !== "Shutdown")}
                   onClick={() =>
                     setConfirmation({
@@ -398,13 +438,13 @@ function CodespacesComputerSettings({
                     })
                   }
                 >
-                  Rebuild
+                  <T context="button, rebuilds a cloud computer">Rebuild</T>
                 </Button>
                 <Button
                   size="icon-sm"
                   variant="ghost-destructive"
-                  aria-label={`Delete ${space.displayName || space.name}`}
-                  title="Delete computer"
+                  aria-label={gt("Delete {name}", { name: space.displayName || space.name })}
+                  title={gt("Delete computer")}
                   disabled={busy || !canManage}
                   onClick={() =>
                     setConfirmation({
@@ -423,7 +463,7 @@ function CodespacesComputerSettings({
       })}
       {!inventory.isPending && !inventory.error && !inventory.data?.codespaces.length ? (
         <p className="px-4 py-4 text-sm text-muted-foreground">
-          No Codespaces yet. Create a blank computer to get started.
+          <T>No Codespaces yet. Create a blank computer to get started.</T>
         </p>
       ) : null}
       {feedback ? (
@@ -440,7 +480,7 @@ function CodespacesComputerSettings({
         <div className="space-y-3 px-4 py-4">
           <div className="grid gap-1.5 text-sm">
             <label htmlFor={formId + "-project"} className="font-medium">
-              Project
+              <T>Project</T>
             </label>
             <Select
               value={projectId}
@@ -448,7 +488,7 @@ function CodespacesComputerSettings({
               items={projects.map((project) => ({ value: project.id, label: project.title }))}
             >
               <SelectTrigger id={formId + "-project"}>
-                <SelectValue placeholder="Choose a project" />
+                <SelectValue placeholder={gt("Choose a project")} />
               </SelectTrigger>
               <SelectPopup>
                 {projects.map((project) => (
@@ -469,7 +509,7 @@ function CodespacesComputerSettings({
         </div>
       ) : (
         <p className="px-4 py-4 text-xs text-muted-foreground">
-          Add a project to this T3 host, then assign it to a computer here.
+          <T>Add a project to this T3 host, then assign it to a computer here.</T>
         </p>
       )}
       {state.data ? (
@@ -489,29 +529,35 @@ function CodespacesComputerSettings({
           <DialogHeader>
             <DialogTitle>
               {confirmation?.action === "delete"
-                ? "Delete computer?"
+                ? gt("Delete computer?")
                 : confirmation?.action === "rebuild"
-                  ? "Rebuild computer?"
-                  : "Create blank computer?"}
+                  ? gt("Rebuild computer?")
+                  : gt("Create blank computer?")}
             </DialogTitle>
             <DialogDescription>
               {confirmation?.action === "delete"
-                ? "GitHub permanently deletes every project and unpushed change on this computer. Local thread history remains."
+                ? gt(
+                    "GitHub permanently deletes every project and unpushed change on this computer. Local thread history remains.",
+                  )
                 : confirmation?.action === "rebuild"
-                  ? "Finish or stop active turns first. Rebuilding affects every project on this computer and may reset installed tools. GitHub compute and storage charges may apply."
-                  : "GitHub compute and storage charges may apply. You can add several projects after creation."}
+                  ? gt(
+                      "Finish or stop active turns first. Rebuilding affects every project on this computer and may reset installed tools. GitHub compute and storage charges may apply.",
+                    )
+                  : gt(
+                      "GitHub compute and storage charges may apply. You can add several projects after creation.",
+                    )}
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
             <p className="text-sm">
               {confirmation?.action === "create"
-                ? "Template: github/codespaces-blank"
+                ? gt("Template: {template}", { template: "github/codespaces-blank" })
                 : confirmation?.name}
             </p>
           </DialogPanel>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmation(null)}>
-              Cancel
+              <T>Cancel</T>
             </Button>
             <Button
               variant={confirmation?.action === "delete" ? "destructive" : "default"}
@@ -521,10 +567,10 @@ function CodespacesComputerSettings({
               }}
             >
               {confirmation?.action === "delete"
-                ? "Delete computer"
+                ? gt("Delete computer")
                 : confirmation?.action === "rebuild"
-                  ? "Rebuild computer"
-                  : "Create computer"}
+                  ? gt("Rebuild computer")
+                  : gt("Create computer")}
             </Button>
           </DialogFooter>
         </DialogPopup>
@@ -538,18 +584,20 @@ function CodespacesComputerSettings({
         <DialogPopup>
           <DialogHeader>
             <DialogTitle>
-              {editing?.kind === "rename" ? "Rename computer" : "Change machine"}
+              {editing?.kind === "rename" ? gt("Rename computer") : gt("Change machine")}
             </DialogTitle>
             <DialogDescription>
               {editing?.kind === "rename"
-                ? "Update the name shown for this computer across all projects."
-                : "The computer must stay stopped while changing its machine. This affects every project on it. GitHub compute and storage charges may change."}
+                ? gt("Update the name shown for this computer across all projects.")
+                : gt(
+                    "The computer must stay stopped while changing its machine. This affects every project on it. GitHub compute and storage charges may change.",
+                  )}
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
             {editing?.kind === "rename" ? (
               <label className="grid gap-1.5 text-sm">
-                Computer name
+                <T>Computer name</T>
                 <Input
                   value={editing.value}
                   onValueChange={(value) => setEditing({ ...editing, value })}
@@ -557,7 +605,9 @@ function CodespacesComputerSettings({
               </label>
             ) : editing ? (
               <div className="grid gap-1.5 text-sm">
-                <label htmlFor={formId + "-edit-machine"}>Machine</label>
+                <label htmlFor={formId + "-edit-machine"}>
+                  <T context="cloud computer hardware size">Machine</T>
+                </label>
                 <Select
                   value={editing.value}
                   onValueChange={(value) => setEditing({ ...editing, value: value ?? "" })}
@@ -569,7 +619,7 @@ function CodespacesComputerSettings({
                   }
                 >
                   <SelectTrigger id={formId + "-edit-machine"}>
-                    <SelectValue placeholder="Choose a machine" />
+                    <SelectValue placeholder={gt("Choose a machine")} />
                   </SelectTrigger>
                   <SelectPopup>
                     {editing.options?.machines.map((entry) => (
@@ -584,7 +634,7 @@ function CodespacesComputerSettings({
           </DialogPanel>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditing(null)}>
-              Cancel
+              <T>Cancel</T>
             </Button>
             <Button
               disabled={busy || !canManage || !canSaveEdit}
@@ -600,7 +650,7 @@ function CodespacesComputerSettings({
                 });
               }}
             >
-              {editing?.kind === "rename" ? "Save name" : "Change machine"}
+              {editing?.kind === "rename" ? gt("Save name") : gt("Change machine")}
             </Button>
           </DialogFooter>
         </DialogPopup>
@@ -618,6 +668,7 @@ function CodespacesAgentAccess({
   configuration: CodespacesConfiguration;
   disabled: boolean;
 }) {
+  const gt = useGT();
   const configure = useAtomCommand(codespacesEnvironment.configure, { reportFailure: false });
   const id = useId();
   const [optimisticValue, setOptimisticValue] = useState<boolean | null>(null);
@@ -639,11 +690,11 @@ function CodespacesAgentAccess({
       if (result._tag === "Failure") {
         setOptimisticValue(null);
         const cause = squashAtomCommandFailure(result);
-        setError(cause instanceof Error ? cause.message : "Could not update agent access.");
+        setError(cause instanceof Error ? cause.message : gt("Could not update agent access."));
       }
     } catch (cause) {
       setOptimisticValue(null);
-      setError(cause instanceof Error ? cause.message : "Could not update agent access.");
+      setError(cause instanceof Error ? cause.message : gt("Could not update agent access."));
     }
     setSaving(false);
   };
@@ -652,11 +703,13 @@ function CodespacesAgentAccess({
       <label className="flex items-center justify-between gap-4">
         <span>
           <span id={id + "-label"} className="text-sm font-medium">
-            Agent access
+            <T>Agent access</T>
           </span>
           <span id={id + "-description"} className="mt-1 block text-xs text-muted-foreground">
-            Lets full-access agents create billable workspaces and delete remote files, across all
-            projects on this host.
+            <T>
+              Lets full-access agents create billable workspaces and delete remote files, across all
+              projects on this host.
+            </T>
           </span>
         </span>
         <Switch
@@ -676,7 +729,7 @@ function CodespacesAgentAccess({
             : "sr-only"
         }
       >
-        {saving ? "Saving…" : error}
+        {saving ? gt("Saving…") : error}
       </p>
     </div>
   );

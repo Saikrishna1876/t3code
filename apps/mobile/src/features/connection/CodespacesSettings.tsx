@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
+import { msg, T, useGT, useMessages, Var } from "gt-react-native";
 import { Alert, Linking, Pressable, Switch, View } from "react-native";
 import type {
   Codespace,
@@ -31,6 +32,7 @@ import {
   waitForComposerDraftsLoaded,
 } from "../../state/use-composer-drafts";
 import { uuidv4 } from "../../lib/uuid";
+import { m } from "../../i18n/messages";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { Button } from "../../components/ui/Button";
 
@@ -45,15 +47,16 @@ export function ProjectCodespacesControl({
   const projects = useProjects();
   const selectDetail = useSelectWorkspaceDetail();
   const [preparing, setPreparing] = useState(false);
+  const gt = useGT();
   const supported = environments.find((entry) => entry.environmentId === environmentId)
     ?.serverConfig?.environment.capabilities.codespaces;
   return supported ? (
-    <SettingsSection title="Cloud computer">
+    <SettingsSection title={gt("Cloud computer")}>
       <CodespacesPickerRows environmentId={environmentId} projectId={projectId} />
       <View className="px-4 pb-4">
         <Button
           fullWidth
-          label="Prepare cloud setup"
+          label={gt("Prepare cloud setup")}
           disabled={preparing}
           onPress={() => {
             setPreparing(true);
@@ -75,15 +78,15 @@ export function ProjectCodespacesControl({
                         projects.find(
                           (entry) =>
                             entry.id === projectId && entry.environmentId === environmentId,
-                        )?.title ?? "Cloud setup",
+                        )?.title ?? gt("Cloud setup"),
                     },
                   },
                 });
               })
               .catch(() =>
                 Alert.alert(
-                  "Could not open setup draft",
-                  "Open a new thread for this project and retry.",
+                  m(msg("Could not open setup draft")),
+                  m(msg("Open a new thread for this project and retry.")),
                 ),
               )
               .finally(() => setPreparing(false));
@@ -106,6 +109,8 @@ export function CodespacesPickerRows({
   onCodespaceChange?: (name: string | null) => void;
 }) {
   const [inspectedName, setInspectedName] = useState<string | null>(null);
+  const gt = useGT();
+  const messages = useMessages();
   const name = codespaceName === undefined ? inspectedName : codespaceName;
   const canManage = useAtomValue(codespacesEnvironment.run.permissionAtom(environmentId));
   const project = useEnvironmentQuery(
@@ -123,7 +128,7 @@ export function CodespacesPickerRows({
     (entry) =>
       entry.projectId === projectId || (project.data?.name && entry.name === project.data.name),
   );
-  const feedback = operation ? codespacesOperationPresentation(operation) : null;
+  const feedback = operation ? codespacesOperationPresentation(operation, messages) : null;
   const busy = pending || operation?.status === "running";
   const managed = new Set(state.data?.environments.map((entry) => entry.name));
   const spaces =
@@ -144,7 +149,7 @@ export function CodespacesPickerRows({
     });
     if (result._tag === "Failure") {
       const cause = squashAtomCommandFailure(result);
-      setError(cause instanceof Error ? cause.message : "Could not update project.");
+      setError(cause instanceof Error ? cause.message : gt("Could not update project."));
     }
     setPending(false);
     project.refresh();
@@ -167,7 +172,7 @@ export function CodespacesPickerRows({
     });
     if (result._tag === "Failure") {
       const cause = squashAtomCommandFailure(result);
-      setError(cause instanceof Error ? cause.message : "Could not connect project.");
+      setError(cause instanceof Error ? cause.message : gt("Could not connect project."));
     }
     setPending(false);
     project.refresh();
@@ -176,8 +181,10 @@ export function CodespacesPickerRows({
   return (
     <View className="gap-3 p-4">
       <Text className="text-sm text-foreground-muted">
-        Add computers in Settings, Environments, Codespaces. Projects share a computer in separate
-        /workspaces folders.
+        <T>
+          Add computers in Settings, Environments, Codespaces. Projects share a computer in separate
+          /workspaces folders.
+        </T>
       </Text>
       {error || project.error || inventory.error || state.error ? (
         <Text accessibilityRole="alert" className="text-sm text-destructive">
@@ -196,14 +203,14 @@ export function CodespacesPickerRows({
             {info.setupWarning}
           </Text>
           <Button
-            label="Don't warn again for this project"
+            label={gt("Don't warn again for this project")}
             disabled={busy || !canManage}
             onPress={() => void save(info.name, true)}
           />
         </View>
       ) : info?.setupWarningDismissed ? (
         <Button
-          label="Show setup warnings"
+          label={gt("Show setup warnings")}
           disabled={busy || !canManage}
           onPress={() => void save(info.name, false)}
         />
@@ -212,20 +219,21 @@ export function CodespacesPickerRows({
         <View key={space.name} className="flex-row items-center gap-3">
           <View className="flex-1 gap-1">
             <Text className="text-sm text-foreground">
-              {space.displayName || space.name}
-              {space.name === info?.name ? " (selected)" : ""}
+              {space.name === info?.name
+                ? gt("{name} (selected)", { name: space.displayName || space.name })
+                : space.displayName || space.name}
             </Text>
             <Text className="text-xs text-foreground-muted">
-              {codespaceStateLabel(space.state)}
+              {codespaceStateLabel(space.state, messages)}
             </Text>
           </View>
           <Button
             label={
               space.state === "Shutdown"
-                ? "Start"
+                ? gt("Start", { $context: "button, starts a stopped cloud computer" })
                 : onCodespaceChange
-                  ? "Select"
-                  : "Prepare project"
+                  ? gt("Select", { $context: "button, chooses a cloud computer" })
+                  : gt("Prepare project")
             }
             disabled={busy || !canManage || (!info?.eligible && !info?.name)}
             onPress={() => void select(space.name, space.state === "Shutdown")}
@@ -233,7 +241,9 @@ export function CodespacesPickerRows({
         </View>
       ))}
       {!spaces.length ? (
-        <Text className="text-sm text-foreground-muted">No computers added yet.</Text>
+        <Text className="text-sm text-foreground-muted">
+          <T>No computers added yet.</T>
+        </Text>
       ) : null}
       {feedback ? (
         <View className="gap-1">
@@ -246,7 +256,7 @@ export function CodespacesPickerRows({
       ) : null}
       <Button
         fullWidth
-        label="Refresh status"
+        label={gt("Refresh status")}
         disabled={pending}
         onPress={() => {
           project.refresh();
@@ -255,8 +265,10 @@ export function CodespacesPickerRows({
         }}
       />
       <Text className="text-xs text-foreground-muted">
-        First connection copies your current committed branch. Commit local changes first. Codex and
-        Claude Code run here; other providers require local work.
+        <T>
+          First connection copies your current committed branch. Commit local changes first. Codex
+          and Claude Code run here; other providers require local work.
+        </T>
       </Text>
     </View>
   );
@@ -287,6 +299,8 @@ function ComputerSettings({
   label: string;
 }) {
   const canManage = useAtomValue(codespacesEnvironment.run.permissionAtom(environmentId));
+  const gt = useGT();
+  const messages = useMessages();
   const state = useEnvironmentQuery(
     codespacesEnvironment.state({ environmentId, input: undefined }),
   );
@@ -310,13 +324,13 @@ function ComputerSettings({
   const busy =
     pending || state.data?.operations.some((operation) => operation.status === "running");
   const operation = state.data?.operations.at(-1);
-  const feedback = operation ? codespacesOperationPresentation(operation) : null;
+  const feedback = operation ? codespacesOperationPresentation(operation, messages) : null;
   const authorizing =
     state.data?.authorization?.phase === "starting" ||
     state.data?.authorization?.phase === "waiting";
   const failure = (result: Parameters<typeof squashAtomCommandFailure>[0]) => {
     const cause = squashAtomCommandFailure(result);
-    setError(cause instanceof Error ? cause.message : "Codespace request failed.");
+    setError(cause instanceof Error ? cause.message : gt("Codespace request failed."));
   };
   const execute = async (input: CodespacesRunInput) => {
     setPending(true);
@@ -351,11 +365,13 @@ function ComputerSettings({
         ? editing.space.displayName || editing.space.name
         : editing.space.machine);
   return (
-    <SettingsSection title={`Codespaces · ${label}`}>
+    <SettingsSection title={gt("Codespaces · {label}", { label })}>
       <View className="gap-4 p-4">
         <Text className="text-sm text-foreground-muted">
-          Create a blank cloud computer, then add several projects. Provider login and history stay
-          on your T3 host.
+          <T>
+            Create a blank cloud computer, then add several projects. Provider login and history
+            stay on your T3 host.
+          </T>
         </Text>
         {error || state.error || inventory.error ? (
           <Text accessibilityRole="alert" className="text-sm text-destructive">
@@ -364,7 +380,7 @@ function ComputerSettings({
         ) : null}
         <Button
           fullWidth
-          label={authorizing ? "Cancel GitHub sign-in" : "Sign in for Codespaces access"}
+          label={authorizing ? gt("Cancel GitHub sign-in") : gt("Sign in for Codespaces access")}
           disabled={pending || !canManage}
           onPress={async () => {
             setPending(true);
@@ -381,13 +397,19 @@ function ComputerSettings({
         {state.data?.authorization?.code ? (
           <View className="gap-2">
             <Text selectable className="text-sm text-foreground">
-              GitHub code: {state.data.authorization.code}
+              <T>
+                GitHub code: <Var>{state.data.authorization.code}</Var>
+              </T>
             </Text>
             <Button
-              label="Open GitHub"
+              label={gt("Open {product}", { product: "GitHub" })}
               onPress={() =>
                 void Linking.openURL("https://github.com/login/device").catch(() =>
-                  setError("Open https://github.com/login/device and enter the code above."),
+                  setError(
+                    gt("Open {url} and enter the code above.", {
+                      url: "https://github.com/login/device",
+                    }),
+                  ),
                 )
               }
             />
@@ -398,7 +420,7 @@ function ComputerSettings({
         ) : null}
         <Button
           fullWidth
-          label="New Codespace"
+          label={gt("New Codespace")}
           disabled={busy || !canManage}
           onPress={async () => {
             setPending(true);
@@ -415,9 +437,9 @@ function ComputerSettings({
         {options ? (
           <View className="gap-3">
             <CodespaceOptionPicker
-              label="Machine"
+              label={gt("Machine", { $context: "cloud computer hardware type" })}
               value={machine}
-              placeholder="No machines available"
+              placeholder={gt("No machines available")}
               disabled={busy || !options.machines.length}
               options={options.machines.map((entry) => ({
                 value: entry.name,
@@ -426,21 +448,27 @@ function ComputerSettings({
               onSelect={setMachine}
             />
             <Text className="text-xs text-foreground-muted">
-              Stops after 30 idle minutes. Files are retained for one day after stopping. GitHub
-              compute and storage charges may apply.
+              <T>
+                Stops after 30 idle minutes. Files are retained for one day after stopping. GitHub
+                compute and storage charges may apply.
+              </T>
             </Text>
             <Button
               fullWidth
-              label="Create blank computer"
+              label={gt("Create blank computer")}
               disabled={busy || !machine || !canManage}
               onPress={() =>
                 Alert.alert(
-                  "Create blank computer?",
-                  "Uses github/codespaces-blank. GitHub compute and storage charges may apply.",
+                  m(msg("Create blank computer?")),
+                  m(
+                    msg("Uses {template}. GitHub compute and storage charges may apply.", {
+                      template: "github/codespaces-blank",
+                    }),
+                  ),
                   [
-                    { text: "Cancel", style: "cancel" },
+                    { text: m(msg("Cancel")), style: "cancel" },
                     {
-                      text: "Create",
+                      text: m(msg("Create")),
                       onPress: () =>
                         void execute({
                           action: "create",
@@ -454,7 +482,7 @@ function ComputerSettings({
                 )
               }
             />
-            <Button label="Cancel" onPress={() => setOptions(null)} />
+            <Button label={gt("Cancel")} onPress={() => setOptions(null)} />
           </View>
         ) : null}
         {inventory.data?.codespaces.map((space) => {
@@ -465,13 +493,21 @@ function ComputerSettings({
                 {space.displayName || space.name}
               </Text>
               <Text className="text-xs text-foreground-muted">
-                {codespaceStateLabel(space.state)} · {space.machine}
-                {managed?.connected ? " · Connected" : ""}
+                {managed?.connected
+                  ? gt("{state} · {machine} · Connected", {
+                      state: codespaceStateLabel(space.state, messages),
+                      machine: space.machine,
+                    })
+                  : `${codespaceStateLabel(space.state, messages)} · ${space.machine}`}
               </Text>
               <View className="flex-row flex-wrap gap-2">
                 <Button
                   label={
-                    space.state === "Shutdown" ? "Start" : managed ? "Reconnect" : "Add computer"
+                    space.state === "Shutdown"
+                      ? gt("Start", { $context: "button, starts a stopped cloud computer" })
+                      : managed
+                        ? gt("Reconnect")
+                        : gt("Add computer")
                   }
                   disabled={busy || !canManage}
                   onPress={() =>
@@ -484,7 +520,7 @@ function ComputerSettings({
                 />
                 {space.state === "Available" && managed ? (
                   <Button
-                    label="Stop"
+                    label={gt("Stop", { $context: "button, stops a running cloud computer" })}
                     disabled={busy || !canManage}
                     onPress={() =>
                       void execute({ action: "stop", name: space.name, clientRequestId: uuidv4() })
@@ -492,26 +528,32 @@ function ComputerSettings({
                   />
                 ) : null}
                 <Button
-                  label="Rename"
+                  label={gt("Rename")}
                   disabled={busy || !canManage}
                   onPress={() => void editComputer(space, "rename")}
                 />
                 <Button
-                  label="Change machine"
+                  label={gt("Change machine")}
                   disabled={busy || !canManage || space.state !== "Shutdown"}
                   onPress={() => void editComputer(space, "resize")}
                 />
                 <Button
-                  label="Rebuild"
+                  label={gt("Rebuild", { $context: "button, rebuilds a cloud computer" })}
                   disabled={busy || !canManage || (!managed && space.state !== "Shutdown")}
                   onPress={() =>
                     Alert.alert(
-                      "Rebuild computer?",
-                      "Finish or stop active turns first. Rebuilding affects every project on this computer and may reset installed tools. GitHub compute and storage charges may apply.",
+                      m(msg("Rebuild computer?")),
+                      m(
+                        msg(
+                          "Finish or stop active turns first. Rebuilding affects every project on this computer and may reset installed tools. GitHub compute and storage charges may apply.",
+                        ),
+                      ),
                       [
-                        { text: "Cancel", style: "cancel" },
+                        { text: m(msg("Cancel")), style: "cancel" },
                         {
-                          text: "Rebuild",
+                          text: m(
+                            msg("Rebuild", { $context: "button, rebuilds a cloud computer" }),
+                          ),
                           onPress: () =>
                             void execute({
                               action: "rebuild",
@@ -524,17 +566,21 @@ function ComputerSettings({
                   }
                 />
                 <Button
-                  label="Delete"
+                  label={gt("Delete")}
                   tone="danger"
                   disabled={busy || !canManage}
                   onPress={() =>
                     Alert.alert(
-                      "Delete computer?",
-                      "GitHub permanently deletes every project and unpushed change on this computer. Local history remains.",
+                      m(msg("Delete computer?")),
+                      m(
+                        msg(
+                          "GitHub permanently deletes every project and unpushed change on this computer. Local history remains.",
+                        ),
+                      ),
                       [
-                        { text: "Cancel", style: "cancel" },
+                        { text: m(msg("Cancel")), style: "cancel" },
                         {
-                          text: "Delete",
+                          text: m(msg("Delete")),
                           style: "destructive",
                           onPress: () =>
                             void execute({
@@ -551,20 +597,20 @@ function ComputerSettings({
               {editing?.space.name === space.name ? (
                 <View className="gap-3">
                   <Text className="text-sm font-t3-medium text-foreground">
-                    {editing.kind === "rename" ? "Rename computer" : "Change machine"}
+                    {editing.kind === "rename" ? gt("Rename computer") : gt("Change machine")}
                   </Text>
                   {editing.kind === "rename" ? (
                     <AppTextInput
-                      accessibilityLabel="Computer name"
+                      accessibilityLabel={gt("Computer name")}
                       value={editing.value}
                       editable={!busy && canManage}
                       onChangeText={(value) => setEditing({ ...editing, value })}
                     />
                   ) : (
                     <CodespaceOptionPicker
-                      label="Machine"
+                      label={gt("Machine", { $context: "cloud computer hardware type" })}
                       value={editing.value}
-                      placeholder="Choose a machine"
+                      placeholder={gt("Choose a machine")}
                       disabled={busy || !canManage}
                       options={
                         editing.options?.machines.map((entry) => ({
@@ -577,12 +623,14 @@ function ComputerSettings({
                   )}
                   <Text className="text-xs text-foreground-muted">
                     {editing.kind === "rename"
-                      ? "Update the name shown for this computer across all projects."
-                      : "The computer must stay stopped while changing its machine. This affects every project on it. GitHub compute and storage charges may change."}
+                      ? gt("Update the name shown for this computer across all projects.")
+                      : gt(
+                          "The computer must stay stopped while changing its machine. This affects every project on it. GitHub compute and storage charges may change.",
+                        )}
                   </Text>
                   <View className="flex-row gap-2">
                     <Button
-                      label={editing.kind === "rename" ? "Save name" : "Change machine"}
+                      label={editing.kind === "rename" ? gt("Save name") : gt("Change machine")}
                       disabled={busy || !canManage || !canSaveEdit}
                       onPress={() => {
                         if (!canSaveEdit) return;
@@ -596,7 +644,7 @@ function ComputerSettings({
                         });
                       }}
                     />
-                    <Button label="Cancel" onPress={() => setEditing(null)} />
+                    <Button label={gt("Cancel")} onPress={() => setEditing(null)} />
                   </View>
                 </View>
               ) : null}
@@ -614,16 +662,16 @@ function ComputerSettings({
         ) : null}
         {projects.length ? (
           <CodespaceOptionPicker
-            label="Add or manage a project"
+            label={gt("Add or manage a project")}
             value={projectId}
-            placeholder="Choose a project"
+            placeholder={gt("Choose a project")}
             disabled={!canManage}
             options={projects.map((project) => ({ value: project.id, label: project.title }))}
             onSelect={setProjectId}
           />
         ) : (
           <Text className="text-xs text-foreground-muted">
-            Add a project to this T3 host, then assign it to a computer here.
+            <T>Add a project to this T3 host, then assign it to a computer here.</T>
           </Text>
         )}
         {projectId ? (
@@ -636,10 +684,10 @@ function ComputerSettings({
         {state.data ? (
           <View className="flex-row items-center justify-between gap-3">
             <Text className="flex-1 text-sm text-foreground">
-              Allow agents to manage billable Codespaces
+              <T>Allow agents to manage billable Codespaces</T>
             </Text>
             <Switch
-              accessibilityLabel="Allow agents to manage Codespaces"
+              accessibilityLabel={gt("Allow agents to manage Codespaces")}
               value={state.data.configuration.agentAccessEnabled}
               disabled={busy || !canManage}
               onValueChange={async (enabled) => {
@@ -658,7 +706,7 @@ function ComputerSettings({
         ) : null}
         <Button
           fullWidth
-          label="Refresh status"
+          label={gt("Refresh status")}
           disabled={pending}
           onPress={() => {
             inventory.refresh();
@@ -671,13 +719,17 @@ function ComputerSettings({
 }
 
 function CodespacesLogHelp({ url }: { url: string | null }) {
+  const gt = useGT();
   return url ? (
     <Button
-      label="How to view creation logs"
+      label={gt("How to view creation logs")}
       tone="text"
       onPress={() =>
         void Linking.openURL(url).catch(() =>
-          Alert.alert("Could not open log instructions", `Open ${url} in your browser.`),
+          Alert.alert(
+            m(msg("Could not open log instructions")),
+            m(msg("Open {url} in your browser.", { url })),
+          ),
         )
       }
     />
@@ -740,12 +792,13 @@ export function CodespacesSetupWarning({
   const bind = useAtomCommand(codespacesEnvironment.bind);
   const canManage = useAtomValue(codespacesEnvironment.bind.permissionAtom(environmentId));
   const [pending, setPending] = useState(false);
+  const gt = useGT();
   if (!project.setupWarning || project.setupWarningDismissed) return null;
   return (
     <View className="gap-2">
       <Text className="text-sm text-foreground-muted">{project.setupWarning}</Text>
       <Button
-        label="Don't warn again for this project"
+        label={gt("Don't warn again for this project")}
         disabled={pending || !canManage}
         onPress={async () => {
           setPending(true);
