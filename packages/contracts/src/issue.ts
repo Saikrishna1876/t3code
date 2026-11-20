@@ -305,6 +305,12 @@ export const IssueListProjectError = Schema.Struct({
   projectId: ProjectId,
   projectTitle: TrimmedNonEmptyString,
   message: TrimmedNonEmptyString,
+  /**
+   * The tracker and host the failed read was for. A project may read several, so its git provider
+   * cannot name the one that failed. Absent from servers that predate these fields.
+   */
+  tracker: Schema.optional(IssueTrackerKind),
+  host: Schema.optional(TrimmedNonEmptyString),
 });
 export type IssueListProjectError = typeof IssueListProjectError.Type;
 

@@ -8,6 +8,7 @@ import type {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
+import type { EnvironmentProject } from "./state/shell.ts";
 import {
   continueIssuePage,
   groupIssues,
@@ -219,6 +220,66 @@ describe("groupIssues", () => {
     expect(group!.rows.map((row) => row.url)).toEqual([
       "https://linear.app/acme/issue/ENG-1",
       "https://linear.app/globex/issue/ENG-1",
+    ]);
+  });
+
+  const githubSummary = {
+    tracker: "github",
+    host: "github.com",
+    projectCount: 1,
+    capabilities: { labels: true, assignees: true },
+    configured: true,
+    detail: null,
+  } as IssueTrackerSummary;
+  const linearSummary = {
+    tracker: "linear",
+    host: "linear.app",
+    projectCount: 1,
+    capabilities: { labels: true, assignees: true },
+    configured: true,
+    detail: null,
+  } as IssueTrackerSummary;
+
+  it("groups a Linear failure under Linear, not the project's git host", () => {
+    const githubProject = {
+      environmentId,
+      id: api,
+      repositoryIdentity: { provider: "github" },
+    } as unknown as EnvironmentProject;
+    const error = {
+      projectId: api,
+      projectTitle: "api",
+      message: "Linear refused",
+      tracker: "linear" as IssueTrackerKind,
+      host: "linear.app",
+    };
+    const held = holdIssuePages(
+      [[environmentId, answer({ trackers: [githubSummary, linearSummary], errors: [error] })]],
+      new Map(),
+    );
+    const groups = groupIssues(held, "", [githubProject]);
+    expect(groups.find((group) => group.tracker.tracker === "linear")!.errors).toEqual([
+      { ...error, environmentId },
+    ]);
+    expect(groups.find((group) => group.tracker.tracker === "github")!.errors).toEqual([]);
+  });
+
+  it("keeps a failure with no matching group off an unrelated tracker", () => {
+    const error = {
+      projectId: api,
+      projectTitle: "api",
+      message: "Linear refused",
+      tracker: "linear" as IssueTrackerKind,
+      host: "linear.app",
+    };
+    const held = holdIssuePages(
+      [[environmentId, answer({ trackers: [githubSummary], errors: [error] })]],
+      new Map(),
+    );
+    const groups = groupIssues(held, "", []);
+    expect(groups.find((group) => group.tracker.tracker === "github")!.errors).toEqual([]);
+    expect(groups.find((group) => group.tracker.tracker === "linear")!.errors).toEqual([
+      { ...error, environmentId },
     ]);
   });
 });

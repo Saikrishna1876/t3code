@@ -1,6 +1,7 @@
 import type { PreviewSessionSnapshot } from "@t3tools/contracts";
 import { isLoopbackHost } from "@t3tools/shared/preview";
 import { msg } from "gt-react-native";
+import { Platform } from "react-native";
 
 import { m, type MessageResolver } from "../../i18n/messages";
 
@@ -25,11 +26,18 @@ export function browserTabTitle(tab: PreviewSessionSnapshot, resolve: MessageRes
   }
 }
 
-/** The tab's URL for this device's tunnelled webview, when it is one of the environment's loopback pages. */
-export function loopbackUrlForDevice(value: string): string | null {
+/**
+ * The tab's URL for this device's tunnelled webview, when it is one of the environment's loopback pages.
+ *
+ * iOS carries loopback under a stand-in host, but an HTTPS server's certificate names `localhost`.
+ * WKWebView verifies the stand-in and rejects that certificate, so HTTPS loopback is left to the
+ * streamed browser there. Android keeps the real host in its proxy override and can verify it.
+ */
+export function loopbackUrlForDevice(value: string, os: string = Platform.OS): string | null {
   try {
     const url = new URL(value);
     if (!/^https?:$/.test(url.protocol)) return null;
+    if (os === "ios" && url.protocol === "https:") return null;
     // The unspecified address would name this device's own interfaces, so use localhost instead.
     if (url.hostname === "0.0.0.0" || url.hostname === "[::]") url.hostname = "localhost";
     if (!isLoopbackHost(url.hostname)) return null;

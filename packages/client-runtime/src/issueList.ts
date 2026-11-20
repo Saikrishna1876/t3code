@@ -100,21 +100,20 @@ export function issueOrder(sort: IssueListSort) {
   return (left: IssueListEntry, right: IssueListEntry) => date(right) - date(left);
 }
 
+interface IssueTrackerGroup {
+  tracker: IssueTrackerSummary;
+  rows: EnvironmentIssueEntry[];
+  errors: Array<IssueListProjectError & { readonly environmentId: EnvironmentId }>;
+  more: EnvironmentId[];
+}
+
 export function groupIssues(
   held: ReadonlyMap<EnvironmentId, HeldIssuePage>,
   query: string,
   projects: ReadonlyArray<EnvironmentProject>,
   sort: IssueListSort = "updated",
 ) {
-  const byTracker = new Map<
-    string,
-    {
-      tracker: IssueTrackerSummary;
-      rows: EnvironmentIssueEntry[];
-      errors: Array<{ projectTitle: string; message: string; environmentId: EnvironmentId }>;
-      more: EnvironmentId[];
-    }
-  >();
+  const byTracker = new Map<string, IssueTrackerGroup>();
   const listed = new Set<string>();
   const needle = query.toLowerCase();
   for (const [environmentId, page] of held) {
@@ -144,6 +143,31 @@ export function groupIssues(
       group.rows.push({ ...entry, environmentId });
     }
     for (const error of page.errors) {
+      if (error.tracker !== undefined && error.host !== undefined) {
+        const key = issueTrackerKey({ tracker: error.tracker, host: error.host });
+        let group = byTracker.get(key);
+        if (group === undefined) {
+          // No summary named this tracker, but the error still does; keep it under its own name
+          // instead of borrowing a host whose only fault was answering the listing.
+          group = {
+            tracker: {
+              tracker: error.tracker,
+              host: error.host,
+              projectCount: 1,
+              capabilities: null,
+              configured: true,
+              detail: null,
+            },
+            rows: [],
+            errors: [],
+            more: [],
+          };
+          byTracker.set(key, group);
+        }
+        group.errors.push({ ...error, environmentId });
+        continue;
+      }
+      // Older servers did not name the failing tracker; fall back to the project's git host.
       const project = projects.find(
         (p) => p.environmentId === environmentId && p.id === error.projectId,
       );

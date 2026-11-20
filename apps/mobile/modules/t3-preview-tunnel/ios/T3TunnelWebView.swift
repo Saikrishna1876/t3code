@@ -82,15 +82,23 @@ final class T3TunnelWebView: ExpoView, WKNavigationDelegate {
     }
   }
 
+  /// HTTPS loopback would fail TLS verification at the stand-in host, so it is reported as
+  /// unsupported instead of loaded. The URL is the reason; the screen localizes the surrounding text.
+  private func refuseHttpsLoopback(_ url: URL) -> Bool {
+    guard T3Loopback.needsStreamedBrowser(url) else { return false }
+    onLoadError(["code": -1, "description": url.absoluteString, "url": ""])
+    return true
+  }
+
   func load(_ url: String) {
     guard let webView else {
       pendingUrl = url
       return
     }
     pendingUrl = nil
-    guard let target = URL(string: url).map(T3Loopback.standIn), webView.url != target else {
-      return
-    }
+    guard let original = URL(string: url), !refuseHttpsLoopback(original) else { return }
+    let target = T3Loopback.standIn(original)
+    guard webView.url != target else { return }
     requestedUrl = target
     webView.load(URLRequest(url: target))
   }
@@ -101,7 +109,8 @@ final class T3TunnelWebView: ExpoView, WKNavigationDelegate {
       pendingUrl = url
       return
     }
-    guard let target = URL(string: url).map(T3Loopback.standIn) else { return }
+    guard let original = URL(string: url), !refuseHttpsLoopback(original) else { return }
+    let target = T3Loopback.standIn(original)
     requestedUrl = target
     webView.load(URLRequest(url: target))
   }
@@ -203,13 +212,19 @@ final class T3TunnelWebView: ExpoView, WKNavigationDelegate {
     decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
   ) {
     let url = navigationAction.request.url
-    guard let url, navigationAction.targetFrame?.isMainFrame ?? true,
-      T3Loopback.standIn(url) != url
-    else { return decisionHandler(.allow) }
+    guard let url, navigationAction.targetFrame?.isMainFrame ?? true else {
+      return decisionHandler(.allow)
+    }
+    if T3Loopback.needsStreamedBrowser(url) {
+      decisionHandler(.cancel)
+      _ = refuseHttpsLoopback(url)
+      return
+    }
+    let target = T3Loopback.standIn(url)
+    guard target != url else { return decisionHandler(.allow) }
     decisionHandler(.cancel)
     // The same request at the stand-in host, so a form keeps its method, headers and body.
     var request = navigationAction.request
-    let target = T3Loopback.standIn(url)
     request.url = target
     requestedUrl = target
     webView.load(request)
@@ -362,8 +377,19 @@ enum T3Loopback {
     return false
   }
 
+  /// HTTPS loopback cannot use the stand-in host. The SOCKS listener carries TLS bytes unchanged,
+  /// so WKWebView verifies the stand-in against a certificate that names `localhost` and rejects it.
+  /// These pages belong to the streamed browser, which opens them on the environment itself.
+  static func needsStreamedBrowser(_ url: URL) -> Bool {
+    guard url.scheme?.lowercased() == "https",
+      let host = url.host(percentEncoded: false)
+    else { return false }
+    return isLoopbackHost(host) || host.lowercased() == standInHost
+  }
+
   static func standIn(_ url: URL) -> URL {
-    guard let host = url.host(percentEncoded: false), isLoopbackHost(host) else { return url }
+    guard !needsStreamedBrowser(url), let host = url.host(percentEncoded: false), isLoopbackHost(host)
+    else { return url }
     return replacingHost(url, with: standInHost)
   }
 

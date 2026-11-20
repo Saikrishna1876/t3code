@@ -485,7 +485,13 @@ describe("IssueService", () => {
       ).toEqual(["Acme/Web", "Acme/Web"]);
       expect(result.nextCursors).toEqual({ "github.com acme/web": "next" });
       expect(result.errors).toEqual([
-        { projectId: "api", projectTitle: "api", message: "The issue tracker request failed." },
+        {
+          projectId: "api",
+          projectTitle: "api",
+          message: "The issue tracker request failed.",
+          tracker: "github",
+          host: "github.com",
+        },
       ]);
       expect(result.viewers).toEqual({});
       expect(result.trackers).toEqual([
@@ -522,7 +528,13 @@ describe("IssueService", () => {
       expect(listed).toEqual(["Acme/Web"]);
       expect(failed.nextCursors).toEqual(result.nextCursors);
       expect(failed.errors).toEqual([
-        { projectId: "web", projectTitle: "web", message: "try again" },
+        {
+          projectId: "web",
+          projectTitle: "web",
+          message: "try again",
+          tracker: "github",
+          host: "github.com",
+        },
       ]);
       const next = yield* service.list({ state: "open", cursors: failed.nextCursors });
       expect(next.entries.map((entry) => [entry.projectId, entry.key])).toEqual([["web", "4"]]);
@@ -720,6 +732,39 @@ describe("IssueService with a standalone tracker", () => {
         _tag: "IssueOperationError",
         operation: "listProjects",
       });
+    }),
+  );
+
+  it.effect("names the tracker and host of a failed scope in the listing error", () =>
+    Effect.gen(function* () {
+      const service = yield* makeService({
+        projects: [project({ id: "web", repository: "acme/web" })],
+        trackers: [
+          fakeTracker(),
+          fakeStandaloneTracker({
+            listIssues: () =>
+              Effect.fail(
+                new IssueTrackerError({
+                  tracker: LINEAR,
+                  operation: "listIssues",
+                  reason: "failed",
+                  detail: "Linear refused",
+                }),
+              ),
+          }),
+        ],
+        bindings: { ["web" as ProjectId]: { tracker: LINEAR, scope: "ENG" } },
+      });
+      const result = yield* service.list({ state: "open" });
+      expect(result.errors).toEqual([
+        {
+          projectId: "web",
+          projectTitle: "web (ENG)",
+          message: "Linear refused",
+          tracker: LINEAR,
+          host: "linear.app",
+        },
+      ]);
     }),
   );
 });

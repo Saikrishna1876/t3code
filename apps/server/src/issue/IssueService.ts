@@ -438,6 +438,8 @@ const make = Effect.gen(function* () {
                 ? `${project.project.title} (${project.scope})`
                 : project.project.title,
               message: trackerDetail(page.failure),
+              tracker: project.tracker,
+              host: project.host,
             });
             return;
           }

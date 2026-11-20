@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+vi.mock("react-native", () => ({ Platform: { OS: "ios" } }));
 
 import { loopbackUrlForDevice } from "./browserTabs";
 
@@ -16,5 +18,22 @@ describe("loopbackUrlForDevice", () => {
     expect(loopbackUrlForDevice("http://192.168.1.5:3000/")).toBeNull();
     expect(loopbackUrlForDevice("file:///tmp/a.html")).toBeNull();
     expect(loopbackUrlForDevice("")).toBeNull();
+  });
+
+  it("leaves HTTPS loopback to the streamed browser on iOS", () => {
+    // The stand-in host breaks the certificate check, so the tunnel webview must not get these.
+    expect(loopbackUrlForDevice("https://localhost:5173/app", "ios")).toBeNull();
+    expect(loopbackUrlForDevice("https://127.0.0.1:8443/", "ios")).toBeNull();
+    expect(loopbackUrlForDevice("https://[::1]:8443/", "ios")).toBeNull();
+    expect(loopbackUrlForDevice("https://0.0.0.0:8443/", "ios")).toBeNull();
+  });
+
+  it("keeps HTTPS loopback on the device where the real host is proxied", () => {
+    expect(loopbackUrlForDevice("https://localhost:5173/app", "android")).toBe(
+      "https://localhost:5173/app",
+    );
+    expect(loopbackUrlForDevice("http://localhost:5173/app", "ios")).toBe(
+      "http://localhost:5173/app",
+    );
   });
 });
