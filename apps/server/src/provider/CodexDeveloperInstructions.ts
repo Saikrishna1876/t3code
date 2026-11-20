@@ -37,6 +37,16 @@ export interface CodexRuntimeInfo {
   readonly reasoningEffort?: string | undefined;
 }
 
+// Tool descriptions already carry these two instructions; the runtime copy is redundant.
+const PR_TOOL_PREFERENCE =
+  " When pull_request_* tools are listed, use them, not gh or cafe, to read, list, open, edit, review, reply on, close, or merge PRs, and ci_logs and ci_rerun for their checks. pull_request_create links for you.";
+const ISSUE_LINKING =
+  "\nIf available, call link_issue for each issue you take on or file, even via CLI; skip issues you only read.";
+
+export function compactRuntimeInstructions(value: string): string {
+  return value.replace(PR_TOOL_PREFERENCE, "").replace(ISSUE_LINKING, "");
+}
+
 /** Keep this outside collaboration mode; model-catalog mode text overrides client developer_instructions. */
 export function buildCodexAdditionalContext(
   runtime: CodexRuntimeInfo,
@@ -53,7 +63,7 @@ export function buildCodexAdditionalContext(
     ),
     t3_code_runtime: {
       kind: "application",
-      value: buildRuntimeInstructions({ harness: "Codex", ...runtime }),
+      value: compactRuntimeInstructions(buildRuntimeInstructions({ harness: "Codex", ...runtime })),
     },
     ...(tools ? { t3_code_tools: { kind: "application", value: tools } } : {}),
   };

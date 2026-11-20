@@ -59,7 +59,7 @@ const readonlyBrowserTool = <T extends Tool.Any>(tool: T): T =>
 
 const PreviewStatusTool = Tool.make("preview_status", {
   description:
-    "List thread preview tabs. Automate only runtime:'server' via preview_*; never send other tabIds. Other tabs belong to user's local desktop. Tell user those tabs cannot be reached from this environment.",
+    "List thread preview tabs. Automate only `runtime:'server'` via preview_*; never pass other tabIds. Others are on user's local desktop, unreachable here.",
   parameters: PreviewAutomationTabTargetInput,
   success: PreviewAutomationStatus,
   failure: PreviewToolFailure,
@@ -77,7 +77,7 @@ const EnvironmentPortTarget = BrowserNavigationTarget.members[1];
 const PreviewOpenTool = browserTool(
   Tool.make("preview_open", {
     description:
-      "Open/show a thread preview tab. Dev server: target, not url. open=false: background. Reuses current tab unless tabId or reuseExistingTab=false. Parallel subagents must each set reuseExistingTab=false and use their returned tabId.",
+      "Open/show preview tab. Dev server: `target`, not `url`. `open=false`: background. Reuses tab unless `tabId` or `reuseExistingTab=false`. Parallel subagents: set that false, use returned `tabId`.",
     parameters: PreviewAutomationOpenInput.mapFields(
       (fields) => ({ ...fields, target: Schema.optional(EnvironmentPortTarget) }),
       { unsafePreserveChecks: true },
@@ -93,7 +93,7 @@ const PreviewOpenTool = browserTool(
 const PreviewDialogTool = browserTool(
   Tool.make("preview_dialog", {
     description:
-      "Accept or dismiss the dialog `preview_status` reports. Pass `promptText` to accept a prompt. Needs your own tab, or an unclaimed one. Desktop hosts may not support this.",
+      "Accept/dismiss dialog from `preview_status`. `promptText` accepts a prompt. Needs your own or unclaimed tab.",
     parameters: PreviewAutomationDialogInput,
     success: PreviewAutomationStatus,
     failure: PreviewToolFailure,
@@ -104,7 +104,7 @@ const PreviewDialogTool = browserTool(
 const PreviewNavigateTool = safeBrowserTool(
   Tool.make("preview_navigate", {
     description:
-      "Navigate the chosen tab. Pass `url` for a website, or `target:{kind:'environment-port',port}` for a dev server. Exactly one of `url` and `target`.",
+      "Navigate tab. `url` for website or `target:{kind:'environment-port',port}` for dev server; exactly one.",
     parameters: PreviewAutomationNavigateInput,
     success: PreviewAutomationStatus,
     failure: PreviewToolFailure,
@@ -115,7 +115,7 @@ const PreviewNavigateTool = safeBrowserTool(
 const PreviewResizeTool = safeBrowserTool(
   Tool.make("preview_resize", {
     description:
-      "Resize the chosen tab: {mode:'fill'}, {mode:'freeform',width,height}, or {mode:'preset',preset,orientation}. Changes CSS size only, not the user agent.",
+      "Resize tab: {mode:'fill'}, {mode:'freeform',width,height}, or {mode:'preset',preset,orientation}. CSS size only.",
     parameters: PreviewAutomationResizeInput,
     success: Schema.Struct({ ...PreviewAutomationResizeResult.fields, ...presentationFields }),
     failure: PreviewToolFailure,
@@ -145,7 +145,7 @@ const PreviewSetAppearanceTool = safeBrowserTool(
 export const PreviewSnapshotTool = safeBrowserTool(
   Tool.make("preview_snapshot", {
     description:
-      "Requested browser work only, including edit checks. No unasked edits/earlier snapshots. Human-driven tabs supported. Returns state/elements/diagnostics/screenshot size. Use accessibilityTree refs, including frames: locator='aria-ref=<ref>'. Navigation/snapshot/handoff expires refs. Text ~20 KB; preview_evaluate reads more on own/unclaimed tabs. Requested screenshot: save=true, embed ![alt](screenshotPath).",
+      "Requested browser work only. Use accessibilityTree refs incl. frames: `locator='aria-ref=<ref>'`. Navigation/snapshot expires refs. Returns state/elements/diagnostics/screenshot size. Text ~20 KB. Screenshot: `save=true`, embed `![alt](screenshotPath)`.",
     parameters: Schema.Struct({
       ...PreviewAutomationTabTargetInput.fields,
       includeImage: Schema.optional(
@@ -168,7 +168,7 @@ export const PreviewSnapshotTool = safeBrowserTool(
 const PreviewActTool = browserTool(
   Tool.make("preview_act", {
     description:
-      "Act on tab: locator='aria-ref=<ref>' from preview_snapshot, or x AND y. timeoutMs=15000 default. click: button/clickCount 1–3. type literal text; clear replaces. hover: menus/tooltips. select native values/labels; custom dropdown: open then click option. drag source to target. upload absolute paths for reported picker, [] cancels; locator for <input type=file>. press key+modifiers on focus; click field first. scroll tab/locator; positive deltaY down, deltaX right.",
+      "Act on tab: `locator='aria-ref=<ref>'` from snapshot, or x AND y. Supports click, type, clear, hover, select, drag, upload, press, scroll. timeoutMs default 15000.",
     parameters: PreviewAutomationActInput,
     success: Schema.Union([
       Schema.Struct({ ...PreviewAutomationSelectResult.fields, ...presentationFields }),
@@ -190,7 +190,7 @@ export const PreviewEvaluateResult = Schema.Struct({
 const PreviewEvaluateTool = browserTool(
   Tool.make("preview_evaluate", {
     description:
-      "Run page JavaScript; may mutate state. Returns {value}, capped 64 KB. Requires own/unclaimed tab. Human-driven tab reads: preview_snapshot. Page tools write only on user request; show results via html_render, never page tools.",
+      "Run page JS; may mutate state. Returns {value}, capped 64 KB. Needs own/unclaimed tab. Human tabs: preview_snapshot. Write only on user request; show results via html_render.",
     parameters: PreviewAutomationEvaluateInput,
     success: PreviewEvaluateResult,
     failure: PreviewToolFailure,

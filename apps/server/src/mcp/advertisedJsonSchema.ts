@@ -25,6 +25,9 @@ const SAFE_INTEGER_BOUNDS: Record<string, number> = {
 const isNonStringEnum = (key: string, value: Json) =>
   key === "enum" && Array.isArray(value) && value.some((item) => typeof item !== "string");
 
+// Keep field hints that carry limits or hard rules; the rest only restate the field name.
+const keepsFieldHint = (value: string) => /\d|Never|Only|Must|required/.test(value);
+
 const tagOf = (branch: JsonObject, key: string): Json => {
   const property = Predicate.isObject(branch.properties) ? branch.properties[key] : undefined;
   return Predicate.isObject(property) && Array.isArray(property.enum) && property.enum.length === 1
@@ -80,6 +83,7 @@ const compact = (schema: Json, optional: boolean): Json => {
     if (key === "additionalProperties" && value === true) continue;
     if (SAFE_INTEGER_BOUNDS[key] === value) continue;
     if (isNonStringEnum(key, value)) continue;
+    if (key === "description" && typeof value === "string" && !keepsFieldHint(value)) continue;
     result[key] =
       key === "properties" && Predicate.isObject(value)
         ? Object.fromEntries(
@@ -102,10 +106,9 @@ const compact = (schema: Json, optional: boolean): Json => {
 };
 
 /**
- * The input schema T3 advertises for a tool. Drops JSON noise that every thread pays for:
- * `additionalProperties: true`, safe-integer bounds, nested `anyOf`, JSON-string fallbacks, and
- * the `null` branch of optional properties. A tagged union of objects becomes one object.
- * Decoding still uses the full schema, so each tag's own required fields still apply.
+ * Advertised tool input schema. Drops JSON noise every thread pays for: bounds, nested `anyOf`,
+ * JSON-string fallbacks, optional `null` branches, field hints without limits. A tagged union
+ * collapses to one object; decoding still uses the full schema, so each tag's required fields apply.
  */
 export const advertisedJsonSchema = (tool: Tool.Any) =>
   compact(Tool.getJsonSchema(tool), false) as ReturnType<typeof Tool.getJsonSchema>;

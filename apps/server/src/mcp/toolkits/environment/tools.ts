@@ -61,7 +61,7 @@ const EnvironmentReadTool = Tool.make("t3_environment_read", {
 const EnvironmentPreferencesTool = Tool.make("t3_environment_preferences_update", {
   ...shared,
   description:
-    "Update environment-wide preferences. Live full-access or default caller thread only. Omitted fields are unchanged; `customInstructions: ''` clears it.",
+    "Update environment-wide preferences. Live full-access/default caller only. Omitted fields unchanged; `customInstructions: ''` clears.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     defaultThreadEnvMode: ServerSettingsPatch.fields.defaultThreadEnvMode,
@@ -75,7 +75,7 @@ const EnvironmentPreferencesTool = Tool.make("t3_environment_preferences_update"
 const CodespacesListTool = Tool.make("codespaces_list", {
   ...shared,
   description:
-    "List this controller's GitHub Codespaces. Uses the GitHub account configured on this T3 host. Does not start compute.",
+    "List this controller's Codespaces using the host's GitHub account. Does not start compute.",
   success: CodespacesListResult,
 })
   .annotate(Tool.Readonly, true)
@@ -83,14 +83,14 @@ const CodespacesListTool = Tool.make("codespaces_list", {
 const CodespacesRunTool = Tool.make("codespaces_run", {
   ...shared,
   description:
-    "Manage Codespaces. Create: github/codespaces-blank, project optional. projectId transfers committed branch to separate /workspaces checkout; no GitHub origin/devcontainer. Lifecycle setup requires memory limits; failures keep files. Only this project/bound computer. Requires full-access + Settings > Environments > Codespaces agent management. Create/start may cost; delete loses unpushed files. New clientRequestId per request, reuse retries; await codespaces_status. Project lifecycle requires ALL turns idle, yours too; force cannot bypass. After turn, user can use Settings/Run on > named computer.",
+    "Manage Codespaces. Create: github/codespaces-blank; `projectId` moves a committed branch to /workspaces (no GitHub origin/devcontainer). Setup needs memory limits; failures keep files. Needs full-access + Settings > Environments > Codespaces agent management. Create/start costs; delete loses unpushed files. New `clientRequestId`, reuse retries; await `codespaces_status`. All turns idle; force cannot bypass.",
   parameters: Schema.Struct({ input: CodespacesRunInput }),
   success: CodespacesOperation,
 }).annotate(Tool.Destructive, true);
 const CodespacesStatusTool = Tool.make("codespaces_status", {
   ...shared,
   description:
-    "Read controller operation progress and managed Codespace identities. Does not return credentials or change compute.",
+    "Read controller operation progress and managed Codespace identities. No credentials, no compute change.",
   success: Schema.Struct({ operations: Schema.Array(CodespacesOperation) }),
 })
   .annotate(Tool.Readonly, true)

@@ -34,7 +34,7 @@ const shared = {
 const AttachmentUploadTool = Tool.make("t3_attachment_prepare_upload", {
   ...shared,
   description:
-    "Get an upload URL. POST the file's exact bytes to `uploadUrl` (else this server's `relativeUrl`), then send via `t3_thread_send_attachments` with the returned `attachmentId`.",
+    "Get upload URL. POST exact bytes to `uploadUrl` (or `relativeUrl`), then send via `t3_thread_send_attachments` with `attachmentId`.",
   parameters: Schema.Struct({ upload: AttachmentCreateUploadUrlInput }),
   success: Schema.Struct({
     ...AttachmentCreateUploadUrlResult.fields,
@@ -51,7 +51,7 @@ const AttachmentSendTool = Tool.make("t3_thread_send_attachments", {
   ...shared,
   dependencies: [...shared.dependencies, DocumentText.DocumentText],
   description:
-    "Send uploaded attachments as a new message to a thread. No retry key. Target modes cannot exceed yours. Success does not mean the provider read them or finished.",
+    "Send uploaded attachments as a new message. No retry key. Target modes cannot exceed yours. Success does not mean the provider read them.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     message: Schema.optional(Schema.String.check(Schema.isMaxLength(120000))),

@@ -84,13 +84,12 @@ import Migration0073 from "./Migrations/073_ActiveTurnItemIndexes.ts";
 import Migration0074 from "./Migrations/074_ExcludeAttachmentPlaceholdersFromSearch.ts";
 import Migration0075 from "./Migrations/075_SubagentDeliveryState.ts";
 import Migration0076 from "./Migrations/076_ProjectionProjectsPinArchive.ts";
+import ScheduledTaskCodespace from "./Migrations/077_ScheduledTaskCodespace.ts";
 import Migration0078 from "./Migrations/078_RepairBooleanSettledOverride.ts";
 import Migration0079 from "./Migrations/079_DropOrchestrationEventCorrelationIndex.ts";
 import Migration0080 from "./Migrations/080_DelegatedRecoveryIndexes.ts";
 import Migration0081 from "./Migrations/081_ScheduledTaskThreadMode.ts";
 import Migration0082 from "./Migrations/082_ProjectionMessageSearchText.ts";
-
-import ScheduledTaskCodespace from "./Migrations/077_ScheduledTaskCodespace.ts";
 import Migration0083 from "./Migrations/083_TurnItemConversationIndex.ts";
 import Migration0084 from "./Migrations/084_CommandReadIndexes.ts";
 import Migration0085 from "./Migrations/085_LastExecutedRunIndex.ts";
@@ -106,6 +105,12 @@ import Migration0094 from "./Migrations/094_ProviderTurnAttemptIndex.ts";
 import Migration0095 from "./Migrations/095_TurnItemMessageOrdinalIndex.ts";
 import Migration0096 from "./Migrations/096_TurnItemInlineWorkOutput.ts";
 import Migration0097 from "./Migrations/097_RepairStaleTitleRegeneration.ts";
+import Migration0098 from "./Migrations/097_IssueTrackerBindings.ts";
+import Migration0099 from "./Migrations/098_ActiveShellIndexIndexes.ts";
+import Migration0100 from "./Migrations/099_BackgroundRecoveryIndexes.ts";
+import Migration0101 from "./Migrations/100_TurnStartReadIndexes.ts";
+import Migration0102 from "./Migrations/101_DelegatedTaskReadIndexes.ts";
+import Migration0103 from "./Migrations/102_ThreadItemCounts.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -207,6 +212,12 @@ const migrationEntries = [
   [95, "TurnItemMessageOrdinalIndex", Migration0095],
   [96, "TurnItemInlineWorkOutput", Migration0096],
   [97, "RepairStaleTitleRegeneration", Migration0097],
+  [98, "IssueTrackerBindings", Migration0098],
+  [99, "ActiveShellIndexIndexes", Migration0099],
+  [100, "BackgroundRecoveryIndexes", Migration0100],
+  [101, "TurnStartReadIndexes", Migration0101],
+  [102, "DelegatedTaskReadIndexes", Migration0102],
+  [103, "ThreadItemCounts", Migration0103],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
