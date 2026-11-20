@@ -99,7 +99,9 @@ jobs:
           vp run --filter @t3tools/desktop ensure:electron
           node -e "if (require('./apps/desktop/node_modules/electron/package.json').version !== '43.6.0') throw Error('Installed Electron pin changed')"
           node apps/server/node_modules/playwright-core/cli.js install --only-shell chromium
-          ./node_modules/.bin/vp test run apps/desktop/src/preview/Manager.test.ts apps/desktop/src/electron/ElectronShell.test.ts apps/desktop/src/preview/DesktopBrowserHost.test.ts apps/server/src/preview/ServerBrowser.test.ts apps/desktop/src/window/ContextMenuImage.test.ts
+          # Run from each package so the root config does not load uninstalled mobile projects.
+          (cd apps/desktop && ../../node_modules/.bin/vp test run src/preview/Manager.test.ts src/electron/ElectronShell.test.ts src/preview/DesktopBrowserHost.test.ts src/window/ContextMenuImage.test.ts)
+          (cd apps/server && ../../node_modules/.bin/vp test run src/preview/ServerBrowser.test.ts)
           vp run --filter @t3tools/desktop typecheck
 
       - name: Set release version and public configuration
