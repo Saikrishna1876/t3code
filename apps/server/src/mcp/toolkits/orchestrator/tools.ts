@@ -74,7 +74,7 @@ const threadMetadataDependencies = [
 
 const OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   description:
-    "List providers, models, options, modes for `delegate_task`. Short list; `search` finds others. Any catalog model works.",
+    "List delegate_task providers/models/options/modes. Search extends list; any catalog model works.",
   parameters: OrchestratorMcpCapabilitiesInput,
   success: OrchestratorMcpCapabilitiesResult,
   failure: OrchestratorMcpFailure,
@@ -88,7 +88,7 @@ const OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
 
 const DelegateTaskTool = Tool.make("delegate_task", {
   description:
-    "Start one child agent with only `task`. No parent history. Separate checkout/PR: `isolation:'worktree'`. Keep `taskId` for `task_status`/`task_cancel`. No secrets in `task`.",
+    "Start one child with task only; no parent history/secrets. Separate checkout/PR: isolation='worktree'. Keep taskId for task_status/task_cancel.",
   parameters: OrchestratorMcpDelegateTaskInput,
   success: OrchestratorMcpDelegateTaskResult,
   failure: OrchestratorMcpFailure,
@@ -102,7 +102,7 @@ const DelegateTaskTool = Tool.make("delegate_task", {
 
 const TaskStatusTool = Tool.make("task_status", {
   description:
-    "Read your task. Running: await wake. workState: working, waiting_for_children, result_available; live children mean not done. `summary`: final result; reading marks delivered.",
+    "Read own task. Running: await wake. workState: working/waiting_for_children/result_available; live children still running. summary reads result and marks delivered.",
   parameters: OrchestratorMcpTaskStatusInput,
   success: OrchestratorMcpDelegateTaskResult,
   failure: OrchestratorMcpFailure,
@@ -116,8 +116,7 @@ const TaskStatusTool = Tool.make("task_status", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const TaskCancelTool = Tool.make("task_cancel", {
-  description:
-    "Stop a delegated task by `taskId`: its turns, delegates, PR watches, later child-thread runs. Finished task keeps result.",
+  description: "Stop task turns/delegates/PR watches/later child runs. Finished task keeps result.",
   parameters: OrchestratorMcpTaskCancelInput,
   success: OrchestratorMcpTaskCancelResult,
   failure: OrchestratorMcpFailure,
@@ -129,8 +128,7 @@ const TaskCancelTool = Tool.make("task_cancel", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const WorkflowStopTool = Tool.make("t3_workflow_stop", {
-  description:
-    "Stop a Claude workflow. `subagentId`: coordinator from `t3_thread_read` 'activity'. Workflow only, not thread.",
+  description: "Stop Claude workflow only. subagentId from t3_thread_read activity.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     ...OrchestrationV2StopWorkflowInput.fields,
@@ -145,7 +143,7 @@ const WorkflowStopTool = Tool.make("t3_workflow_stop", {
 
 const BackgroundWaitTool = Tool.make("t3_background_wait", {
   description:
-    "Keep thread Working while background work runs. Pass task ID once started. Not for work left running. `waiting=false` clears; no stop. Claude/OpenCode only.",
+    "Keep Working while temporary background task runs. Pass task ID once started. waiting=false clears without stopping. Skip servers/watchers.",
   parameters: Schema.Struct({
     taskIds: Schema.Array(TrimmedNonEmptyString).check(
       Schema.isMinLength(1),
@@ -165,11 +163,11 @@ const BackgroundWaitTool = Tool.make("t3_background_wait", {
   // Only marks which tasks keep the thread Working; Claude Plan mode blocks tools without this.
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
-  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenWithoutBackgroundWait);
 
 const ScheduleTaskTool = Tool.make("schedule_task", {
   description:
-    "Schedule without active turn: prompt + schedule object. `scheduledTaskId` updates fields; `enabled=false` pauses. Report next run/webhookUrl. URL only on creation with T3 Connect + run permission.",
+    "Schedule prompt without running. Update by scheduledTaskId; enabled=false pauses. Report next run/webhookUrl. URL only on creation with T3 Connect + run grant.",
   parameters: OrchestratorMcpSaveScheduledTaskInput,
   success: OrchestratorMcpScheduleTaskResult,
   failure: OrchestratorMcpFailure,
@@ -183,7 +181,7 @@ const ScheduleTaskTool = Tool.make("schedule_task", {
 const ListScheduledTasksTool = Tool.make("list_scheduled_tasks", {
   parameters: OrchestratorMcpListScheduledTasksInput,
   description:
-    "List scheduled tasks. Omit `projectId` for this thread's project. Pass `scheduledTaskId` to `schedule_task`/`delete_scheduled_task`. In a scheduled run, just do the prompt.",
+    "List schedules, default this thread's project. scheduledTaskId updates/deletes. When scheduled, execute prompt.",
   success: OrchestratorMcpListScheduledTasksResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",
@@ -195,8 +193,7 @@ const ListScheduledTasksTool = Tool.make("list_scheduled_tasks", {
   .annotate(Tool.Idempotent, true);
 
 const DeleteScheduledTaskTool = Tool.make("delete_scheduled_task", {
-  description:
-    "Delete a scheduled task by `scheduledTaskId`; stops at once. To pause: `schedule_task` with `enabled=false`.",
+  description: "Delete by scheduledTaskId immediately. Pause via schedule_task enabled=false.",
   parameters: OrchestratorMcpDeleteScheduledTaskInput,
   success: OrchestratorMcpDeleteScheduledTaskResult,
   failure: OrchestratorMcpFailure,
@@ -208,7 +205,7 @@ const DeleteScheduledTaskTool = Tool.make("delete_scheduled_task", {
 
 const RequestSecretTool = Tool.make("request_secret", {
   description:
-    "Ask for one secret per single-line card; never combine values. Open it, don't offer it. Returns one-use `secretRef`, or `delivery:'file'` readable only in its command. Sign-in: `url`. Pasted secret: `value`.",
+    "Open private card even when asked how. One value per single-line input. One-use secretRef or delivery='file' readable only in its command. Sign-in: url. Pasted secret for child/script: value. Never from old threads.",
   parameters: OrchestratorMcpRequestSecretInput,
   success: OrchestratorMcpRequestSecretResult,
   failure: OrchestratorMcpFailure,
@@ -223,7 +220,7 @@ const RequestSecretTool = Tool.make("request_secret", {
 
 const CreateThreadsTool = Tool.make("create_threads", {
   description:
-    "Create top-level threads in this checkout. Not delegation. One thread or its own worktree: `t3_thread_launch`. Project, branch, worktree inherit.",
+    "Create top-level threads inheriting checkout/project/branch. For one or custom worktree use t3_thread_launch. No delegation.",
   parameters: OrchestratorMcpCreateThreadsInput,
   success: OrchestratorMcpCreateThreadsResult,
   failure: OrchestratorMcpFailure,
@@ -236,8 +233,7 @@ const CreateThreadsTool = Tool.make("create_threads", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const ThreadListTool = Tool.make("t3_thread_list", {
-  description:
-    "List threads newest first, in one project or with `allProjects`. Page with `cursor`.",
+  description: "List newest threads by project or allProjects. Page by cursor.",
   parameters: OrchestratorMcpThreadListInput,
   success: OrchestratorMcpThreadListResult,
   failure: OrchestratorMcpFailure,
@@ -251,7 +247,7 @@ const ThreadListTool = Tool.make("t3_thread_list", {
 
 const ThreadReadTool = Tool.make("t3_thread_read", {
   description:
-    "Read thread by id: `messages` (default) or `activity`. Newest first; older: `beforePosition=earlierPosition`; start: `afterPosition=-1`, then `nextPosition`. Cut text: `itemId`, `textOffset=nextTextOffset`. Reading child result marks delivered. Reply with verbatim `link`.",
+    "Read messages (default) or activity, newest first. Older: beforePosition=earlierPosition. Chronological: afterPosition=-1 then nextPosition. Continue cut text by itemId + textOffset=nextTextOffset. Child result marked delivered. Cite verbatim link.",
   parameters: OrchestratorMcpThreadReadInput,
   success: OrchestratorMcpThreadReadResult,
   failure: OrchestratorMcpFailure,
@@ -266,7 +262,7 @@ const ThreadReadTool = Tool.make("t3_thread_read", {
 
 const ThreadUpdateTool = Tool.make("t3_thread_update", {
   description:
-    "Rename a thread (`action:'rename'` + `title`) or regenerate its title. Omit `threadId` for this thread. Workspace/branch cannot change.",
+    "Rename (action='rename', title) or regenerate title. Default thread here. Cannot change workspace/branch.",
   // Keeps the input's action/field check, which rebuilding the struct would drop.
   parameters: ThreadMetadataMcpUpdateInput.mapFields(
     Struct.assign({ environmentId: OrchestratorMcpEnvironmentTarget }),
@@ -283,7 +279,7 @@ const ThreadUpdateTool = Tool.make("t3_thread_update", {
 
 const ThreadSendTool = Tool.make("t3_thread_send", {
   description:
-    "Message any thread; modes cannot exceed yours. auto: idle/steer/queue. queue: new turn; steer: mid-turn; restart: interrupt/restart. Finished child: fresh task, returns taskId. Reply with verbatim link.",
+    "Message thread; modes ≤ yours. auto: idle/steer/queue; queue: new turn; steer: mid-turn; restart: interrupt/restart. Finished child: new taskId. Cite verbatim link.",
   parameters: OrchestratorMcpThreadSendInput,
   success: OrchestratorMcpThreadSendResult,
   failure: OrchestratorMcpFailure,
@@ -296,7 +292,7 @@ const ThreadSendTool = Tool.make("t3_thread_send", {
 
 const ThreadWaitTool = Tool.make("t3_thread_wait", {
   description:
-    "Wait for a thread's run. No `runId`: latest. Idle: return at once. On timeout, with `next` end turn; else call again.",
+    "Wait on run (default latest). Idle returns; timeout with next ends turn, otherwise retry.",
   parameters: OrchestratorMcpThreadWaitInput,
   success: OrchestratorMcpThreadWaitResult,
   failure: OrchestratorMcpFailure,
@@ -309,8 +305,7 @@ const ThreadWaitTool = Tool.make("t3_thread_wait", {
   .annotate(Tool.Idempotent, true);
 
 const ThreadInterruptTool = Tool.make("t3_thread_interrupt", {
-  description:
-    "Interrupt a top-level thread's running turn. No `runId`: newest. No effect if idle. Delegate: `task_cancel`.",
+  description: "Interrupt top-level turn, default newest; idle no-op. Delegates: task_cancel.",
   parameters: OrchestratorMcpThreadInterruptInput,
   success: OrchestratorMcpThreadInterruptResult,
   failure: OrchestratorMcpFailure,
@@ -322,7 +317,7 @@ const ThreadInterruptTool = Tool.make("t3_thread_interrupt", {
 
 const EnvironmentLinksTool = Tool.make("t3_environment_links", {
   description:
-    "List linked environments (user's other machines) and reachability. Pass `environmentId` to act there; `delegate_task` uses `target.environmentId`. Relink expired via `t3_environment_link`.",
+    "List linked machines/reachability. For remote actions pass environmentId; delegate_task uses target.environmentId. Relink via t3_environment_link.",
   success: OrchestratorMcpEnvironmentLinksResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",
@@ -336,7 +331,7 @@ const EnvironmentLinksTool = Tool.make("t3_environment_links", {
 
 const EnvironmentLinkTool = Tool.make("t3_environment_link", {
   description:
-    "Open link card for an unlinked machine. `hint`: user words; `environmentId`: known ID; `url`: only user-given address. Returns pending; outcome arrives as a message. Never wait/poll or ask pairing code in chat.",
+    "Link unlinked machine. hint: user words; environmentId: known ID; url: user-given only. Returns pending; outcome via message. No polling or pairing code in chat.",
   parameters: OrchestratorMcpEnvironmentLinkInput,
   success: OrchestratorMcpEnvironmentLinkResult,
   failure: OrchestratorMcpFailure,
@@ -349,7 +344,7 @@ const EnvironmentLinkTool = Tool.make("t3_environment_link", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenWhileLinksOff);
 
 const EnvironmentUnlinkTool = Tool.make("t3_environment_unlink", {
-  description: "Forget a linked environment. Its Connections entry stays until revoked there.",
+  description: "Forget environment; end its session if reachable.",
   parameters: OrchestratorMcpEnvironmentUnlinkInput,
   success: OrchestratorMcpEnvironmentUnlinkResult,
   failure: OrchestratorMcpFailure,

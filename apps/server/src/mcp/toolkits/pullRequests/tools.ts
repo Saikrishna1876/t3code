@@ -16,6 +16,7 @@ import {
   PullRequestReviewGuideRun,
   PullRequestState,
   PullRequestUnavailableError,
+  PullRequestVisibility,
   PullRequestWatchUntil,
   ThreadPullRequestLinkSource,
   TrimmedNonEmptyString,
@@ -37,6 +38,7 @@ import {
   PullRequestTargetIncompleteError,
   PullRequestHostRequiredError,
   PullRequestUrlUnavailableError,
+  PullRequestRepositoryInvalidError,
 } from "../../../pullRequest/pullRequestTarget.ts";
 import * as PullRequestService from "../../../pullRequest/PullRequestService.ts";
 import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequestReviewGuideService.ts";
@@ -180,13 +182,13 @@ export const PullRequestToolError = Schema.Union([
   PullRequestTargetIncompleteError,
   PullRequestHostRequiredError,
   PullRequestUrlUnavailableError,
+  PullRequestRepositoryInvalidError,
   PullRequestThreadRequiredError,
   PullRequestLinkFailedError,
   PullRequestUnlinkFailedError,
   PullRequestListFailedError,
   PullRequestWatchService.PullRequestWatchFailedError,
   PullRequestUnavailableError,
-  PullRequestWatchService.PullRequestNotOpenError,
   PullRequestWatchService.PullRequestWatchFromSubagentError,
   PullRequestProjectNotFoundError,
   PullRequestGuideFailedError,
@@ -258,8 +260,21 @@ export const WatchPullRequestResult = Schema.Struct({
   ...PullRequestIdentity,
   watching: Schema.Boolean,
   wasWatching: Schema.Boolean,
+  state: Schema.optional(
+    Schema.Literals(["merged", "closed"]).annotate({
+      description: "The PR already ended, so nothing was watched.",
+    }),
+  ),
+  checksState: Schema.optional(PullRequestChecksState),
+  next: Schema.optional(Schema.String),
 });
 export type WatchPullRequestResult = typeof WatchPullRequestResult.Type;
+
+export const alreadyEndedWatchNext = (state: "merged" | "closed") =>
+  `This PR is already ${state}, so there is nothing to watch. Report that and end your turn.`;
+
+export const CHECKS_ALREADY_PASSED_WATCH_NEXT =
+  "Checks already pass on this head, so no wake will come for them. Act on that now; the watch still wakes you on later changes.";
 
 export const ThreadPullRequestEntry = Schema.Struct({
   ...PullRequestIdentity,
@@ -296,8 +311,7 @@ export const ListThreadPullRequestsResult = Schema.Struct({
 export type ListThreadPullRequestsResult = typeof ListThreadPullRequestsResult.Type;
 
 const LinkPullRequestTool = Tool.make("link_pull_request", {
-  description:
-    "Link a PR to this thread. T3 shows its status and settles the thread on merge. For several PRs, use `link_pull_requests`.",
+  description: "Link PR to thread, show status and settle on merge. Bulk: link_pull_requests.",
   parameters: PullRequestTargetInput,
   success: LinkPullRequestResult,
   failure: PullRequestToolError,
@@ -310,8 +324,7 @@ const LinkPullRequestTool = Tool.make("link_pull_request", {
   .annotate(Tool.OpenWorld, false);
 
 const LinkPullRequestsTool = Tool.make("link_pull_requests", {
-  description:
-    "Link several PRs to a thread; use instead of one `link_pull_request` each. Non-PR URLs return in `invalidUrls`.",
+  description: "Link PR URLs in bulk; returns invalidUrls.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId.annotate({ description: "Thread. Default: this thread." })),
@@ -328,8 +341,7 @@ const LinkPullRequestsTool = Tool.make("link_pull_requests", {
   .annotate(Tool.OpenWorld, false);
 
 const UnlinkPullRequestTool = Tool.make("unlink_pull_request", {
-  description:
-    "Remove a PR link from this thread. Succeeds with `wasLinked=false` when it was not linked.",
+  description: "Unlink PR; returns wasLinked=false if absent.",
   parameters: PullRequestTargetInput,
   success: UnlinkPullRequestResult,
   failure: PullRequestToolError,
@@ -342,8 +354,7 @@ const UnlinkPullRequestTool = Tool.make("unlink_pull_request", {
   .annotate(Tool.OpenWorld, false);
 
 const UnlinkPullRequestsTool = Tool.make("unlink_pull_requests", {
-  description:
-    "Unlink a thread's PRs whose last known state is in `states`. Use instead of one `unlink_pull_request` each. Unknown state stays linked.",
+  description: "Unlink PRs in states in bulk. Unknown state stays linked.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId.annotate({ description: "Thread. Default: this thread." })),
@@ -361,7 +372,7 @@ const UnlinkPullRequestsTool = Tool.make("unlink_pull_requests", {
 
 const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
   description:
-    "List a thread's PRs, with last known state and stack order (bottom to top). Not an end-of-work check.",
+    "List linked PRs, last state and stack order (bottom first). Verify final state separately.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId.annotate({ description: "Thread. Default: this thread." })),
@@ -383,14 +394,14 @@ const WatchPullRequestInput = Schema.Struct({
   until: Schema.optional(
     PullRequestWatchUntil.annotate({
       description:
-        'How long this thread stays working. Omit it to keep the current value; a new watch starts at "checks". "checks": until checks finish, for a PR you hand to the user. "merged": until it merges or closes or you unwatch it, when you will act on it yourself, such as merging after someone else approves.',
+        'How long this thread stays working. Omit to keep the current value; a new watch starts at "checks". "checks": until checks finish, for a PR you hand to the user. "merged": until it merges, closes or is unwatched, when you act on it yourself, such as merging after approval.',
     }),
   ),
 });
 
 const WatchPullRequestTool = Tool.make("watch_pull_request", {
   description:
-    "Watch/link open PR. Wakes on failed checks, passed required checks, new comments/reviews, conflicts. Handle old comments first; only newer wake. End turn now; no rewatch. Wake grants no merge decision.",
+    "Link/watch open PR. Wakes on check failure/required passes, new comments/reviews, conflicts, merge/close. Handle old comments first. End turn; no rewatch. Check readiness before merge.",
   parameters: WatchPullRequestInput,
   success: WatchPullRequestResult,
   failure: PullRequestToolError,
@@ -404,7 +415,7 @@ const WatchPullRequestTool = Tool.make("watch_pull_request", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromSubagents);
 
 const UnwatchPullRequestTool = Tool.make("unwatch_pull_request", {
-  description: "Stop watching a PR for this thread. It stays linked.",
+  description: "Stop watch, retain link.",
   parameters: PullRequestTargetInput,
   success: WatchPullRequestResult,
   failure: PullRequestToolError,
@@ -450,7 +461,7 @@ export type ReadPullRequestGuideResult = typeof ReadPullRequestGuideResult.Type;
 
 const WritePullRequestGuidesTool = Tool.make("write_pull_request_guides", {
   description:
-    "Write review guides for up to 20 PRs (PR Guide tab tour). Returns when runs start; each takes minutes in a temp checkout. Same-head runs join. Read with `read_pull_request_guide`. Fails if guides off.",
+    "Start guides for up to 20 PRs; same-head joins. Minutes per run in temp checkout. Read via read_pull_request_guide. Fails if guides off.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     pullRequests: Schema.Array(GuideTarget).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
@@ -466,8 +477,7 @@ const WritePullRequestGuidesTool = Tool.make("write_pull_request_guides", {
   .annotate(Tool.OpenWorld, true);
 
 const ReadPullRequestGuideTool = Tool.make("read_pull_request_guide", {
-  description:
-    "Read a PR's stored review guide and run state. `guide` is null when none exists. Never starts a run.",
+  description: "Read saved guide and run state; missing guide is null. Never starts a run.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     ...GuideTarget.fields,
@@ -490,9 +500,10 @@ export const ThreadPullRequestInput = Schema.Struct({
 export type ThreadPullRequestInput = typeof ThreadPullRequestInput.Type;
 
 export const PullRequestReadSection = Schema.Literals([
-  "summary",
+  "body",
   "checks",
-  "conversation",
+  "threads",
+  "comments",
   "diff",
 ]);
 export type PullRequestReadSection = typeof PullRequestReadSection.Type;
@@ -505,50 +516,59 @@ const ReadComment = Schema.Struct({
 
 export const ReadPullRequestResult = Schema.Struct({
   ...PullRequestIdentity,
-  summary: Schema.optional(
-    Schema.Struct({
-      title: Schema.String,
-      body: Schema.String,
-      state: PullRequestState,
-      isDraft: Schema.Boolean,
-      author: Schema.NullOr(Schema.String),
-      headBranch: Schema.String,
-      baseBranch: Schema.String,
-      headSha: Schema.NullOr(Schema.String),
-      mergeability: PullRequestMergeability,
-      behindBy: Schema.NullOr(Schema.Int),
-      autoMergeEnabled: Schema.NullOr(Schema.Boolean),
-      additions: Schema.Int,
-      deletions: Schema.Int,
-      changedFiles: Schema.Int,
-      labels: Schema.Array(Schema.String),
-      reviewers: Schema.Array(Schema.String),
+  title: Schema.String,
+  state: PullRequestState,
+  isDraft: Schema.Boolean,
+  visibility: Schema.optional(PullRequestVisibility).annotate({
+    description: "Only on a host with private PRs.",
+  }),
+  author: Schema.NullOr(Schema.String),
+  headBranch: Schema.String,
+  baseBranch: Schema.String,
+  headSha: Schema.NullOr(Schema.String),
+  mergeability: PullRequestMergeability,
+  behindBy: Schema.NullOr(Schema.Int),
+  autoMergeEnabled: Schema.NullOr(Schema.Boolean),
+  checks: Schema.Struct({
+    passed: Schema.Int,
+    pending: Schema.Int,
+    failed: Schema.Array(Schema.String),
+    incomplete: Schema.optional(Schema.Literal(true)).annotate({
+      description: "The host could not list some checks; checkRuns says which.",
     }),
-  ),
-  checks: Schema.optional(Schema.Array(PullRequestCheck)),
+  }),
+  unresolvedThreads: Schema.Int,
+  unresolvedThreadsTruncated: Schema.optional(Schema.Literal(true)).annotate({
+    description: "unresolvedThreads is a lower bound.",
+  }),
+  body: Schema.optional(Schema.String),
+  checkRuns: Schema.optional(Schema.Array(PullRequestCheck)),
   conversation: Schema.optional(
     Schema.Struct({
-      comments: Schema.Array(
-        Schema.Struct({
-          ...ReadComment.fields,
-          id: Schema.String,
-          kind: PullRequestCommentKind,
-          path: Schema.NullOr(Schema.String),
-          reviewState: Schema.NullOr(Schema.String),
-        }),
+      reviewThreads: Schema.optional(
+        Schema.Array(
+          Schema.Struct({
+            id: Schema.String,
+            path: Schema.String,
+            line: Schema.NullOr(Schema.Int),
+            isResolved: Schema.Boolean,
+            isOutdated: Schema.Boolean,
+            comments: Schema.Array(ReadComment),
+            moreComments: Schema.Boolean,
+          }),
+        ),
       ),
-      reviewThreads: Schema.Array(
-        Schema.Struct({
-          id: Schema.String,
-          path: Schema.String,
-          line: Schema.NullOr(Schema.Int),
-          isResolved: Schema.Boolean,
-          isOutdated: Schema.Boolean,
-          comments: Schema.Array(ReadComment),
-          moreComments: Schema.Boolean,
-        }),
+      comments: Schema.optional(
+        Schema.Array(
+          Schema.Struct({
+            ...ReadComment.fields,
+            id: Schema.String,
+            kind: PullRequestCommentKind,
+            path: Schema.NullOr(Schema.String),
+            reviewState: Schema.NullOr(Schema.String),
+          }),
+        ),
       ),
-      hiddenResolvedThreads: Schema.Int,
       truncated: Schema.Boolean,
       nextCursor: Schema.NullOr(Schema.String),
     }),
@@ -609,12 +629,12 @@ export const MergePullRequestResult = Schema.Struct({
 export type MergePullRequestResult = typeof MergePullRequestResult.Type;
 
 const ReadPullRequestTool = Tool.make("pull_request_read", {
-  description: "Read a PR's state, checks, review comments, or diff. Use instead of gh or cafe.",
+  description: "Read state/check counts. include adds detail.",
   parameters: Schema.Struct({
     ...ThreadPullRequestInput.fields,
-    sections: Schema.optional(
+    include: Schema.optional(
       Schema.Array(PullRequestReadSection).annotate({
-        description: "Default: summary, checks. conversation has review threads.",
+        description: "threads: unresolved review threads.",
       }),
     ),
     includeResolved: Schema.optional(Schema.Boolean),
@@ -632,7 +652,7 @@ const ReadPullRequestTool = Tool.make("pull_request_read", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenWithoutForge);
 
 const ListPullRequestsTool = Tool.make("pull_request_list", {
-  description: "List PRs in this thread's repository, recently updated first.",
+  description: "List repo PRs by latest update.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     state: Schema.optional(PullRequestListState.annotate({ description: "Default: open." })),
@@ -653,13 +673,17 @@ const ListPullRequestsTool = Tool.make("pull_request_list", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenWithoutForge);
 
 const CreatePullRequestTool = Tool.make("pull_request_create", {
-  description: "Open a PR from this thread's pushed branch and link it, or return its open PR.",
+  description: "Push thread branch, open/link PR or return existing open PR.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     title: TrimmedNonEmptyString,
     body: Schema.String,
     base: Schema.optional(TrimmedNonEmptyString),
     draft: Schema.optional(Schema.Boolean),
+    private: Schema.optional(Schema.Boolean).annotate({
+      description:
+        "Visible to writers only; the branch never reaches origin. Fails on a host without private PRs.",
+    }),
   }),
   success: CreatePullRequestResult,
   failure: PullRequestToolError,
@@ -678,8 +702,7 @@ const UpdateNames = Schema.Array(TrimmedNonEmptyString).check(
 );
 
 const UpdatePullRequestTool = Tool.make("pull_request_update", {
-  description:
-    "Edit PR title, body, labels, reviewers; close/reopen; `ready=false` returns to draft.",
+  description: "Edit title/body/labels/reviewers; close/reopen; ready=false drafts.",
   parameters: Schema.Struct({
     ...ThreadPullRequestInput.fields,
     title: Schema.optional(TrimmedNonEmptyString),
@@ -704,8 +727,7 @@ const UpdatePullRequestTool = Tool.make("pull_request_update", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenWithoutForge);
 
 const RespondToPullRequestTool = Tool.make("pull_request_respond", {
-  description:
-    "Reply to, resolve, or reopen a review thread. Without reviewThreadId, comment on the PR.",
+  description: "Reply/resolve/reopen by reviewThreadId; omit to comment on PR.",
   parameters: Schema.Struct({
     ...ThreadPullRequestInput.fields,
     reviewThreadId: Schema.optional(TrimmedNonEmptyString),
@@ -738,10 +760,11 @@ export type ReviewLineComment = typeof ReviewLineComment.Type;
 
 const ReviewPullRequestTool = Tool.make("pull_request_review", {
   description:
-    "Submit a review: approve, request changes, or comment, with optional line comments.",
+    "Approve/request changes/comment, optionally inline. Approval requires expectedHeadSha from pull_request_read; rejects changed head.",
   parameters: Schema.Struct({
     ...ThreadPullRequestInput.fields,
     verdict: PullRequestReviewVerdict,
+    expectedHeadSha: Schema.optional(TrimmedNonEmptyString),
     body: Schema.optional(Schema.String),
     comments: Schema.optional(Schema.Array(ReviewLineComment).check(Schema.isMaxLength(50))),
   }),
@@ -757,7 +780,7 @@ const ReviewPullRequestTool = Tool.make("pull_request_review", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenWithoutForge);
 
 const MergePullRequestTool = Tool.make("pull_request_merge", {
-  description: "Merge a PR. Refuses if the head moved from expectedHeadSha (summary.headSha).",
+  description: "Merge only if expectedHeadSha matches headSha from pull_request_read.",
   parameters: Schema.Struct({
     ...ThreadPullRequestInput.fields,
     expectedHeadSha: TrimmedNonEmptyString,
@@ -769,7 +792,7 @@ const MergePullRequestTool = Tool.make("pull_request_merge", {
     ),
     stack: Schema.optional(
       Schema.Boolean.annotate({
-        description: "Merge this PR and every open stack layer below it at once. Not with auto.",
+        description: "Merge this PR and every open stack layer below it at once.",
       }),
     ),
   }),
@@ -811,8 +834,7 @@ export const RerunChecksResult = Schema.Struct({
 export type RerunChecksResult = typeof RerunChecksResult.Type;
 
 const CheckLogsTool = Tool.make("ci_logs", {
-  description:
-    "Read tail of a PR's failing check logs, or one named check. Use instead of gh run view.",
+  description: "Tail failing or named PR check. Prefer over gh run view.",
   parameters: Schema.Struct({
     ...ThreadPullRequestInput.fields,
     check: Schema.optional(TrimmedNonEmptyString),

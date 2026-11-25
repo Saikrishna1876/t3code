@@ -59,7 +59,7 @@ const readonlyBrowserTool = <T extends Tool.Any>(tool: T): T =>
 
 const PreviewStatusTool = Tool.make("preview_status", {
   description:
-    "List thread preview tabs. Automate only `runtime:'server'` via preview_*; never pass other tabIds. Others are on user's local desktop, unreachable here.",
+    "List tabs. preview_* only for runtime='server'; local desktop tabs unreachable here.",
   parameters: PreviewAutomationTabTargetInput,
   success: PreviewAutomationStatus,
   failure: PreviewToolFailure,
@@ -77,7 +77,7 @@ const EnvironmentPortTarget = BrowserNavigationTarget.members[1];
 const PreviewOpenTool = browserTool(
   Tool.make("preview_open", {
     description:
-      "Open/show preview tab. Dev server: `target`, not `url`. `open=false`: background. Reuses tab unless `tabId` or `reuseExistingTab=false`. Parallel subagents: set that false, use returned `tabId`.",
+      "Open/show tab. Dev server: target; website: url. open=false background. Reuse unless tabId or reuseExistingTab=false. Parallel children set false, use returned tabId.",
     parameters: PreviewAutomationOpenInput.mapFields(
       (fields) => ({ ...fields, target: Schema.optional(EnvironmentPortTarget) }),
       { unsafePreserveChecks: true },
@@ -93,7 +93,7 @@ const PreviewOpenTool = browserTool(
 const PreviewDialogTool = browserTool(
   Tool.make("preview_dialog", {
     description:
-      "Accept/dismiss dialog from `preview_status`. `promptText` accepts a prompt. Needs your own or unclaimed tab.",
+      "Accept/dismiss dialog from preview_status; promptText for prompts. Own/unclaimed tab.",
     parameters: PreviewAutomationDialogInput,
     success: PreviewAutomationStatus,
     failure: PreviewToolFailure,
@@ -103,8 +103,7 @@ const PreviewDialogTool = browserTool(
 
 const PreviewNavigateTool = safeBrowserTool(
   Tool.make("preview_navigate", {
-    description:
-      "Navigate tab. `url` for website or `target:{kind:'environment-port',port}` for dev server; exactly one.",
+    description: "Navigate tab: website url or dev server target={kind:'environment-port',port}.",
     parameters: PreviewAutomationNavigateInput,
     success: PreviewAutomationStatus,
     failure: PreviewToolFailure,
@@ -114,8 +113,7 @@ const PreviewNavigateTool = safeBrowserTool(
 
 const PreviewResizeTool = safeBrowserTool(
   Tool.make("preview_resize", {
-    description:
-      "Resize tab: {mode:'fill'}, {mode:'freeform',width,height}, or {mode:'preset',preset,orientation}. CSS size only.",
+    description: "Set tab CSS size. fill, freeform(width,height), preset(preset,orientation).",
     parameters: PreviewAutomationResizeInput,
     success: Schema.Struct({ ...PreviewAutomationResizeResult.fields, ...presentationFields }),
     failure: PreviewToolFailure,
@@ -127,8 +125,7 @@ const PreviewResizeTool = safeBrowserTool(
 
 const PreviewSetAppearanceTool = safeBrowserTool(
   Tool.make("preview_set_appearance", {
-    description:
-      "Set `prefers-color-scheme` for the chosen tab: 'dark', 'light', or 'system' to clear the override.",
+    description: "Override tab prefers-color-scheme: dark/light/system (clear).",
     parameters: PreviewAutomationSetColorSchemeInput,
     success: Schema.Struct({
       ...PreviewAutomationSetColorSchemeResult.fields,
@@ -145,7 +142,7 @@ const PreviewSetAppearanceTool = safeBrowserTool(
 export const PreviewSnapshotTool = safeBrowserTool(
   Tool.make("preview_snapshot", {
     description:
-      "Requested browser work only. Use accessibilityTree refs incl. frames: `locator='aria-ref=<ref>'`. Navigation/snapshot expires refs. Returns state/elements/diagnostics/screenshot size. Text ~20 KB. Screenshot: `save=true`, embed `![alt](screenshotPath)`.",
+      "Requested browser work only. Accessibility refs (incl. frames): locator='aria-ref=<ref>'; expire on navigation/snapshot. State/elements/diagnostics, text ~20 KB. save=true yields PNG; embed ![alt](screenshotPath).",
     parameters: Schema.Struct({
       ...PreviewAutomationTabTargetInput.fields,
       includeImage: Schema.optional(
@@ -168,7 +165,7 @@ export const PreviewSnapshotTool = safeBrowserTool(
 const PreviewActTool = browserTool(
   Tool.make("preview_act", {
     description:
-      "Act on tab: `locator='aria-ref=<ref>'` from snapshot, or x AND y. Supports click, type, clear, hover, select, drag, upload, press, scroll. timeoutMs default 15000.",
+      "Act via locator='aria-ref=<ref>' or x AND y. Click/type/clear/hover/select/drag/upload/press/scroll. timeoutMs default 15000.",
     parameters: PreviewAutomationActInput,
     success: Schema.Union([
       Schema.Struct({ ...PreviewAutomationSelectResult.fields, ...presentationFields }),
@@ -190,7 +187,7 @@ export const PreviewEvaluateResult = Schema.Struct({
 const PreviewEvaluateTool = browserTool(
   Tool.make("preview_evaluate", {
     description:
-      "Run page JS; may mutate state. Returns {value}, capped 64 KB. Needs own/unclaimed tab. Human tabs: preview_snapshot. Write only on user request; show results via html_render.",
+      "Run page JS (may mutate), value ≤64 KB. Own/unclaimed tab. Human tabs: preview_snapshot. User authorization for writes; show via html_render.",
     parameters: PreviewAutomationEvaluateInput,
     success: PreviewEvaluateResult,
     failure: PreviewToolFailure,
@@ -200,8 +197,7 @@ const PreviewEvaluateTool = browserTool(
 
 const PreviewWaitForTool = readonlyBrowserTool(
   Tool.make("preview_wait_for", {
-    description:
-      "Wait until all given locator, selector, text, and URL conditions match in the chosen tab.",
+    description: "Wait for all given tab locator/selector/text/URL conditions.",
     parameters: PreviewAutomationWaitForInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,
@@ -221,8 +217,7 @@ const PreviewRecordingStartTool = safeBrowserTool(
 
 const PreviewRecordingStopTool = safeBrowserTool(
   Tool.make("preview_recording_stop", {
-    description:
-      "Stop recording the chosen tab. Returns a local path to the recording file (max 50 MiB).",
+    description: "Stop tab recording; returns local file path (max 50 MiB).",
     parameters: PreviewAutomationTabTargetInput,
     success: Schema.Struct({ ...PreviewAutomationRecordingArtifact.fields, ...presentationFields }),
     failure: PreviewToolFailure,

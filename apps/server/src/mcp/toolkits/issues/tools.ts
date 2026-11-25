@@ -239,8 +239,7 @@ export const ListThreadIssuesResult = Schema.Struct({
 export type ListThreadIssuesResult = typeof ListThreadIssuesResult.Type;
 
 const ListIssuesTool = Tool.make("list_issues", {
-  description:
-    "List a project's issues, newest updated first. Pass `nextCursors` as `cursors` to page.",
+  description: "List project issues by newest update. Page with cursors=nextCursors.",
   parameters: Schema.Struct({
     projectId: Schema.optional(
       ProjectId.annotate({ description: "Defaults to this thread's project." }),
@@ -265,8 +264,7 @@ const ListIssuesTool = Tool.make("list_issues", {
   .annotate(Tool.OpenWorld, true);
 
 const ReadIssueTool = Tool.make("read_issue", {
-  description:
-    "Read an issue: body, state, labels, assignees, comments, linked PRs. Pass `url` or `key`.",
+  description: "Read issue, comments and PRs by url or key.",
   parameters: IssueTargetInput,
   success: ReadIssueResult,
   failure: IssueToolError,
@@ -283,6 +281,11 @@ const CreateIssueTool = Tool.make("create_issue", {
   parameters: Schema.Struct({
     projectId: Schema.optional(
       ProjectId.annotate({ description: "Defaults to this thread's project." }),
+    ),
+    scope: Schema.optional(
+      TrimmedNonEmptyString.annotate({
+        description: "A bound team or repository, such as OPS. Defaults to the project's first.",
+      }),
     ),
     title: TrimmedNonEmptyString.check(Schema.isMaxLength(1024)),
     body: Schema.optional(Schema.String.check(Schema.isMaxLength(65_536))),
@@ -334,8 +337,7 @@ const SetIssueStateTool = Tool.make("set_issue_state", {
   .annotate(Tool.OpenWorld, true);
 
 const LinkIssueTool = Tool.make("link_issue", {
-  description:
-    "Link an issue to a thread so T3 shows it beside the thread. Link every issue you work or file.",
+  description: "Link each issue you work on or file to its thread.",
   parameters: Schema.Struct({ ...IssueTargetInput.fields, ...ThreadTargetInput.fields }),
   success: LinkIssueResult,
   failure: IssueToolError,
@@ -348,7 +350,7 @@ const LinkIssueTool = Tool.make("link_issue", {
   .annotate(Tool.OpenWorld, false);
 
 const UnlinkIssueTool = Tool.make("unlink_issue", {
-  description: "Remove an issue link from a thread; the issue itself is unchanged.",
+  description: "Remove issue link only.",
   parameters: Schema.Struct({ ...IssueTargetInput.fields, ...ThreadTargetInput.fields }),
   success: UnlinkIssueResult,
   failure: IssueToolError,

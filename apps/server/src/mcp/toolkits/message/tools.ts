@@ -10,7 +10,7 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 // It affects only the caller's thread, so read-only sandboxes and plan mode may use it.
 const SendToUserTool = Tool.make(SEND_TO_USER_TOOL_NAME, {
   description:
-    "Show a Markdown message in this thread exactly as written before your turn ends. Use for content the user must read in full mid-turn, such as a draft or code block. Don't repeat it in your reply.",
+    "Show Markdown verbatim mid-turn for material user must read in full (draft, code). Skip repeat in final.",
   parameters: Schema.Struct({
     message: Schema.String.check(
       Schema.isMinLength(1),

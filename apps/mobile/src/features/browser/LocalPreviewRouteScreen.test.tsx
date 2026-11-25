@@ -19,6 +19,7 @@ type NavigationPayload = {
 };
 
 const mocks = vi.hoisted(() => ({
+  loaded: [] as string[],
   tunnelWebViewProps: null as null | {
     onLoadError: (failure: ErrorPayload) => void;
     onNavigationChange: (navigation: NavigationPayload) => void;
@@ -79,6 +80,7 @@ vi.mock("./TunnelWebView", async () => {
     TunnelWebView: forwardRef(
       (
         props: {
+          url: string;
           onLoadError: (failure: ErrorPayload) => void;
           onNavigationChange: (navigation: NavigationPayload) => void;
         },
@@ -86,6 +88,7 @@ vi.mock("./TunnelWebView", async () => {
       ) => {
         useEffect(() => {
           mocks.tunnelWebViewProps = props;
+          mocks.loaded.push(props.url);
         }, [props]);
         useImperativeHandle(ref, () => ({
           loadUrl: mocks.loadUrl,
@@ -99,7 +102,7 @@ vi.mock("./TunnelWebView", async () => {
   };
 });
 
-import { LocalPreviewScreen } from "./LocalPreviewRouteScreen";
+import { LocalPreviewScreen, LocalPreviewRouteScreen } from "./LocalPreviewRouteScreen";
 
 const UNSUPPORTED_TITLE = "This device can't open localhost pages";
 
@@ -193,4 +196,26 @@ describe("LocalPreviewScreen unsupported overlay", () => {
 
     expect(view.container.textContent).toContain(UNSUPPORTED_TITLE);
   });
+});
+
+it("gives the webview only web addresses from the route, on open and on a later link", () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const root = createRoot(document.createElement("div"));
+  const show = (url: string) => {
+    mocks.loaded.length = 0;
+    act(() =>
+      root.render(<LocalPreviewRouteScreen route={{ params: { environmentId: "env-1", url } }} />),
+    );
+    return mocks.loaded.at(-1);
+  };
+
+  try {
+    expect(show("http://0.0.0.0:5173/app")).toBe("http://localhost:5173/app");
+    expect(show("javascript:document.title='x'")).toBe("");
+    expect(show("https://example.com/docs")).toBe("https://example.com/docs");
+    expect(show("file:///data/local/tmp/a.html")).toBe("");
+    expect(show("intent://example.com#Intent;scheme=http;end")).toBe("");
+  } finally {
+    act(() => root.unmount());
+  }
 });

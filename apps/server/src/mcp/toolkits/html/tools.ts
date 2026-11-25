@@ -23,7 +23,7 @@ const HtmlPath = Schema.String.annotate({
 });
 
 export const HtmlPreviewTool = Tool.make("html_preview", {
-  description: `Check HTML before html_render. Returns PNG, contentHeight, console output. Inline <style>/<script>; local images absolute; remote URLs as-is.`,
+  description: `Check HTML before html_render. PNG, contentHeight, console. Inline style/script; local images absolute, remote URLs unchanged.`,
   parameters: Schema.Struct({
     path: Schema.optional(HtmlPath),
     html: Schema.optional(Html),
@@ -72,7 +72,7 @@ export const HtmlPreviewTool = Tool.make("html_preview", {
 
 // This affects only the caller's thread, not its workspace, so read-only sandboxes and plan mode may use it.
 const HtmlRenderTool = Tool.make(HTML_RENDER_TOOL_NAME, {
-  description: `Render HTML inline above final reply; don't announce. Frame fits to ${HTML_RENDER_MAX_FIT_HEIGHT}px; mobile scrolls. No html/body/outer background/card/border/banner/side padding. Fluid widths; 8px gutter. Background boxes: 16px padding, var(--radius). Charts fixed px. No vh/height:100%. Use theme vars, not fixed colors: --background --foreground --muted --card --popover --secondary --border --ring --primary --accent --destructive --warning --success --info --code-background --chart-1 to --chart-6 --radius --font-sans --font-mono.`,
+  description: `Render above final reply without announcement. Frame fits to ${HTML_RENDER_MAX_FIT_HEIGHT}px; mobile scrolls. Skip html/body, outer background/card/border/banner/side padding. Fluid width, 8px gutter; boxes 16px padding + var(--radius). Fixed-px charts. No vh/height:100%. Theme vars: --background --foreground --muted --card --popover --secondary --border --ring --primary --accent --destructive --warning --success --info --code-background --chart-1 to --chart-6 --radius --font-sans --font-mono.`,
   parameters: Schema.Struct({
     path: Schema.optional(HtmlPath),
     html: Schema.optional(Html),

@@ -45,8 +45,7 @@ const shared = {
 };
 const EnvironmentReadTool = Tool.make("t3_environment_read", {
   ...shared,
-  description:
-    "Read this server's identity and preferences. Providers and models: `orchestrator_capabilities`.",
+  description: "Read server identity/preferences. Models: orchestrator_capabilities.",
   parameters: Schema.Struct({ environmentId: OrchestratorMcpEnvironmentTarget }),
   success: Schema.Struct({
     environmentId: ExecutionEnvironmentDescriptor.fields.environmentId,
@@ -61,7 +60,7 @@ const EnvironmentReadTool = Tool.make("t3_environment_read", {
 const EnvironmentPreferencesTool = Tool.make("t3_environment_preferences_update", {
   ...shared,
   description:
-    "Update environment-wide preferences. Live full-access/default caller only. Omitted fields unchanged; `customInstructions: ''` clears.",
+    "Update environment preferences, live full-access/default only. Omitted fields stay; empty customInstructions clears.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     defaultThreadEnvMode: ServerSettingsPatch.fields.defaultThreadEnvMode,
@@ -74,8 +73,7 @@ const EnvironmentPreferencesTool = Tool.make("t3_environment_preferences_update"
 }).annotate(Tool.Destructive, true);
 const CodespacesListTool = Tool.make("codespaces_list", {
   ...shared,
-  description:
-    "List this controller's Codespaces using the host's GitHub account. Does not start compute.",
+  description: "List controller's Codespaces via host GitHub account without starting compute.",
   success: CodespacesListResult,
 })
   .annotate(Tool.Readonly, true)
@@ -83,14 +81,14 @@ const CodespacesListTool = Tool.make("codespaces_list", {
 const CodespacesRunTool = Tool.make("codespaces_run", {
   ...shared,
   description:
-    "Manage Codespaces. Create: github/codespaces-blank; `projectId` moves a committed branch to /workspaces (no GitHub origin/devcontainer). Setup needs memory limits; failures keep files. Needs full-access + Settings > Environments > Codespaces agent management. Create/start costs; delete loses unpushed files. New `clientRequestId`, reuse retries; await `codespaces_status`. All turns idle; force cannot bypass.",
+    "Manage Codespaces. Create uses github/codespaces-blank; projectId transfers committed branch to /workspaces without origin/devcontainer. Setup needs memory limits; failure keeps files. Needs full-access + Codespaces agent management. Create/start costs; delete loses unpushed files. Reuse clientRequestId only on retry; await codespaces_status. All turns idle, even with force.",
   parameters: Schema.Struct({ input: CodespacesRunInput }),
   success: CodespacesOperation,
 }).annotate(Tool.Destructive, true);
 const CodespacesStatusTool = Tool.make("codespaces_status", {
   ...shared,
   description:
-    "Read controller operation progress and managed Codespace identities. No credentials, no compute change.",
+    "Read operation progress and managed Codespace identities. No credentials or compute changes.",
   success: Schema.Struct({ operations: Schema.Array(CodespacesOperation) }),
 })
   .annotate(Tool.Readonly, true)

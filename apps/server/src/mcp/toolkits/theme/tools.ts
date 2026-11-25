@@ -26,8 +26,7 @@ const shared = {
 
 const ThemeReadTool = Tool.make("t3_theme_read", {
   ...shared,
-  description:
-    "Read T3 Code's own themes and the guide to restyle it: color roles and CSS selectors. Call before `t3_theme_set`.",
+  description: "Read built-in themes, color roles and CSS selectors before t3_theme_set.",
   parameters: Schema.Struct({
     themeId: Schema.optionalKey(
       EnvironmentThemeId.annotate({ description: "Also return this published theme's file." }),
@@ -55,7 +54,7 @@ const ThemeReadTool = Tool.make("t3_theme_read", {
 const ThemeSetTool = Tool.make("t3_theme_set", {
   ...shared,
   description:
-    "Restyle T3 on user request. `theme` publishes/updates `themeId` on this server's web and this machine's desktop, never remote. Without `theme`, switch built-in/published `themeId`. `appearance`: light/dark/system. Live full-access/default caller.",
+    "Restyle T3 on request. theme publishes/updates themeId on server web and local desktop. Omit theme to switch built-in/published themeId. appearance: light/dark/system. Live full-access/default only.",
   parameters: Schema.Struct({
     themeId: Schema.optionalKey(EnvironmentThemeId),
     theme: Schema.optionalKey(EnvironmentThemeFile),

@@ -18,7 +18,8 @@ Keep project Codespaces work available with the user's existing local provider l
 
 ## Baseline
 
-- Fork/main integrated upstream baseline: stable `v0.1.10`, `7d32075e3757ded707914e2450c3e392a9665765`, landed through PR #21 at `b19928ff03` with upstream ancestry preserved at `0e1c422794`. PR #20 added the fork updater prompt at `c70267e52a3e7a58ce95c6a731b39d21e0f12f18`; PR #22 installed Chromium for release checks and PR #23 subscribed before the first browser tab opens. Fork release `0.1.10` was published 2026-11-18.
+- Fork/main integrated upstream baseline: stable `v0.1.11`, `59651c1761f6c63e9b6056839067066968e6a406`, landed through PR #24 at `97d2bddc2a`. PR #26 fixed migrations, Codespaces asset routing and selection, Markdown find, and translations. PR #27 scoped the release compatibility tests to their owning packages. Fork release `0.1.11` published 2026-11-20.
+- Previous integrated upstream baseline: stable `v0.1.10`, `7d32075e3757ded707914e2450c3e392a9665765`, landed through PR #21 at `b19928ff03` with upstream ancestry preserved at `0e1c422794`. PR #20 added the fork updater prompt at `c70267e52a3e7a58ce95c6a731b39d21e0f12f18`; PR #22 installed Chromium for release checks and PR #23 subscribed before the first browser tab opens. Fork release `0.1.10` was published 2026-11-18.
 - Previous integrated upstream baseline: stable `v0.1.9`, `24e77473ecf41bc1f7142529c7911c1c1aae1d76`, landed through PR #19 at `e6b749f8f8b1c51afec50fb508a38a81bff5b7c8`. PR #19 recovered PR #12's reviewed v0.1.7 integration before merging v0.1.9.
 - Compatibility patches, including PR #2, are committed. Superseded local Codespaces drafts were stashed before the 2026-10-13 integration; see Previous update, 2026-10-18.
 - Last behaviorally verified baseline: `56a9bf2bd7d3dcdae722a5de84578909dc11aeda` (release `0.0.42` built locally on 2026-09-18 with Electron `43.6.0` was extracted and interactively confirmed working by the user on the target Intel Mac macOS 15 system).
@@ -123,6 +124,12 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Prior successful release: 2026-10-07, version `0.0.45`, source `49b07dc3cb8e105c69ed93885ba0e6e80990762b`. DMG and ZIP integrity, packaged Electron `43.6.0`, x64 architecture, and fork feed checks passed. CodeRabbit had zero findings; Greptile's merged review was unavailable because reviews were disabled for the organization.
 
 ## Latest attempt
+
+- 2026-11-25 candidate merges published upstream stable `v0.1.12`, `ca81b7b97a1c4b91e5ac25768d0f6629f37732fd`, from fork/main `ecbccec5ae0ced6bc0d4be701ff5832ce84f5cca`.
+- Electron stays `43.6.0`. Existing migration IDs 77–103 stay fixed. Incoming IDs 104–118 match their filenames and migration ledger. Codespace launches and handoffs keep the pinned remote checkout. Upstream multi-repository task folders use the host checkout.
+- Preserved the fork update feed, upstream-release prompt, Markdown find, and package-scoped release compatibility tests. Agent context measures 6,196 bytes for Claude, 7,588 for Codex, and 50,218 for the MCP tool list, within the existing ceilings.
+
+## Previous attempt, 2026-11-20
 
 - Date: 2026-11-20. Integrating upstream stable `v0.1.11`, exact commit `59651c1761f6c63e9b6056839067066968e6a406`. Published release API and fetched tag agree; `draft=false`, `prerelease=false`, published 07:38:08 UTC. Nightly and preview tags are excluded.
 - Starting fork/main and rollback reference: `4c0eb0452bcd3e74fafc12d545b4e9c9f9717e9e`. Branch `chore/fork-release-v0-1-11` in the task worktree. Preserve P001 through P009, PR #20's upstream release prompt, PR #22's Chromium install and PR #23's browser subscribe fix. Electron remains exactly `43.6.0` in the manifest, workspace exception, regenerated lockfile and installed binary.

@@ -29,7 +29,7 @@ const DeviceToolFailure = Schema.Union([DeviceToolError, OrchestratorMcpFailure]
 
 const DeviceListTool = Tool.make("device_list", {
   description:
-    "List simulators/emulators on every device host and what's open in this thread's Device panel. Call before `device_open` if you lack an id.",
+    "List simulators/emulators per host and open Device panel entries. Call before device_open when id unknown.",
   // An empty struct serializes as `anyOf [object, array]`, which some
   // providers reject and then drop every tool on the server with it.
   parameters: Schema.Struct({
@@ -50,7 +50,7 @@ const DeviceListTool = Tool.make("device_list", {
 
 const DeviceOpenTool = Tool.make("device_open", {
   description:
-    "Open a simulator/emulator for this thread. Pass `deviceId`/`hostId` from `device_list`. Boots if needed, shows in Device panel, returns pinned `agent-device` CLI call.",
+    "Open/boot simulator/emulator with deviceId/hostId from device_list. Shows in Device panel, returns pinned agent-device command.",
   parameters: DeviceToolOpenInput,
   success: DeviceToolOpenResult,
   failure: DeviceToolFailure,
@@ -71,8 +71,7 @@ const DeviceOpenTool = Tool.make("device_open", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 export const DeviceScreenshotTool = Tool.make("device_screenshot", {
-  description:
-    "Get a PNG of an open device's screen. For taps and text, use the `agent-device` CLI.",
+  description: "PNG of open device. Input via agent-device CLI.",
   parameters: DeviceToolTargetInput,
   success: DeviceToolScreenshotResult,
   failure: DeviceToolFailure,
@@ -86,8 +85,7 @@ export const DeviceScreenshotTool = Tool.make("device_screenshot", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const DeviceCloseTool = Tool.make("device_close", {
-  description:
-    "Remove a device from this thread's Device panel. `shutdown=true` also turns it off.",
+  description: "Remove from Device panel. shutdown=true powers it off.",
   parameters: DeviceToolCloseInput,
   success: Schema.Record(Schema.String, Schema.Never),
   failure: DeviceToolFailure,

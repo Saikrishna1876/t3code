@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("react-native", () => ({ Platform: { OS: "ios" } }));
 
-import { loopbackUrlForDevice } from "./browserTabs";
+import { localPreviewUrlForDevice, loopbackUrlForDevice } from "./browserTabs";
 
 describe("loopbackUrlForDevice", () => {
   it("opens only the environment's loopback pages on this device", () => {
@@ -35,5 +35,16 @@ describe("loopbackUrlForDevice", () => {
     expect(loopbackUrlForDevice("http://localhost:5173/app", "ios")).toBe(
       "http://localhost:5173/app",
     );
+  });
+});
+
+describe("localPreviewUrlForDevice", () => {
+  it("loads http and https addresses and nothing else", () => {
+    expect(localPreviewUrlForDevice("http://0.0.0.0:3000/")).toBe("http://localhost:3000/");
+    expect(localPreviewUrlForDevice("https://example.com/docs")).toBe("https://example.com/docs");
+    expect(localPreviewUrlForDevice(" JavaScript:void(0)")).toBeNull();
+    expect(localPreviewUrlForDevice("file:///tmp/a.html")).toBeNull();
+    expect(localPreviewUrlForDevice("data:text/html,hello")).toBeNull();
+    expect(localPreviewUrlForDevice("")).toBeNull();
   });
 });

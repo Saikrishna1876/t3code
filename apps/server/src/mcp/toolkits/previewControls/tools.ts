@@ -26,7 +26,7 @@ const shared = {
 const PreviewListTool = Tool.make("t3_preview_list", {
   ...shared,
   description:
-    "List this thread's preview tabs. Only `runtime:'server'` tabs can be automated here; others are on the user's local desktop. Never pass a non-server `tabId` to `preview_*`.",
+    "List thread tabs. Automate runtime='server' only; others local desktop. Never pass their tabId to preview_*.",
   parameters: Schema.Struct({
     cursor: Schema.optional(NonNegativeInt),
     limit: Schema.optional(clampedPositiveInt(50)),
@@ -41,8 +41,7 @@ const PreviewListTool = Tool.make("t3_preview_list", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 const PreviewCloseTool = Tool.make("t3_preview_close", {
   ...shared,
-  description:
-    "Close one preview tab this thread owns. Use it on a tab you opened for your own check when you finish.",
+  description: "Close owned tab. Close tabs opened for your check when done.",
   parameters: Schema.Struct({ tabId: PreviewTabId }),
   success: Schema.Struct({}),
 })

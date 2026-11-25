@@ -13,6 +13,7 @@ const projectId = ProjectId.make("project:mcp-test");
 const project = Schema.decodeSync(Project.ProjectRow)({
   projectId,
   hasCustomTitle: false,
+  trackedFolders: [],
   title: "Project",
   workspaceRoot: "/local/repo",
   defaultModelSelection: null,
