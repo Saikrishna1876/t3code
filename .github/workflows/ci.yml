@@ -127,7 +127,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.outputs.build != 'false' || needs.changes.outputs.typecheck != 'false') }}
     runs-on: ${{ github.repository == 'pingdotgg/t3code' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.repository == 'pingdotgg/t3code' && 10 || 15 }}
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -180,7 +180,7 @@ jobs:
       # step: neither result hides the other.
       - name: Start typecheck
         id: typecheck
-        if: ${{ !cancelled() && steps.electron.outcome == 'success' && needs.changes.outputs.typecheck != 'false' }}
+        if: ${{ !cancelled() && github.repository == 'pingdotgg/t3code' && steps.electron.outcome == 'success' && needs.changes.outputs.typecheck != 'false' }}
         run: |
           (
             set +e
@@ -274,6 +274,12 @@ jobs:
           until test -s "$RUNNER_TEMP/typecheck-status"; do sleep 1; done
           cat "$RUNNER_TEMP/typecheck.log"
           exit "$(cat "$RUNNER_TEMP/typecheck-status")"
+
+      # GitHub-hosted fork runners have less memory than the upstream build runner.
+      - name: Typecheck on fork
+        if: ${{ !cancelled() && github.repository != 'pingdotgg/t3code' && steps.electron.outcome == 'success' && needs.changes.outputs.typecheck != 'false' }}
+        timeout-minutes: 8
+        run: vp run -r --cache --concurrency-limit 1 typecheck
 
   # Everything except `t3` (apps/server) and the web app, which has its own job
   # below. `--parallel` drops the package dependency ordering that `vp run`
