@@ -311,7 +311,8 @@ export const ListThreadPullRequestsResult = Schema.Struct({
 export type ListThreadPullRequestsResult = typeof ListThreadPullRequestsResult.Type;
 
 const LinkPullRequestTool = Tool.make("link_pull_request", {
-  description: "Link PR to thread, show status and settle on merge. Bulk: link_pull_requests.",
+  description:
+    "Link a PR to this thread. Shows status and settles the thread on merge. Bulk: link_pull_requests.",
   parameters: PullRequestTargetInput,
   success: LinkPullRequestResult,
   failure: PullRequestToolError,

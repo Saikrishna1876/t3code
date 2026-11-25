@@ -1,6 +1,7 @@
 import { assert, describe, expect, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as FeatureFlags from "@t3tools/shared/FeatureFlags";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
 import * as TestSourceControlHost from "@t3tools/source-control-testing/TestSourceControlHost";
@@ -74,7 +75,11 @@ it.effect(
       expect(requests).toBe(2);
       expect(tokenReads).toBe(2);
     }).pipe(
-      Effect.provide(Layer.mergeAll(services, NodeServices.layer, NodeCrypto.layer)),
+      Effect.provide(
+        Layer.mergeAll(services, NodeServices.layer, NodeCrypto.layer).pipe(
+          Layer.provideMerge(FeatureFlags.layerTest()),
+        ),
+      ),
       Effect.provideService(HostProcess.Environment, {}),
       Effect.scoped,
     );

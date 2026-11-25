@@ -398,6 +398,7 @@ it.live("a file without imports or exports loads again after it changes", () =>
       import * as NodeFS from "node:fs";
       import * as NodeServices from "@effect/platform-node/NodeServices";
       import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
       import { loadDefinitions } from ${JSON.stringify(new URL("./WorkflowRuntime.ts", import.meta.url).href)};
       const file = process.argv.at(-1);
       const program = Effect.gen(function* () {

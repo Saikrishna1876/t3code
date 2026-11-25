@@ -88,7 +88,7 @@ const OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
 
 const DelegateTaskTool = Tool.make("delegate_task", {
   description:
-    "Start one child with task only; no parent history/secrets. Separate checkout/PR: isolation='worktree'. Keep taskId for task_status/task_cancel.",
+    "Start one child agent with only `task`. No parent history/secrets. Separate checkout/PR: isolation='worktree'. Keep taskId for task_status/task_cancel.",
   parameters: OrchestratorMcpDelegateTaskInput,
   success: OrchestratorMcpDelegateTaskResult,
   failure: OrchestratorMcpFailure,

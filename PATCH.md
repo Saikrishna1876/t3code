@@ -127,7 +127,7 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 
 - 2026-11-25 candidate merges published upstream stable `v0.1.12`, `ca81b7b97a1c4b91e5ac25768d0f6629f37732fd`, from fork/main `ecbccec5ae0ced6bc0d4be701ff5832ce84f5cca`.
 - Electron stays `43.6.0`. Existing migration IDs 77–103 stay fixed. Incoming IDs 104–118 match their filenames and migration ledger. Codespace launches and handoffs keep the pinned remote checkout. Upstream multi-repository task folders use the host checkout.
-- Preserved the fork update feed, upstream-release prompt, Markdown find, and package-scoped release compatibility tests. Agent context measures 6,196 bytes for Claude, 7,588 for Codex, and 50,218 for the MCP tool list, within the existing ceilings.
+- Preserved the fork update feed, upstream-release prompt, Markdown find, and package-scoped release compatibility tests. Agent context measures 6,196 bytes for Claude, 7,588 for Codex, and 50,246 for the MCP tool list, within the existing ceilings.
 
 ## Previous attempt, 2026-11-20
 
