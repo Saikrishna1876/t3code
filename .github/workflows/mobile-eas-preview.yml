@@ -30,7 +30,6 @@ jobs:
       NODE_OPTIONS: --max-old-space-size=8192
       MOBILE_VERSION_POLICY: fingerprint
       EXPO_TOKEN: ${{ secrets.EXPO_PREVIEW_TOKEN }}
-      GH_TOKEN: ${{ github.token }}
       PR: ${{ github.event.pull_request.number }}
     steps:
       - id: expo-token
@@ -151,7 +150,6 @@ jobs:
       NODE_OPTIONS: --max-old-space-size=8192
       MOBILE_VERSION_POLICY: fingerprint
       EXPO_TOKEN: ${{ secrets.EXPO_PREVIEW_TOKEN }}
-      GH_TOKEN: ${{ github.token }}
       PR: ${{ github.event.pull_request.number }}
     steps:
       - id: expo-token
@@ -294,6 +292,7 @@ jobs:
     concurrency:
       group: mobile-preview-comment-${{ github.event.pull_request.number }}
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       pull-requests: write
@@ -301,6 +300,7 @@ jobs:
       - name: Checkout comment script
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
           sparse-checkout: .github/scripts
 
       - name: Comment

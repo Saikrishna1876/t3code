@@ -268,7 +268,9 @@ test("every fork preview job that reads a secret or runs the PR's code waits in 
     assert.ok(jobSteps.findIndex((step) => /secrets\.|actions\/checkout/.test(step)) > 0, name);
   }
   assert.match(gated.preview, /^ {4}if: needs\.request\.outputs\.sha != ''$/m);
-  assert.doesNotMatch(comment, /secrets\.|^ +ref: |github\.event\.pull_request\.head/m);
+  assert.doesNotMatch(comment, /secrets\.|github\.event\.pull_request\.head/m);
+  const commentRefs = Array.from(comment.matchAll(/^ +ref: (.+)$/gm), (match) => match[1]);
+  assert.deepEqual(commentRefs, ["${{ github.event.pull_request.base.sha }}"]);
 });
 
 async function runPin(environment, sha = "a".repeat(40)) {
