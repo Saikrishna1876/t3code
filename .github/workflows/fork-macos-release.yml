@@ -117,6 +117,8 @@ jobs:
         id: package
         if: steps.meta.outputs.skip != 'true'
         env:
+          # Apple Speech needs the macOS 26 SDK. The Intel runner defaults to Xcode 16.4.
+          DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
           RELEASE_VERSION: ${{ steps.meta.outputs.version }}
           MACOS_PRIVATE_CERTIFICATE: ${{ secrets.MACOS_PRIVATE_CERTIFICATE }}
           MACOS_PRIVATE_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_PRIVATE_CERTIFICATE_PASSWORD }}
