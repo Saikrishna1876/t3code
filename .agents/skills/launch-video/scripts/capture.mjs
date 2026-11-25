@@ -6,6 +6,7 @@ import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
 
 import { findChrome } from "./chrome.mjs";
+import { serveAssets } from "./serve-assets.mjs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
@@ -51,18 +52,9 @@ const TYPES = {
   ".ttf": "font/ttf",
 };
 const root = NodePath.dirname(NodePath.resolve(html));
-const server = NodeHttp.createServer((req, res) => {
-  const file = NodePath.join(root, decodeURIComponent(new URL(req.url, "http://x").pathname));
-  if (!file.startsWith(root)) return void res.writeHead(403).end();
-  NodeFS.readFile(file, (error, body) => {
-    if (error) return void res.writeHead(404).end();
-    res
-      .writeHead(200, {
-        "content-type": TYPES[NodePath.extname(file)] ?? "application/octet-stream",
-      })
-      .end(body);
-  });
-}).listen(0, "127.0.0.1");
+const server = NodeHttp.createServer(
+  serveAssets(root, (file) => TYPES[NodePath.extname(file)] ?? "application/octet-stream"),
+).listen(0, "127.0.0.1");
 await new Promise((resolve) => server.once("listening", resolve));
 
 // Every animation in the story and in its beat iframes, paused at `ms`.

@@ -8,6 +8,7 @@ import * as NodeModule from "node:module";
 import * as NodePath from "node:path";
 
 import { findChrome } from "./chrome.mjs";
+import { serveAssets } from "./serve-assets.mjs";
 
 const [file, text] = process.argv.slice(2);
 if (!file || !text) {
@@ -19,17 +20,9 @@ const { chromium } = NodeModule.createRequire(NodePath.join(REPO, "scripts/packa
   "playwright-core",
 );
 const root = NodePath.dirname(NodePath.resolve(file));
-const server = NodeHttp.createServer((req, res) => {
-  NodeFS.readFile(
-    NodePath.join(root, decodeURIComponent(new URL(req.url, "http://x").pathname)),
-    (error, body) =>
-      error
-        ? res.writeHead(404).end()
-        : res
-            .writeHead(200, req.url.endsWith(".html") ? { "content-type": "text/html" } : {})
-            .end(body),
-  );
-}).listen(0, "127.0.0.1");
+const server = NodeHttp.createServer(
+  serveAssets(root, (file) => (NodePath.extname(file) === ".html" ? "text/html" : undefined)),
+).listen(0, "127.0.0.1");
 await new Promise((resolve) => server.once("listening", resolve));
 const browser = await chromium.launch({
   executablePath: findChrome(chromium),

@@ -845,7 +845,7 @@ describe("checkpoint ref cleanup", () => {
     (remote) =>
       runCleanupTest(
         Effect.gen(function* () {
-          const { service, repo, worktree, command, addThread, listRefs } =
+          const { service, repo, physicalRepo, worktree, command, addThread, listRefs } =
             yield* checkpointCleanupFixture(remote);
           const deleted = yield* addThread("deleted", { deleted: true });
           yield* addThread("imported-deleted", { deleted: true, legacyOnly: true });
@@ -856,7 +856,10 @@ describe("checkpoint ref cleanup", () => {
             legacyCheckpointRef("unknown-owner", 0),
           ];
           const fs = yield* FileSystem.FileSystem;
-          const indexRoot = CheckpointCaptureIndex.storeRoot(yield* Path.Path, `${repo}/.git`);
+          const indexRoot = CheckpointCaptureIndex.storeRoot(
+            yield* Path.Path,
+            `${physicalRepo}/.git`,
+          );
           const captureIndexOf = (ref: string) =>
             `${indexRoot}/${CheckpointCaptureIndex.scopeDirectoryPrefix(ref.slice(0, ref.lastIndexOf("/") + 1))}cwd`;
           for (const ref of [deleted.at(-1)!, active.at(-1)!]) {

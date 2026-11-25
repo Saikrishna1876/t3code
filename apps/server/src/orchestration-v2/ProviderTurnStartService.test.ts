@@ -212,7 +212,8 @@ function startWithMissingWorktree(
                     executor: null,
                     remoteCwd: null,
                   }),
-                call: () => Effect.succeed(null as never),
+                call: () =>
+                  Effect.sync(() => (worktreeExists ? { kind: "directory" } : null) as never),
               }),
             ]
           : []),

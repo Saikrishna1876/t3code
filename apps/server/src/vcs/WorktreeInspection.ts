@@ -11,6 +11,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import { isNetworkPath } from "@t3tools/shared/path";
 import { parse as parseYaml } from "yaml";
 import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
+import * as CheckpointCaptureIndex from "./checkpointCaptureIndex.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import { isLinkedWorktree as detectLinkedWorktree } from "./worktreeRemoval.ts";
 
@@ -32,6 +33,10 @@ class WorktreeInspection extends Context.Service<
       { readonly path: string; readonly type: string; readonly modifiedAt: string | null } | null,
       GitCommandError
     >;
+    readonly removeCheckpointIndexes: (
+      cwd: string,
+      prefixes: ReadonlyArray<string>,
+    ) => Effect.Effect<void, GitCommandError>;
     readonly readDirectory: (cwd: string) => Effect.Effect<ReadonlyArray<string>, GitCommandError>;
     readonly managedDirectory: (
       cwd: string,
@@ -502,6 +507,17 @@ export const make = Effect.gen(function* () {
               ),
             ),
           );
+        }),
+        removeCheckpointIndexes: Effect.fn("WorktreeInspection.removeCheckpointIndexes")(function* (
+          cwd: string,
+          prefixes: ReadonlyArray<string>,
+        ) {
+          const common = yield* git.execute({
+            operation: "WorktreeInspection.removeCheckpointIndexes",
+            cwd,
+            args: ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+          });
+          yield* CheckpointCaptureIndex.removeForScopes(fs, path, common.stdout.trim(), prefixes);
         }),
         readDirectory: Effect.fn("WorktreeInspection.readDirectory")((cwd: string) =>
           guard("readDirectory", cwd, fs.readDirectory(cwd)),

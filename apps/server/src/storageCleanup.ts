@@ -56,7 +56,6 @@ import { forkParked } from "./serverActivation.ts";
 import * as Settings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { isFilesystemRoot, managedWorktreesDirectories } from "./worktreesDirectory.ts";
-import * as CheckpointCaptureIndex from "./vcs/checkpointCaptureIndex.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as WorktreeInspection from "./vcs/WorktreeInspection.ts";
 import * as CodespacesWorkspace from "./codespaces/CodespacesWorkspace.ts";
@@ -2021,9 +2020,9 @@ const make = Effect.gen(function* () {
         ),
       );
     }
-    for (const [commonDir, { cwd, prefixes }] of repositories) {
+    for (const { cwd, prefixes } of repositories.values()) {
       yield* Effect.gen(function* () {
-        yield* CheckpointCaptureIndex.removeForScopes(fs, path, commonDir, prefixes);
+        yield* inspection.removeCheckpointIndexes(cwd, [...prefixes]);
         const result = yield* git.execute({
           operation: "StorageCleanup.listCheckpointRefs",
           cwd,
