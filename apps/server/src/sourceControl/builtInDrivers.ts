@@ -5,6 +5,7 @@ import type {
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
 import * as GitHubDriver from "@t3tools/source-control-github/server/driver";
 import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
+import * as FeatureFlags from "@t3tools/shared/FeatureFlags";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -23,15 +24,27 @@ export class SourceControlDrivers extends Context.Service<
   ReadonlyArray<SourceControlDriverEntry>
 >()("t3/sourceControl/builtInDrivers/SourceControlDrivers") {}
 
-const make = Effect.forEach(BUILT_IN_SOURCE_CONTROL_DRIVER_LIST, (driver) =>
-  Effect.gen(function* () {
-    const instance =
-      driver === GitHubDriver.driver
-        ? yield* GitHubDriver.makeWithSharedServices
-        : yield* driver.make;
-    return { driver, instance };
-  }),
-);
+/** Drivers offered only while their feature flag is on. */
+const FLAGGED_DRIVERS: Readonly<Record<string, "tanstackSource">> = {
+  "tanstack-source": "tanstackSource",
+};
+
+const make = Effect.gen(function* () {
+  const flags = yield* FeatureFlags.FeatureFlags;
+  const drivers = BUILT_IN_SOURCE_CONTROL_DRIVER_LIST.filter((driver) => {
+    const flag = FLAGGED_DRIVERS[driver.kind];
+    return flag === undefined || flags[flag];
+  });
+  return yield* Effect.forEach(drivers, (driver) =>
+    Effect.gen(function* () {
+      const instance =
+        driver === GitHubDriver.driver
+          ? yield* GitHubDriver.makeWithSharedServices
+          : yield* driver.make;
+      return { driver, instance };
+    }),
+  );
+});
 
 export const layer = Layer.effect(SourceControlDrivers, make).pipe(
   Layer.provideMerge(GitHubRest.layerWithDependencies),

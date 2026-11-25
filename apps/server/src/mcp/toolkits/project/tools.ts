@@ -7,6 +7,7 @@ import {
   ThreadId,
   RunId,
   OrchestrationV2DelegatedFrom,
+  OrchestrationV2WorkflowOrigin,
   OrchestrationV2RunStatus,
   OrchestrationV2ThreadLaunchWorkspaceStrategy,
   RuntimeMode,
@@ -79,7 +80,7 @@ const ProjectReadTool = Tool.make("t3_project_read", {
 const ProjectCreateTool = Tool.make("t3_project_create", {
   ...shared,
   description:
-    "Register a project folder. `createWorkspaceRootIfMissing` creates it; registered folders are rejected. Without `workspaceRoot`, makes a git repo from `title` with README, icon, first commit. Clone first with `t3_project_clone`.",
+    "Register workspaceRoot (new if createWorkspaceRootIfMissing); reject duplicates. Without root, init Git repo from title with README, icon, commit. Clone with t3_project_clone first.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     ...ProjectCreatePayload.fields,
@@ -90,7 +91,7 @@ const ProjectCreateTool = Tool.make("t3_project_create", {
 }).annotate(Tool.Destructive, true);
 const ProjectUpdateTool = Tool.make("t3_project_update", {
   ...shared,
-  description: "Update one project's settings. Omitted fields are unchanged.",
+  description: "Update project settings; omitted fields stay.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     projectId: ProjectId,
@@ -99,7 +100,7 @@ const ProjectUpdateTool = Tool.make("t3_project_update", {
 }).annotate(Tool.Destructive, true);
 const ProjectDeleteTool = Tool.make("t3_project_delete", {
   ...shared,
-  description: "Delete one project. Nonempty needs `force: true`. Folder on disk stays.",
+  description: "Delete project record, retaining folder. Nonempty needs force=true.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     projectId: ProjectId,
@@ -114,7 +115,7 @@ const ProjectDeleteTool = Tool.make("t3_project_delete", {
 const ProjectCloneTool = Tool.make("t3_project_clone", {
   ...shared,
   description:
-    "Clone a repository (`destinationPath` new or empty). Register after with `t3_project_create`, with the same `environmentId`.",
+    "Clone into new/empty destinationPath. Register via t3_project_create in same environment.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     ...SourceControlCloneRepositoryInput.fields,
@@ -130,7 +131,7 @@ const ProjectCloneTool = Tool.make("t3_project_clone", {
 const ThreadLaunchTool = Tool.make("t3_thread_launch", {
   ...shared,
   description:
-    "Create top-level thread, bound before start. Task: message. `projectId`/model/modes inherit; outside a thread require `projectId` or `scratch`. Modes cannot exceed yours. Retry with same `clientRequestId`. Follow `t3_thread_read`/`t3_thread_wait`.",
+    "Create and bind top-level thread. Task in message. Omitted project/model/modes inherit. Outside a thread require projectId or scratch. Modes cannot exceed yours. Retry clientRequestId. Follow via t3_thread_read or t3_thread_wait. Cite verbatim link.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     projectId: Schema.optional(ProjectId),
@@ -141,6 +142,7 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
       }),
     ),
     title: TrimmedNonEmptyString,
+    generateTitle: Schema.optional(Schema.Boolean),
     modelSelection: Schema.optional(ModelSelection),
     runtimeMode: Schema.optional(RuntimeMode),
     interactionMode: Schema.optional(ProviderInteractionMode),
@@ -156,9 +158,16 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
       }),
     ),
     attachments: Schema.optional(Schema.Array(McpAttachmentInput).check(Schema.isMaxLength(8))),
+    outputSchema: Schema.optional(
+      Schema.Record(Schema.String, Schema.Json).annotate({
+        description: "As in `t3_thread_send`. Needs `message`.",
+      }),
+    ),
     clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
     /** Set by a linked environment launching its agent's delegated task here; ignored otherwise. */
     delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
+    /** Set by a linked environment whose workflow run this thread is a step of; ignored otherwise. */
+    workflowRun: Schema.optional(OrchestrationV2WorkflowOrigin),
   }),
   success: Schema.Struct({
     threadId: ThreadId,

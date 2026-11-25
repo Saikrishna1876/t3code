@@ -179,8 +179,8 @@ test("preview comments serialize trusted writers without granting build jobs com
     assert.doesNotMatch(builds, /pull-requests: write/);
     assert.doesNotMatch(builds, /^    env:\n(?:      .*\n)*      GH_TOKEN:/m);
     if (name.endsWith("-fork")) {
-      assert.match(jobs, /  consume:[\s\S]*pull-requests: write/);
-      assert.match(builds, /needs: consume/);
+      assert.match(jobs, /^  request:\n[\s\S]*?^      pull-requests: write$/m);
+      assert.match(builds, /^    needs: request$/m);
       assert.doesNotMatch(builds, /issues.removeLabel/);
     }
     assert.match(

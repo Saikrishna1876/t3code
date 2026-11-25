@@ -129,10 +129,11 @@ function ThreadServersList(props: ThreadServersPanelProps) {
         }
         requestedUrl = resolution.value;
       }
+      const forwarding = requestedUrl === server.url && forwardable && locality !== "local";
       const url =
         requestedUrl !== server.url
           ? resolveDiscoveredServerUrl(props.environmentId, requestedUrl)
-          : forwardable && locality !== "local"
+          : forwarding
             ? await forwardPort(props.environmentId, server.port).then(
                 (forward) => forwardedUrl(forward, server.url),
                 (error: unknown) => {
@@ -144,7 +145,8 @@ function ThreadServersList(props: ThreadServersPanelProps) {
       if (url === null) return;
       // Without a forward, a remote environment's localhost would open this machine's instead.
       if (
-        discovery.codespaceName === undefined &&
+        !forwarding &&
+        requestedUrl === server.url &&
         locality !== "local" &&
         tunnelsEnvironmentLoopback(environment?.entry.target) &&
         isLoopbackHost(new URL(url).hostname)

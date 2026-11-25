@@ -27,7 +27,7 @@ const WorktreeToolFailure = Schema.Union([WorktreeMcpFailure, OrchestratorMcpFai
 
 const WorktreeHandoffTool = Tool.make("t3_worktree_handoff", {
   description:
-    "Move THIS thread to a new worktree/branch; setup runs by default. For a separate agent: `t3_thread_launch` + `workspaceStrategy`. Call last: ends session. `continuationPrompt` resumes next turn; omitted waits. Survives deletion. Fails if already in one.",
+    "Move THIS thread to new worktree/branch; runs setup by default. Separate agent: t3_thread_launch workspaceStrategy. Call last; ends session. continuationPrompt starts next turn; omitted waits. Survives deletion. Fails if already attached.",
   parameters: WorktreeMcpHandoffInput,
   success: WorktreeMcpHandoffResult,
   failure: WorktreeToolFailure,
@@ -43,7 +43,7 @@ const WorktreeHandoffTool = Tool.make("t3_worktree_handoff", {
 
 const WorktreeStatusTool = Tool.make("t3_worktree_status", {
   description:
-    "Report this thread's worktree: attached, path, branch, project root, `startFromOrigin` default. Check before `t3_worktree_handoff`.",
+    "Read attachment, path, branch, project root and origin default before t3_worktree_handoff.",
   // No `parameters`: Tool.make defaults to Tool.EmptyParams, which serializes
   // to a top-level `type: "object"` JSON Schema. An explicit empty
   // Schema.Struct({}) serializes to `anyOf: [object, array]`, which is not a
@@ -61,8 +61,7 @@ const WorktreeStatusTool = Tool.make("t3_worktree_status", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const WorktreeListTool = Tool.make("t3_worktree_list", {
-  description:
-    "List branch refs and checkout paths for a thread's workspace. Omit `threadId` for this thread. Detached worktrees are left out.",
+  description: "List branches and worktree paths, excluding detached. Default this thread.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId),

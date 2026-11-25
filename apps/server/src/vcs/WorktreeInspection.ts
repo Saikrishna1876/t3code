@@ -11,6 +11,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import { isNetworkPath } from "@t3tools/shared/path";
 import { parse as parseYaml } from "yaml";
 import * as CodespacesWorkspace from "../codespaces/CodespacesWorkspace.ts";
+import * as CheckpointCaptureIndex from "./checkpointCaptureIndex.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import { isLinkedWorktree as detectLinkedWorktree } from "./worktreeRemoval.ts";
 
@@ -32,6 +33,10 @@ class WorktreeInspection extends Context.Service<
       { readonly path: string; readonly type: string; readonly modifiedAt: string | null } | null,
       GitCommandError
     >;
+    readonly removeCheckpointIndexes: (
+      cwd: string,
+      prefixes: ReadonlyArray<string>,
+    ) => Effect.Effect<void, GitCommandError>;
     readonly readDirectory: (cwd: string) => Effect.Effect<ReadonlyArray<string>, GitCommandError>;
     readonly managedDirectory: (
       cwd: string,
@@ -183,6 +188,22 @@ export const make = Effect.gen(function* () {
           (markers.has("head") && markers.has("objects") && markers.has("refs"))
         );
       };
+      // A gitfile whose target is missing holds no repository data. An unreadable one counts.
+      // Parsed and joined as Git does: only trailing CR/LF is stripped, and `..` is left to the
+      // kernel so a symlinked parent resolves the same way.
+      const isDanglingGitfile = Effect.fn("storageCleanup.isDanglingGitfile")(
+        function* (directory: string, name: string) {
+          const gitPath = path.join(directory, name);
+          if ((yield* fs.lstat(gitPath)).type !== "File") return false;
+          const contents = (yield* fs.readFileString(gitPath)).replace(/[\r\n]+$/u, "");
+          if (!contents.startsWith("gitdir: ") || contents.length === 8) return false;
+          const gitDir = contents.slice(8);
+          // Statting a network path makes Windows sign in to its host with the user's credentials.
+          if (isNetworkPath(gitDir)) return false;
+          return !(yield* fs.exists(path.isAbsolute(gitDir) ? gitDir : `${directory}/${gitDir}`));
+        },
+        Effect.orElseSucceed(() => false),
+      );
       const pending = [root];
       let entries = 1;
       let bytes = 0;
@@ -226,8 +247,15 @@ export const make = Effect.gen(function* () {
         );
         for (const result of inspected) {
           if (result === null) return incomplete;
-          if (inspectRepositories && isNestedRepository(result.target, result.names))
-            return { bytes: null, reason: "contains a nested Git repository" };
+          if (inspectRepositories && isNestedRepository(result.target, result.names)) {
+            const names = yield* Effect.filter(result.names, (name) =>
+              name.toLowerCase() === ".git"
+                ? Effect.map(isDanglingGitfile(result.target, name), (dangling) => !dangling)
+                : Effect.succeed(true),
+            );
+            if (isNestedRepository(result.target, names))
+              return { bytes: null, reason: "contains a nested Git repository" };
+          }
           bytes += result.bytes;
           entries += result.names.length;
           if (entries > 2_000_000) return incomplete;
@@ -240,10 +268,10 @@ export const make = Effect.gen(function* () {
       }
       return { bytes, reason: null };
     },
-    Effect.timeout("30 seconds"),
+    // No time limit: the entry cap bounds the walk, and a removal that timed out would
+    // repeat the whole walk on every sweep without ever deleting the worktree.
     Effect.orElseSucceed(() => ({ bytes: null, reason: "worktree could not be fully inspected" })),
   );
-
   // Use two small Git reads: statusDetailsLocal also diffs and counts for every worktree.
   const branchChanged = Effect.fn("StorageCleanup.branchChanged")(function* (
     cwd: string,
@@ -479,6 +507,17 @@ export const make = Effect.gen(function* () {
               ),
             ),
           );
+        }),
+        removeCheckpointIndexes: Effect.fn("WorktreeInspection.removeCheckpointIndexes")(function* (
+          cwd: string,
+          prefixes: ReadonlyArray<string>,
+        ) {
+          const common = yield* git.execute({
+            operation: "WorktreeInspection.removeCheckpointIndexes",
+            cwd,
+            args: ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+          });
+          yield* CheckpointCaptureIndex.removeForScopes(fs, path, common.stdout.trim(), prefixes);
         }),
         readDirectory: Effect.fn("WorktreeInspection.readDirectory")((cwd: string) =>
           guard("readDirectory", cwd, fs.readDirectory(cwd)),

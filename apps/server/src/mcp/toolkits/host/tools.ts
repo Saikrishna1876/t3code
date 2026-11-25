@@ -28,7 +28,7 @@ export const HostToolkit = Toolkit.make(
   Tool.make("host_skills_list", {
     ...shared,
     description:
-      "Codespaces: list enabled host skills; `fresh` refreshes. Read via `host_skills_read`, never remote shell. Needs thread credential.",
+      "Codespaces: list enabled host skills. fresh refreshes. Read through host_skills_read. Needs thread credential.",
     parameters: HostSkillsListInput,
     success: HostSkillsListResult,
   })
@@ -38,7 +38,7 @@ export const HostToolkit = Toolkit.make(
   Tool.make("host_skills_read", {
     ...shared,
     description:
-      "Codespaces: read host skills/references. `skill`: exact path or unique name from `host_skills_list`/native catalog. `file`: path within skill dir, default SKILL.md. Never run host paths remotely.",
+      "Codespaces: read host skill or reference. skill: exact path or unique name from host_skills_list/catalog. file inside skill dir, default SKILL.md. Never run host paths remotely.",
     parameters: HostSkillReadInput,
     success: HostSkillReadResult,
   })
@@ -48,7 +48,7 @@ export const HostToolkit = Toolkit.make(
   Tool.make("host_mcp_list", {
     ...shared,
     description:
-      "List host MCP servers; server returns tool metadata. Bridge only user-selected servers/resources; keep other routing. Needs live Codex/Claude thread credential. Missing Claude metadata: use known arguments or ask.",
+      "List host MCP servers/tools for live Codex/Claude. Bridge only user-selected servers/resources. Keep other routing. Missing Claude schema: use known arguments or ask.",
     parameters: HostMcpListInput,
     success: HostMcpListResult,
   })
@@ -58,7 +58,7 @@ export const HostToolkit = Toolkit.make(
   Tool.make("host_mcp_call", {
     ...shared,
     description:
-      "Call one host MCP tool with existing credentials; discover via `host_mcp_list`. Selective bridge; keep other routing; remote paths unchanged. Follow tool instructions and user permission. Needs live full-access/default Codex/Claude thread. No recursive T3 host calls.",
+      "Call one host MCP tool via host_mcp_list with existing credentials. Keep other routing, remote paths, tool instructions and permissions. Requires live full-access/default Codex/Claude. No recursive T3 calls.",
     parameters: HostMcpCallInput,
     success: HostMcpCallResult,
   })

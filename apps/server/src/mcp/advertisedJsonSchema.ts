@@ -28,11 +28,9 @@ const isNonStringEnum = (key: string, value: Json) =>
 // Keep field hints that carry limits or hard rules; the rest only restate the field name.
 const keepsFieldHint = (value: string) => /\d|Never|Only|Must|required/.test(value);
 
-const tagOf = (branch: JsonObject, key: string): Json => {
+const tagsOf = (branch: JsonObject, key: string): ReadonlyArray<Json> => {
   const property = Predicate.isObject(branch.properties) ? branch.properties[key] : undefined;
-  return Predicate.isObject(property) && Array.isArray(property.enum) && property.enum.length === 1
-    ? property.enum[0]
-    : undefined;
+  return Predicate.isObject(property) && Array.isArray(property.enum) ? property.enum : [];
 };
 
 /** One object for a tagged union of objects: each property once, the tag listing every value. */
@@ -46,12 +44,13 @@ const mergeTaggedObjects = (branches: ReadonlyArray<Json>): JsonObject | undefin
   );
   if (objects.length !== branches.length) return undefined;
   const tag = Object.keys(objects[0]!.properties).find((key) => {
-    const values = objects.map((object) => tagOf(object, key));
-    return values.every((value) => value !== undefined) && new Set(values).size === values.length;
+    const tags = objects.map((object) => tagsOf(object, key));
+    const values = tags.flat();
+    return tags.every((values) => values.length > 0) && new Set(values).size === values.length;
   });
   if (tag === undefined) return undefined;
   const properties: JsonObject = {
-    [tag]: { type: "string", enum: objects.map((object) => tagOf(object, tag)) },
+    [tag]: { type: "string", enum: objects.flatMap((object) => tagsOf(object, tag)) },
   };
   for (const object of objects) {
     for (const [name, property] of Object.entries(object.properties)) {
