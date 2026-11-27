@@ -9,13 +9,17 @@ function isInside(root, file) {
   );
 }
 
-export function serveAssets(root, contentType) {
+export function serveAssets(root, contentType, prefix = "/") {
   const directory = NodeFS.realpathSync(root);
   return async (request, response) => {
     let file;
     try {
       const pathname = new URL(request.url, "http://127.0.0.1").pathname;
-      file = NodePath.join(directory, decodeURIComponent(pathname));
+      if (!pathname.startsWith(prefix)) {
+        response.writeHead(404).end();
+        return;
+      }
+      file = NodePath.join(directory, decodeURIComponent(pathname.slice(prefix.length)));
     } catch {
       response.writeHead(400).end();
       return;

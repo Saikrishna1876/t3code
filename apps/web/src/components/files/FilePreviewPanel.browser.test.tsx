@@ -814,26 +814,33 @@ describe("rendered Markdown scroll position", () => {
     { length: 200 },
     (_, index) => `## Section ${index}\n\nParagraph ${index}.\n`,
   ).join("\n");
-  const scroller = () =>
-    document.querySelector<HTMLElement>(".scrollbar-gutter-both") ?? expect.unreachable();
+  const chunkedViewport = ".scrollbar-gutter-both";
+  const markdownViewport = '[data-markdown-preview] [data-slot="scroll-area-viewport"]';
+  const scroller = (selector: string) =>
+    document.querySelector<HTMLElement>(selector) ?? expect.unreachable();
   /** The first heading in view and its offset from the top of the viewport. */
-  const readingPosition = () => {
-    const top = scroller().getBoundingClientRect().top;
-    for (const heading of scroller().querySelectorAll("h2")) {
+  const readingPosition = (selector = chunkedViewport) => {
+    const viewport = scroller(selector);
+    const top = viewport.getBoundingClientRect().top;
+    for (const heading of viewport.querySelectorAll("h2")) {
       const offset = Math.round(heading.getBoundingClientRect().top - top);
       if (offset > -100) return { heading: heading.textContent, offset };
     }
     return null;
   };
-  const scrollDown = async () => {
-    scroller().scrollTop = 3000;
-    scroller().dispatchEvent(new Event("scroll"));
-    await vi.waitFor(() => expect(readingPosition()?.heading).not.toBe("Section 0"));
-    return readingPosition();
+  const scrollDown = async (selector = chunkedViewport) => {
+    const viewport = scroller(selector);
+    viewport.scrollTop = 3000;
+    viewport.dispatchEvent(new Event("scroll"));
+    await vi.waitFor(() => expect(readingPosition(selector)?.heading).not.toBe("Section 0"));
+    return readingPosition(selector);
   };
-  const expectReadingPosition = (saved: ReturnType<typeof readingPosition>) =>
+  const expectReadingPosition = (
+    saved: ReturnType<typeof readingPosition>,
+    selector = chunkedViewport,
+  ) =>
     vi.waitFor(() => {
-      const position = readingPosition();
+      const position = readingPosition(selector);
       expect(position?.heading).toBe(saved?.heading);
       expect(Math.abs((position?.offset ?? 0) - (saved?.offset ?? 0))).toBeLessThanOrEqual(2);
     });
@@ -858,15 +865,15 @@ describe("rendered Markdown scroll position", () => {
     {
       await using screen = await render(preview("long.md"));
       await expect.element(screen.getByText("Section 0", { exact: true })).toBeInTheDocument();
-      saved = await scrollDown();
+      saved = await scrollDown(markdownViewport);
     }
     {
       await using screen = await render(preview("other.md"));
       await expect.element(screen.getByText("Section 0", { exact: true })).toBeInTheDocument();
-      expect(scroller().scrollTop, "another file opens at the top").toBe(0);
+      expect(scroller(markdownViewport).scrollTop, "another file opens at the top").toBe(0);
     }
     await using _screen = await render(preview("long.md"));
-    await expectReadingPosition(saved);
+    await expectReadingPosition(saved, markdownViewport);
   });
 
   it("waits for the saved chunk when a reopened file is still streaming in", async () => {

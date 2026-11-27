@@ -3,6 +3,7 @@ import { isEditableFocused } from "~/lib/editableFocus";
 import { isMacPlatform } from "~/lib/utils";
 import {
   useEffect,
+  useLayoutEffect,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -15,7 +16,17 @@ import { ScrollArea } from "../ui/scroll-area";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { MARKDOWN_FIND_OPEN_EVENT } from "./markdownFindActionBus";
 
-export function MarkdownPreview({ children }: { children: ReactNode }) {
+const VIEWPORT_SELECTOR = '[data-slot="scroll-area-viewport"]';
+const MAX_READING_POSITIONS = 100;
+const savedScrollOffsets = new Map<string, number>();
+
+export function MarkdownPreview({
+  children,
+  readingPositionKey,
+}: {
+  children: ReactNode;
+  readingPositionKey?: string;
+}) {
   const gt = useGT();
   const [preview, setPreview] = useState<HTMLDivElement | null>(null);
   const [content, setContent] = useState<HTMLDivElement | null>(null);
@@ -46,8 +57,25 @@ export function MarkdownPreview({ children }: { children: ReactNode }) {
     return () => preview.removeEventListener(MARKDOWN_FIND_OPEN_EVENT, openFind);
   }, [preview]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Restore the rendered viewport before paint and remember its position when it unmounts.
+  useLayoutEffect(() => {
+    if (readingPositionKey === undefined) return;
+    const viewport = content?.closest<HTMLElement>(VIEWPORT_SELECTOR);
+    if (!viewport) return;
+
+    viewport.scrollTop = savedScrollOffsets.get(readingPositionKey) ?? 0;
+    return () => {
+      savedScrollOffsets.delete(readingPositionKey);
+      if (viewport.scrollTop === 0) return;
+      savedScrollOffsets.set(readingPositionKey, viewport.scrollTop);
+      if (savedScrollOffsets.size > MAX_READING_POSITIONS) {
+        savedScrollOffsets.delete(savedScrollOffsets.keys().next().value!);
+      }
+    };
+  }, [content, readingPositionKey]);
+
   const reveal = useStableCallback((range: Range | null) => {
-    const viewport = content?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    const viewport = content?.closest<HTMLElement>(VIEWPORT_SELECTOR);
     if (!range || !viewport) return;
     for (
       let ancestor = range.startContainer.parentElement;

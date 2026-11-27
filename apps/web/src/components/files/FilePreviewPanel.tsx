@@ -1204,8 +1204,10 @@ function RenderedMarkdownSurface({
         changeFileSaveSession(saveTarget, nextContents);
       };
 
+  const readingPositionKey = JSON.stringify([environmentId, threadRef.threadId, cwd, relativePath]);
+
   return (
-    <MarkdownPreview>
+    <MarkdownPreview key={readingPositionKey} readingPositionKey={readingPositionKey}>
       <FileMarkdownPreview
         text={contents}
         cwd={cwd}
