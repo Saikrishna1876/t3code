@@ -176,10 +176,7 @@ function CodespacesComputerSettings({
             <InfoIcon />
           </TooltipTrigger>
           <TooltipPopup>
-            <T>
-              Codespaces are cloud computers. Create one from a blank template, then add projects in
-              separate /workspaces folders.
-            </T>
+            <T>Create a blank Codespace here, then attach a project.</T>
           </TooltipPopup>
         </Tooltip>
       }
@@ -544,7 +541,7 @@ function CodespacesComputerSettings({
                       "Finish or stop active turns first. Rebuilding affects every project on this computer and may reset installed tools. GitHub compute and storage charges may apply.",
                     )
                   : gt(
-                      "GitHub compute and storage charges may apply. You can add several projects after creation.",
+                      "GitHub compute and storage charges may apply. You can attach a project after creation.",
                     )}
             </DialogDescription>
           </DialogHeader>

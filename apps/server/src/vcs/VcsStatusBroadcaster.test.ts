@@ -153,8 +153,8 @@ function layerTestFor(state: {
               ? null
               : {
                   inputStamp: state.refSnapshot ?? "refs",
-                  inputStampAfterLookup:
-                    state.recheckPollStamp ?? Effect.succeed(state.refSnapshot ?? "refs"),
+                  gitCommonDir: "/repo/.git",
+                  refsGeneration: 0,
                   details: {
                     isRepo: state.currentLocalStatus.isRepo,
                     branch,
@@ -169,6 +169,8 @@ function layerTestFor(state: {
                   },
                 },
           ),
+        readStatusPollStamp: (_cwd, _branch, poll) =>
+          state.recheckPollStamp ?? Effect.succeed(poll.inputStamp),
         readRefSnapshot: (_cwd, refs) =>
           Effect.sync(() => {
             state.digestReads?.push(refs);

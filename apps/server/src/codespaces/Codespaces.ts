@@ -249,6 +249,17 @@ const make = Effect.gen(function* () {
           : Effect.void,
       ),
     );
+  const assertProjectCanAttach = Effect.fn("Codespaces.assertProjectCanAttach")(function* (
+    projectId: ProjectId,
+    name: string,
+  ) {
+    const bindings = (yield* projectBindings(
+      (yield* SubscriptionRef.get(state)).operations,
+    )).filter((binding) => binding.name === name);
+    if (bindings.length > 0 && !bindings.some((binding) => binding.projectId === projectId)) {
+      return yield* error("conflict", "This Codespace is attached to another project.");
+    }
+  });
   const project = Effect.fn("Codespaces.project")(function* (input: {
     projectId: ProjectId;
     name?: string | null;
@@ -363,6 +374,7 @@ const make = Effect.gen(function* () {
     }
     const reservationId = `bind:${input.projectId}:${input.name}`;
     yield* workspaces.reserve({ id: reservationId, projectId: input.projectId, name: input.name });
+    yield* assertProjectCanAttach(input.projectId, input.name);
     const saveBinding = (binding: Parameters<typeof workspaces.bind>[0]) =>
       mutex.withPermits(1)(
         workspaces.bind(binding, reservationId).pipe(
@@ -692,6 +704,7 @@ const make = Effect.gen(function* () {
       yield* stage(input.clientRequestId, "starting", "Waiting for the Codespace to start.", name);
       const affected = yield* workspaces.reserve({ id: input.clientRequestId, name, extend: true });
       for (const projectId of affected) yield* assertIdle(ProjectId.make(projectId), name);
+      if (input.projectId) yield* assertProjectCanAttach(input.projectId, name);
     }
     let space = yield* get(name);
     const previous = (yield* SubscriptionRef.get(state)).environments.find(
@@ -908,6 +921,13 @@ const make = Effect.gen(function* () {
                 ...(input.projectId ? { projectId: input.projectId } : {}),
                 ...("name" in input ? { name: input.name } : {}),
               });
+              if (
+                input.projectId &&
+                "name" in input &&
+                ["start", "connect", "rebuild"].includes(input.action)
+              ) {
+                yield* assertProjectCanAttach(input.projectId, input.name);
+              }
               // Reserve first so provider starts cannot pass the idle check during GitHub waits.
               for (const projectId of affected)
                 if ("name" in input) yield* assertIdle(ProjectId.make(projectId), input.name);
@@ -1013,15 +1033,35 @@ const make = Effect.gen(function* () {
       }
     }),
   ).pipe(Effect.ignore, forkParked);
+  const projectBindings = Effect.fn("Codespaces.projectBindings")(function* (
+    operations: readonly CodespacesOperation[],
+  ) {
+    const prepared = (yield* workspaces.bindings).map(({ name, projectId }) => ({
+      name,
+      projectId: ProjectId.make(projectId),
+    }));
+    const attached = new Set(prepared.map(({ name }) => name));
+    return [
+      ...prepared,
+      ...operations.flatMap(({ action, name, projectId }) =>
+        action === "create" && name && projectId && !attached.has(name)
+          ? [{ name, projectId }]
+          : [],
+      ),
+    ];
+  });
+  const withProjectBindings = (snapshot: CodespacesSnapshot) =>
+    projectBindings(snapshot.operations).pipe(
+      Effect.map((projectBindings) => ({ ...snapshot, projectBindings })),
+    );
   return Codespaces.of({
     authorize: authorization.authorize,
     project,
     bind,
     snapshot: Effect.all([SubscriptionRef.get(state), authorization.snapshot]).pipe(
-      Effect.map(([{ requests: _requests, ...snapshot }, authorization]) => ({
-        ...snapshot,
-        authorization,
-      })),
+      Effect.flatMap(([{ requests: _requests, ...snapshot }, authorization]) =>
+        withProjectBindings({ ...snapshot, authorization }),
+      ),
     ),
     list: pinned(list),
     options: Effect.fn("Codespaces.options")((input) => pinned(options(input))),
@@ -1031,10 +1071,9 @@ const make = Effect.gen(function* () {
     ),
     pair: Effect.fn("Codespaces.pair")((input) => pinned(pair(input))),
     changes: Stream.zipLatest(SubscriptionRef.changes(state), authorization.changes).pipe(
-      Stream.map(([{ requests: _requests, ...snapshot }, authorization]) => ({
-        ...snapshot,
-        authorization,
-      })),
+      Stream.mapEffect(([{ requests: _requests, ...snapshot }, authorization]) =>
+        withProjectBindings({ ...snapshot, authorization }),
+      ),
     ),
   });
 });

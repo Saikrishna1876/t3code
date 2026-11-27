@@ -146,6 +146,9 @@ export const CodespacesAuthorizeInput = Schema.Struct({ cancel: Schema.Boolean }
 export const CodespacesSnapshot = Schema.Struct({
   authorization: Schema.optionalKey(CodespacesAuthorization),
   bindingRevision: Schema.optionalKey(Schema.Number),
+  projectBindings: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ name: CodespaceName, projectId: ProjectId })),
+  ),
   configuration: CodespacesConfiguration,
   operations: Schema.Array(CodespacesOperation),
   environments: Schema.Array(CodespacesManagedEnvironment),

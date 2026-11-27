@@ -710,6 +710,26 @@ describe("Codespaces controller", () => {
       expect(test.connects()).toBe(1);
     }).pipe(Effect.provide(test.layer));
   });
+  it.effect("keeps an attached Codespace exclusive to its project", () => {
+    const test = harness();
+    return Effect.gen(function* () {
+      const service = yield* Codespaces.Codespaces;
+      const projectId = ProjectId.make("other-project");
+      expect((yield* service.snapshot).projectBindings).toEqual([
+        { projectId: testProjectId, name: managed.name },
+      ]);
+      const bindError = yield* service.bind({ projectId, name: managed.name }).pipe(Effect.flip);
+      expect(bindError.code).toBe("conflict");
+      for (const action of ["start", "connect", "rebuild"] as const) {
+        const failure = yield* service
+          .run({ action, name: managed.name, projectId, clientRequestId: `exclusive-${action}` })
+          .pipe(Effect.flip);
+        expect(failure.code).toBe("conflict");
+      }
+      expect(test.prepares()).toBe(0);
+      expect(test.connects()).toBe(0);
+    }).pipe(Effect.provide(test.layer));
+  });
   it.effect(
     "prepares a checkout without closing host terminals or changing existing threads",
     () => {

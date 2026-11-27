@@ -429,9 +429,19 @@ export class GitVcsDriver extends Context.Service<
       refreshUpstream: boolean,
     ) => Effect.Effect<{
       readonly inputStamp: string;
-      readonly inputStampAfterLookup: Effect.Effect<string | null>;
+      readonly gitCommonDir: string;
+      readonly refsGeneration: number;
       readonly details: GitRemoteStatusDetails;
     } | null>;
+    readonly readStatusPollStamp: (
+      cwd: string,
+      branch: string | null,
+      poll: {
+        readonly inputStamp: string;
+        readonly gitCommonDir: string;
+        readonly refsGeneration: number;
+      },
+    ) => Effect.Effect<string | null>;
     /** Branch-picker digest input, including worktree paths. */
     readonly readRefSnapshot: (cwd: string, refs?: string) => Effect.Effect<string | null>;
     readonly prepareCommitContext: (

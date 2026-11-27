@@ -3441,12 +3441,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         : 0;
       return {
         inputStamp: inputs.stamp,
-        inputStampAfterLookup: Effect.gen(function* () {
-          if (currentListRefsGeneration(inputs.gitCommonDir) === inputs.refsGeneration) {
-            return inputs.stamp;
-          }
-          return (yield* readStatusInputs(cwd, branch))?.stamp ?? null;
-        }),
+        gitCommonDir: inputs.gitCommonDir,
+        refsGeneration: inputs.refsGeneration,
         details: {
           ...details,
           aheadCount: details.hasUpstream ? details.aheadCount : baseAheadCount,
@@ -3456,6 +3452,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     },
     Effect.orElseSucceed(() => null),
   );
+
+  const readStatusPollStamp: GitVcsDriver.GitVcsDriver["Service"]["readStatusPollStamp"] =
+    Effect.fn("GitVcsDriver.readStatusPollStamp")(function* (cwd, branch, poll) {
+      if (currentListRefsGeneration(poll.gitCommonDir) === poll.refsGeneration) {
+        return poll.inputStamp;
+      }
+      return (yield* readStatusInputs(cwd, branch))?.stamp ?? null;
+    });
 
   const readStatusDetailsLocal = Effect.fn("readStatusDetailsLocal")(function* (
     cwd: string,
@@ -7809,6 +7813,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     statusDetailsLocal,
     statusDetailsRemote,
     readStatusPoll,
+    readStatusPollStamp,
     readStatusRefreshRefs: readBranchPickerRefs,
     readRefSnapshot,
     prepareCommitContext,

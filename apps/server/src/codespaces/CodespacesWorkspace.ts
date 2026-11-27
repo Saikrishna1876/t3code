@@ -4,6 +4,7 @@ import {
   VcsError,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   ProjectWriteFileInput,
+  ReviewDiffPreviewResult,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -155,6 +156,9 @@ const decodeHistory = Schema.decodeEffect(HistoryJson);
 const encodeHistory = Schema.encodeEffect(HistoryJson);
 const decodeVcsError = Schema.decodeUnknownEffect(Schema.toCodecJson(VcsError));
 const decodeWriteFile = Schema.decodeUnknownEffect(ProjectWriteFileInput);
+const decodeReviewDiffPreview = Schema.decodeUnknownEffect(
+  Schema.toCodecJson(ReviewDiffPreviewResult),
+);
 const make = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const client = yield* HttpClient.HttpClient;
@@ -380,6 +384,19 @@ const make = Effect.gen(function* () {
         code: "bootstrap",
         message: "Codespace returned no workspace result.",
       });
+    if (group === "git" && method === "getReviewDiffPreview") {
+      return yield* decodeReviewDiffPreview(
+        mapWorkspacePaths(response.value, executor.remoteRoot, target.localRoot),
+      ).pipe(
+        Effect.mapError(
+          () =>
+            new CodespacesError({
+              code: "bootstrap",
+              message: "Codespace returned an invalid Git diff preview.",
+            }),
+        ),
+      );
+    }
     // File contents and patches are opaque. Only structured Git paths are mapped for local thread bindings.
     if (group === "git" && method === "listWorktreePaths" && Array.isArray(response.value))
       return response.value.map((path) =>

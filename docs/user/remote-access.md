@@ -50,12 +50,15 @@ In the desktop app, open **Settings → Environments → Add environment → SSH
 
 ## GitHub Codespaces
 
-Open **Settings, Environments, Codespaces** to create a cloud computer or add an
-existing Codespace. New computers use GitHub's blank template. Choose a machine,
-review the compute and storage charges, then create it. A computer can hold
-several projects, each in `/workspaces/{project_name}`. Creation does not require
-a project, GitHub repository, or devcontainer configuration.
-In browser VS Code, open `/workspaces` to see every project's folder.
+Choose **Run on**, then **New Codespace** before sending a thread's first
+message. Pick a machine and confirm creation. T3 creates the Codespace from
+GitHub's blank template and prepares the project on it. When it is ready,
+select it in **Run on**. Each new attachment dedicates the Codespace to one
+project. Previously shared computers still open their existing projects.
+
+Open **Settings, Environments, Codespaces** to create a blank computer without
+a project or connect an existing Codespace. In browser VS Code, open
+`/workspaces/{project_name}` to find the project's files.
 Rename, rebuild, or change a computer's machine size from the same settings
 section. Stop the computer before changing its machine size. Rebuilding can
 remove files outside `/workspaces` and affects every project on the computer.
@@ -64,7 +67,6 @@ Choose a project in the same settings section, then choose **Prepare project**.
 The first connection copies the project's current committed branch and Git
 history from your T3 host. Commit local changes first. A GitHub origin is optional.
 Reconnecting preserves the remote checkout and any uncommitted remote changes.
-Projects with the same folder name receive separate folders automatically.
 Choose **New worktree** to give a thread its own branch and checkout on the
 selected computer. Worktrees, file edits, terminals and checkpoints stay there;
 your host's worktree directory setting applies only to local work.
@@ -73,7 +75,8 @@ same rules for local changes and submodules as local projects.
 To open a remote worktree in an external editor, use VS Code or VS Code Insiders
 with the GitHub Codespaces extension.
 
-The **Run on** picker lists computers added in settings. Stopped computers stay
+The **Run on** picker lists the project's computers and unassigned computers
+added in settings. Stopped computers stay
 visible with a **Start** button. Start resumes the existing computer and its
 files. Choose the host or a Codespace before creating a thread. That choice stays
 fixed for the thread. The same project can have host and Codespace threads running
@@ -84,7 +87,7 @@ choice. Tasks that post into an existing thread keep that thread's computer.
 A devcontainer is optional. When present, T3 attempts its lifecycle setup commands
 with memory, process and CPU limits. If the computer cannot enforce those limits,
 or setup fails, your project files remain available and T3 reports what needs
-manual setup. Container images and features do not rebuild the shared computer.
+manual setup. Container images and features need manual setup.
 Choose **Don't warn again for this project** to hide setup notices. Restore them
 with **Show setup warnings** in the project's settings.
 

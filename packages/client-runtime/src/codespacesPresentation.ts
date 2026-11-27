@@ -1,6 +1,17 @@
-import type { CodespacesOperation } from "@t3tools/contracts";
+import type { CodespacesOperation, CodespacesSnapshot, ProjectId } from "@t3tools/contracts";
 import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
+
+export function projectCodespaceNames(snapshot: CodespacesSnapshot | null, projectId: ProjectId) {
+  const bindings = snapshot?.projectBindings ?? [];
+  const attached = new Set(bindings.map(({ name }) => name));
+  return new Set([
+    ...bindings.filter((binding) => binding.projectId === projectId).map(({ name }) => name),
+    ...(snapshot?.environments ?? [])
+      .filter(({ name }) => !attached.has(name))
+      .map(({ name }) => name),
+  ]);
+}
 
 /** Missing capabilities wait for config; a loaded host without the flag is local-only. */
 export function codespacesProjectSendBlockReason(

@@ -17,6 +17,7 @@ import {
 import { providerMessageTextWithAttachmentPaths } from "@t3tools/provider-core/server/attachmentPrompt";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
 import * as Layer from "effect/Layer";
 import * as WorkspaceSearchIndex from "../workspace/WorkspaceSearchIndex.ts";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
@@ -26,7 +27,9 @@ import type {
   ProjectSearchContentsResult,
   ProjectSearchEntriesResult,
   ProjectWriteFileResult,
+  ReviewDiffPreviewResult,
 } from "@t3tools/contracts";
+import type * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { startWorker } from "./worker.ts";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -818,6 +821,22 @@ describe("Codespace workspace worker", () => {
           );
           const worktree = created.worktree.path;
           expect(claimedPath).toBe(worktree);
+          type StatusPoll = Effect.Success<
+            ReturnType<GitVcsDriver.GitVcsDriver["Service"]["readStatusPoll"]>
+          >;
+          const poll = yield* workspace.call<StatusPoll>(worktree, "git", "readStatusPoll", [
+            worktree,
+            "feature/remote",
+            false,
+          ]);
+          if (!poll) throw new Error("Expected worktree status inputs");
+          expect(
+            yield* workspace.call(worktree, "git", "readStatusPollStamp", [
+              worktree,
+              "feature/remote",
+              poll,
+            ]),
+          ).toBe(poll.inputStamp);
           let output = "";
           yield* workspace.call(worktree, "git", "execute", [
             {
@@ -864,6 +883,15 @@ describe("Codespace workspace worker", () => {
           yield* workspace.call(worktree, "files", "writeFile", [
             { cwd: worktree, relativePath: "proof.txt", contents: "worktree only\n" },
           ]);
+          const preview = yield* workspace.call<ReviewDiffPreviewResult>(
+            worktree,
+            "git",
+            "getReviewDiffPreview",
+            [{ cwd: worktree, sourceKind: "working-tree" }],
+          );
+          expect(preview.cwd).toBe(worktree);
+          expect(DateTime.isUtc(preview.generatedAt)).toBe(true);
+          expect(preview.sources[0]?.diff).toContain("+worktree only");
           expect(
             yield* workspace.call(worktree, "files", "readFile", [
               { cwd: worktree, relativePath: "proof.txt" },

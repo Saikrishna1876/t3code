@@ -14,6 +14,7 @@ import {
   codespacesSetupPrompt,
   codespacesOperationPresentation,
   codespaceStateLabel,
+  projectCodespaceNames,
 } from "@t3tools/client-runtime/codespaces-presentation";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { AppText as Text, AppTextInput } from "../../components/ui/AppText";
@@ -122,20 +123,60 @@ export function CodespacesPickerRows({
   );
   const run = useAtomCommand(codespacesEnvironment.run, { reportFailure: false });
   const bind = useAtomCommand(codespacesEnvironment.bind, { reportFailure: false });
+  const loadOptions = useAtomCommand(codespacesEnvironment.options, { reportFailure: false });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [machines, setMachines] = useState<CodespacesOptions["machines"] | null>(null);
+  const [machine, setMachine] = useState("");
   const operation = state.data?.operations.findLast(
     (entry) =>
       entry.projectId === projectId || (project.data?.name && entry.name === project.data.name),
   );
   const feedback = operation ? codespacesOperationPresentation(operation, messages) : null;
   const busy = pending || operation?.status === "running";
-  const managed = new Set(state.data?.environments.map((entry) => entry.name));
+  const available = projectCodespaceNames(state.data, projectId);
   const spaces =
     inventory.data?.codespaces.filter(
-      (entry) => managed.has(entry.name) || entry.name === project.data?.name,
+      (entry) => available.has(entry.name) || entry.name === name,
     ) ?? [];
   const info = project.data;
+  const loadMachines = async () => {
+    setPending(true);
+    setError(null);
+    const result = await loadOptions({ environmentId, input: {} });
+    setPending(false);
+    if (result._tag === "Failure") {
+      const cause = squashAtomCommandFailure(result);
+      setError(cause instanceof Error ? cause.message : gt("Could not load Codespace machines."));
+      return;
+    }
+    setMachines(result.value.machines);
+    setMachine(result.value.machines[0]?.name ?? "");
+  };
+  const create = async () => {
+    setPending(true);
+    setError(null);
+    const result = await run({
+      environmentId,
+      input: {
+        action: "create",
+        projectId,
+        machine,
+        clientRequestId: uuidv4(),
+        idleTimeoutMinutes: 30,
+        retentionDays: 1,
+      },
+    });
+    setPending(false);
+    if (result._tag === "Failure") {
+      const cause = squashAtomCommandFailure(result);
+      setError(cause instanceof Error ? cause.message : gt("Codespace request failed."));
+      return;
+    }
+    setMachines(null);
+    state.refresh();
+    inventory.refresh();
+  };
   const save = async (name: string | null, dismissSetupWarning?: boolean) => {
     setPending(true);
     setError(null);
@@ -182,8 +223,7 @@ export function CodespacesPickerRows({
     <View className="gap-3 p-4">
       <Text className="text-sm text-foreground-muted">
         <T>
-          Add computers in Settings, Environments, Codespaces. Projects share a computer in separate
-          /workspaces folders.
+          Create a Codespace from Run on or add a computer in Settings, Environments, Codespaces.
         </T>
       </Text>
       {error || project.error || inventory.error || state.error ? (
@@ -245,6 +285,42 @@ export function CodespacesPickerRows({
           <T>No computers added yet.</T>
         </Text>
       ) : null}
+      {onCodespaceChange &&
+        (machines === null ? (
+          <Button
+            fullWidth
+            label={gt("New Codespace")}
+            disabled={busy || !canManage || !info?.eligible}
+            onPress={() => void loadMachines()}
+          />
+        ) : (
+          <>
+            <CodespaceOptionPicker
+              label={gt("Machine", { $context: "cloud computer hardware type" })}
+              value={machine}
+              placeholder={gt("No machines available")}
+              disabled={busy || !machines.length}
+              options={machines.map((entry) => ({ value: entry.name, label: entry.displayName }))}
+              onSelect={setMachine}
+            />
+            <Button
+              fullWidth
+              label={gt("Create Codespace")}
+              disabled={busy || !canManage || !info?.eligible || !machine}
+              onPress={() =>
+                Alert.alert(
+                  gt("Create Codespace"),
+                  gt("GitHub compute and storage charges may apply."),
+                  [
+                    { text: gt("Cancel"), style: "cancel" },
+                    { text: gt("Create"), onPress: () => void create() },
+                  ],
+                )
+              }
+            />
+            <Button label={gt("Cancel")} onPress={() => setMachines(null)} />
+          </>
+        ))}
       {feedback ? (
         <View className="gap-1">
           <Text accessibilityLiveRegion="polite" className="text-sm text-foreground">
@@ -368,10 +444,7 @@ function ComputerSettings({
     <SettingsSection title={gt("Codespaces · {label}", { label })}>
       <View className="gap-4 p-4">
         <Text className="text-sm text-foreground-muted">
-          <T>
-            Create a blank cloud computer, then add several projects. Provider login and history
-            stay on your T3 host.
-          </T>
+          <T>Create a blank Codespace here, then attach a project.</T>
         </Text>
         {error || state.error || inventory.error ? (
           <Text accessibilityRole="alert" className="text-sm text-destructive">
