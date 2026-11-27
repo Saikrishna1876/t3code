@@ -188,6 +188,7 @@ export const CodespacesProject = Schema.Struct({
   name: Schema.NullOr(CodespaceName),
   connected: Schema.Boolean,
   workspacePath: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  reclaimableNames: Schema.optionalKey(Schema.Array(CodespaceName)),
   workspaceRoot: Schema.optionalKey(Schema.String),
   setupWarning: Schema.optionalKey(Schema.NullOr(Schema.String)),
   setupWarningDismissed: Schema.optionalKey(Schema.Boolean),

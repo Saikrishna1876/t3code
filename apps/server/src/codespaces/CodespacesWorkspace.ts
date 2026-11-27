@@ -41,6 +41,7 @@ const decodeProgressFrame = Schema.decodeEffect(Schema.fromJsonString(Schema.Unk
 const decodeGitProgress = Schema.decodeUnknownEffect(WorkspaceGitProgressEvent);
 const Binding = Schema.Struct({
   projectId: Schema.String,
+  remoteProjectId: Schema.optionalKey(Schema.String),
   localRoot: Schema.String,
   hostRoot: Schema.optionalKey(Schema.String),
   name: Schema.String,
@@ -58,6 +59,7 @@ export class CodespacesWorkspace extends Context.Service<
     readonly bind: (
       binding: WorkspaceBinding | { projectId: string; name: null },
       reservationId?: string,
+      previousProjectId?: string,
     ) => Effect.Effect<void, CodespacesError>;
     readonly reserve: (input: {
       id: string;
@@ -441,7 +443,7 @@ const make = Effect.gen(function* () {
         ),
       ),
     ),
-    bind: Effect.fn("CodespacesWorkspace.bind")((binding, reservationId) =>
+    bind: Effect.fn("CodespacesWorkspace.bind")((binding, reservationId, previousProjectId) =>
       mutex.withPermits(1)(
         Effect.gen(function* () {
           yield* reservations.assertBindingAvailable(
@@ -476,10 +478,11 @@ const make = Effect.gen(function* () {
                   ? undefined
                   : executors.get(binding.name)?.remoteRoot));
           const next = [
-            ...bindings.filter(
-              (item) =>
-                item.projectId !== binding.projectId ||
-                (binding.name !== null && item.name !== binding.name),
+            ...bindings.filter((item) =>
+              binding.name === null
+                ? item.projectId !== binding.projectId
+                : item.name !== binding.name ||
+                  (item.projectId !== binding.projectId && item.projectId !== previousProjectId),
             ),
             ...(binding.name === null
               ? []

@@ -188,5 +188,9 @@ it("preserves the draft and does not duplicate Codespaces setup instructions", (
     "Fix the tests first.\n\nMake this project compatible with GitHub Codespaces.",
   );
   expect(prompt).toContain(".devcontainer/devcontainer.json");
+  expect(prompt).toContain("project checkout under /workspaces/{project_name}");
   expect(codespacesSetupPrompt(prompt)).toBe(prompt);
+  const olderDraft =
+    "Make this project compatible with GitHub Codespaces. Inspect its stack and existing setup, then add or update .devcontainer/devcontainer.json and supporting files only where needed. The Codespace is a shared computer created from a blank template.";
+  expect(codespacesSetupPrompt(olderDraft)).toBe(olderDraft);
 });

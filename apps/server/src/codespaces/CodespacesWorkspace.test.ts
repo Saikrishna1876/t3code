@@ -39,6 +39,35 @@ function fixture(httpClient = FetchHttpClient.layer) {
 }
 
 describe("project workspace binding", () => {
+  it.effect("transfers one checkout without disturbing another binding on the same Codespace", () =>
+    Effect.gen(function* () {
+      const service = yield* Workspace.CodespacesWorkspace;
+      const original = {
+        projectId: "old",
+        name: "computer",
+        localRoot: "/local/old",
+        remoteRoot: "/workspaces/old",
+      };
+      const other = {
+        projectId: "other",
+        name: "computer",
+        localRoot: "/local/other",
+        remoteRoot: "/workspaces/other",
+      };
+      yield* service.bind(original);
+      yield* service.bind(other);
+      const restored = { ...original, projectId: "new", remoteProjectId: "old" };
+      yield* service.reserve({
+        id: "reattach",
+        projectId: restored.projectId,
+        name: restored.name,
+      });
+      yield* service.bind(restored, "reattach", original.projectId);
+      expect(yield* service.bindings).toEqual([other, restored]);
+      expect(yield* service.lookup(original.localRoot)).toMatchObject(restored);
+    }).pipe(Effect.scoped, Effect.provide(fixture())),
+  );
+
   it.effect("leaves legacy bindings disconnected until their project folder is prepared", () =>
     Effect.gen(function* () {
       const service = yield* Workspace.CodespacesWorkspace;

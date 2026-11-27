@@ -230,7 +230,7 @@ it("creates a dedicated Codespace from Run on when a computer already exists", a
     <Menu>
       <MenuTrigger render={<Button />}>Run on</MenuTrigger>
       <MenuPopup>
-        <CodespacesMenuItems environmentId={local} projectId={projectId} />
+        <CodespacesMenuItems environmentId={local} projectId={projectId} allowCreate />
       </MenuPopup>
     </Menu>,
   );
@@ -256,7 +256,7 @@ it("hides computers attached to other projects from Run on", async () => {
     <Menu>
       <MenuTrigger render={<Button />}>Run on</MenuTrigger>
       <MenuPopup>
-        <CodespacesMenuItems environmentId={local} projectId={projectId} />
+        <CodespacesMenuItems environmentId={local} projectId={projectId} allowCreate />
       </MenuPopup>
     </Menu>,
   );
@@ -265,6 +265,28 @@ it("hides computers attached to other projects from Run on", async () => {
     .element(page.getByRole("menuitem", { name: /Cloud computer/ }))
     .not.toBeInTheDocument();
   await expect.element(page.getByRole("menuitem", { name: "New Codespace" })).toBeEnabled();
+});
+
+it("offers a reclaimable computer in the picker used by scheduled tasks", async () => {
+  setup();
+  state.snapshot = {
+    ...state.snapshot!,
+    projectBindings: [{ name: "computer", projectId: ProjectId.make("removed-project") }],
+  };
+  state.project = { ...state.project!, reclaimableNames: ["computer"] };
+  await using screen = await render(
+    <Menu>
+      <MenuTrigger render={<Button />}>Run on</MenuTrigger>
+      <MenuPopup>
+        <CodespacesMenuItems environmentId={local} projectId={projectId} />
+      </MenuPopup>
+    </Menu>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Run on" }));
+  await expect.element(page.getByRole("menuitem", { name: /Cloud computer/ })).toBeVisible();
+  await expect
+    .element(page.getByRole("menuitem", { name: "New Codespace" }))
+    .not.toBeInTheDocument();
 });
 
 it.each([

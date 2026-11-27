@@ -94,6 +94,7 @@ function harness(
     head?: string;
     remoteFolderExists?: boolean;
     bindings?: ReadonlyArray<CodespacesWorkspace.WorkspaceBinding>;
+    deletedProjects?: ReadonlyArray<{ projectId: ProjectId; workspaceRoot: string }>;
     beforeBind?: () => Effect.Effect<void, CodespacesError>;
     threads?: ReadonlyArray<
       Pick<
@@ -203,7 +204,31 @@ function harness(
           }),
         ),
         Layer.succeed(ProjectStore.ProjectStoreV2, {
-          get: () => Effect.succeedSome({ workspaceRoot: "/workspace/fork" }),
+          get: (projectId: ProjectId) =>
+            overrides.deletedProjects?.some((row) => row.projectId === projectId)
+              ? Effect.succeedNone
+              : Effect.succeedSome({ workspaceRoot: "/workspace/fork" }),
+          list: ({
+            projectIds,
+            includeDeleted,
+          }: {
+            projectIds: readonly ProjectId[];
+            includeDeleted?: boolean;
+          }) =>
+            Effect.succeed(
+              projectIds
+                .map((projectId) => {
+                  const deleted = overrides.deletedProjects?.find(
+                    (row) => row.projectId === projectId,
+                  );
+                  return {
+                    projectId,
+                    workspaceRoot: deleted?.workspaceRoot ?? "/workspace/fork",
+                    deletedAt: deleted ? "2026-10-08T00:00:00Z" : null,
+                  };
+                })
+                .filter((row) => includeDeleted || row.deletedAt === null),
+            ),
         } as unknown as ProjectStore.ProjectStoreV2["Service"]),
         Layer.succeed(ProjectionStore.ProjectionStoreV2, {
           getShellSnapshot: () => Effect.sync(() => ({ threads })),
@@ -237,16 +262,18 @@ function harness(
               .reserve(id, [...projects], [...names], extend)
               .pipe(Effect.as([...projects]));
           },
-          bind: (binding) =>
+          bind: (binding, _reservation, previousProjectId) =>
             Effect.suspend(() => overrides.beforeBind?.() ?? Effect.void).pipe(
               Effect.andThen(
                 Effect.sync(() => {
                   targetEvents.push("bind:" + binding.name);
                   bindings = [
-                    ...bindings.filter(
-                      (entry) =>
-                        entry.projectId !== binding.projectId ||
-                        (binding.name !== null && entry.name !== binding.name),
+                    ...bindings.filter((entry) =>
+                      binding.name === null
+                        ? entry.projectId !== binding.projectId
+                        : entry.name !== binding.name ||
+                          (entry.projectId !== binding.projectId &&
+                            entry.projectId !== previousProjectId),
                     ),
                     ...(binding.name === null ? [] : [binding]),
                   ];
@@ -728,6 +755,94 @@ describe("Codespaces controller", () => {
       }
       expect(test.prepares()).toBe(0);
       expect(test.connects()).toBe(0);
+    }).pipe(Effect.provide(test.layer));
+  });
+  it.effect("reclaims a deleted project's remote checkout when its folder is re-added", () => {
+    const projectId = ProjectId.make("readded-project");
+    const test = harness({
+      bindings: [
+        {
+          projectId: testProjectId,
+          name: managed.name,
+          localRoot: "/workspace/fork",
+          remoteRoot: "/workspaces/original-with-edits",
+        },
+      ],
+      deletedProjects: [{ projectId: testProjectId, workspaceRoot: "/workspace/fork" }],
+      remoteFolderExists: true,
+    });
+    return Effect.gen(function* () {
+      const service = yield* Codespaces.Codespaces;
+      expect(yield* service.project({ projectId })).toMatchObject({
+        reclaimableNames: [managed.name],
+      });
+      const clientRequestId = "reclaim-connect";
+      yield* service.run({ action: "connect", name: managed.name, projectId, clientRequestId });
+      expect((yield* completed(service, clientRequestId)).status).toBe("succeeded");
+      expect((yield* service.snapshot).projectBindings).toEqual([
+        { name: managed.name, projectId },
+      ]);
+      expect(yield* service.project({ projectId, name: managed.name })).toMatchObject({
+        workspacePath: "/workspaces/original-with-edits",
+      });
+      expect(test.prepares()).toBe(0);
+    }).pipe(Effect.provide(test.layer));
+  });
+  it.effect("reuses the original project folder after an interrupted creation", () => {
+    const projectId = ProjectId.make("readded-project");
+    const test = harness({
+      bindings: [],
+      deletedProjects: [{ projectId: testProjectId, workspaceRoot: "/workspace/fork" }],
+      saved: new TextEncoder().encode(
+        json({
+          configuration,
+          environments: [],
+          requests: {},
+          operations: [
+            {
+              projectId: testProjectId,
+              clientRequestId: create.clientRequestId,
+              action: "create",
+              name: managed.name,
+              status: "failed",
+              stage: "interrupted",
+              message: "Interrupted",
+              createdAt: "2026-10-08T00:00:00Z",
+            },
+          ],
+        }),
+      ),
+      prepareProject: (input) =>
+        Effect.sync(() => {
+          expect(input.projectId).toBe(testProjectId);
+          return { remoteRoot: "/workspaces/original", setupWarning: null };
+        }),
+    });
+    return Effect.gen(function* () {
+      const service = yield* Codespaces.Codespaces;
+      expect(yield* service.project({ projectId })).toMatchObject({
+        reclaimableNames: [managed.name],
+      });
+      const clientRequestId = "reclaim-interrupted";
+      yield* service.run({ action: "connect", name: managed.name, projectId, clientRequestId });
+      expect((yield* completed(service, clientRequestId)).status).toBe("succeeded");
+      expect(test.prepares()).toBe(1);
+      expect((yield* service.snapshot).projectBindings).toEqual([
+        { name: managed.name, projectId },
+      ]);
+    }).pipe(Effect.provide(test.layer));
+  });
+  it.effect("keeps a deleted project's Codespace reserved for its original folder", () => {
+    const projectId = ProjectId.make("unrelated-project");
+    const test = harness({
+      deletedProjects: [{ projectId: testProjectId, workspaceRoot: "/workspace/other" }],
+    });
+    return Effect.gen(function* () {
+      const service = yield* Codespaces.Codespaces;
+      expect((yield* service.project({ projectId })).reclaimableNames ?? []).toEqual([]);
+      expect((yield* service.bind({ projectId, name: managed.name }).pipe(Effect.flip)).code).toBe(
+        "conflict",
+      );
     }).pipe(Effect.provide(test.layer));
   });
   it.effect(

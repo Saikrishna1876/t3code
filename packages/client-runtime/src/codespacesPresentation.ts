@@ -2,10 +2,15 @@ import type { CodespacesOperation, CodespacesSnapshot, ProjectId } from "@t3tool
 import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
 
-export function projectCodespaceNames(snapshot: CodespacesSnapshot | null, projectId: ProjectId) {
+export function projectCodespaceNames(
+  snapshot: CodespacesSnapshot | null,
+  projectId: ProjectId,
+  reclaimableNames: readonly string[] = [],
+) {
   const bindings = snapshot?.projectBindings ?? [];
   const attached = new Set(bindings.map(({ name }) => name));
   return new Set([
+    ...reclaimableNames,
     ...bindings.filter((binding) => binding.projectId === projectId).map(({ name }) => name),
     ...(snapshot?.environments ?? [])
       .filter(({ name }) => !attached.has(name))
@@ -147,8 +152,11 @@ export function codespaceStateLabel(state: string | undefined, resolve: MFunctio
 
 /** Draft setup for local review before the user sends it to their agent. */
 export function codespacesSetupPrompt(existingPrompt: string) {
+  const introduction =
+    "Make this project compatible with GitHub Codespaces. Inspect its stack and existing setup, then add or update .devcontainer/devcontainer.json and supporting files only where needed.";
+  if (existingPrompt.includes(introduction)) return existingPrompt;
   const instruction =
-    "Make this project compatible with GitHub Codespaces. Inspect its stack and existing setup, then add or update .devcontainer/devcontainer.json and supporting files only where needed. The Codespace is a shared computer created from a blank template, with projects under /workspaces/{project_name}. A devcontainer is optional. Preserve existing configurations. Do not rebuild, replace, stop, or delete the shared computer. Explain image or feature requirements that cannot be applied safely to it. Check available memory before proposing dependency installation. Use enforceable memory limits for setup commands; if those are unavailable or installation would exceed them, explain how the user can finish setup manually. Do not run an unrestricted dependency installation. Keep T3 thread history and provider login on my T3 host; do not copy credentials or require provider sign-in in the Codespace. Validate the configuration and explain what I need to commit before adding this project to a computer from Settings, Environments, Codespaces. Do not create a Codespace or push changes without my approval.";
-  if (existingPrompt.includes(instruction)) return existingPrompt;
+    introduction +
+    " T3 uses GitHub's blank Codespaces template and puts the project checkout under /workspaces/{project_name}. A devcontainer is optional. Preserve existing configurations. Do not rebuild, replace, stop, or delete the Codespace. Explain image or feature requirements that cannot be applied safely to it. Check available memory before proposing dependency installation. Use enforceable memory limits for setup commands; if those are unavailable or installation would exceed them, explain how the user can finish setup manually. Do not run an unrestricted dependency installation. Keep T3 thread history and provider login on my T3 host; do not copy credentials or require provider sign-in in the Codespace. Validate the configuration and explain what I need to commit before creating a Codespace from Run on or attaching the project in Settings, Environments, Codespaces. Do not create a Codespace or push changes without my approval.";
   return existingPrompt.trim() ? `${existingPrompt}\n\n${instruction}` : instruction;
 }

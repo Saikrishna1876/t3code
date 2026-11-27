@@ -192,6 +192,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
               codespaceName={codespaceName}
               onCodespaceChange={onCodespaceChange}
               locked={envLocked}
+              allowCreate
             />
           ) : null}
         </MenuPopup>

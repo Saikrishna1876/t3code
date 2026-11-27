@@ -248,6 +248,7 @@ export function NewTaskEnvironmentPickerRouteScreen() {
                 projectId={project.id}
                 codespaceName={flow.codespaceName}
                 onCodespaceChange={flow.selectCodespace}
+                allowCreate
               />
             </View>
           ) : null}

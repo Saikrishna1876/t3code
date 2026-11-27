@@ -65,7 +65,7 @@ async function setup(root: string, configurationPath: string | undefined): Promi
     ].filter((command) => command !== undefined);
     const containerWarning =
       configuration.image || configuration.build || Object.keys(configuration.features ?? {}).length
-        ? " Container images and features need a separate container and were not applied to this shared computer."
+        ? " Container images and features need a separate container. Set them up manually."
         : "";
     if (!commands.length) return containerWarning.trim() || null;
     const relative = /^0::(.*)$/m.exec(await NodeFSP.readFile("/proc/self/cgroup", "utf8"))?.[1];

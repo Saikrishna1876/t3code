@@ -67,6 +67,8 @@ Choose a project in the same settings section, then choose **Prepare project**.
 The first connection copies the project's current committed branch and Git
 history from your T3 host. Commit local changes first. A GitHub origin is optional.
 Reconnecting preserves the remote checkout and any uncommitted remote changes.
+If you removed a project from T3, add the same local folder again and select
+its Codespace in **Run on** to reconnect to the existing checkout.
 Choose **New worktree** to give a thread its own branch and checkout on the
 selected computer. Worktrees, file edits, terminals and checkpoints stay there;
 your host's worktree directory setting applies only to local work.
@@ -93,7 +95,7 @@ with **Show setup warnings** in the project's settings.
 
 Use **Prepare cloud setup** in project settings to open instructions for your
 agent. Review and send the draft when ready. It preserves existing draft text
-and asks the agent to prepare setup without rebuilding the shared computer or
+and asks the agent to prepare setup without rebuilding the Codespace or
 running an unrestricted dependency installation.
 
 Your T3 host keeps thread history, the agent and provider login. It must stay

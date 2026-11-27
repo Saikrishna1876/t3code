@@ -103,11 +103,13 @@ export function CodespacesPickerRows({
   projectId,
   codespaceName,
   onCodespaceChange,
+  allowCreate = false,
 }: {
   environmentId: EnvironmentId;
   projectId: ProjectId;
   codespaceName?: string | null;
   onCodespaceChange?: (name: string | null) => void;
+  allowCreate?: boolean;
 }) {
   const [inspectedName, setInspectedName] = useState<string | null>(null);
   const gt = useGT();
@@ -134,7 +136,7 @@ export function CodespacesPickerRows({
   );
   const feedback = operation ? codespacesOperationPresentation(operation, messages) : null;
   const busy = pending || operation?.status === "running";
-  const available = projectCodespaceNames(state.data, projectId);
+  const available = projectCodespaceNames(state.data, projectId, project.data?.reclaimableNames);
   const spaces =
     inventory.data?.codespaces.filter(
       (entry) => available.has(entry.name) || entry.name === name,
@@ -285,7 +287,7 @@ export function CodespacesPickerRows({
           <T>No computers added yet.</T>
         </Text>
       ) : null}
-      {onCodespaceChange &&
+      {allowCreate &&
         (machines === null ? (
           <Button
             fullWidth

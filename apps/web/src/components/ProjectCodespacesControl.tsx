@@ -58,7 +58,7 @@ function useProjectCodespaces(
   );
   const feedback = operation ? codespacesOperationPresentation(operation, messages) : null;
   const busy = pending || operation?.status === "running";
-  const available = projectCodespaceNames(state.data, projectId);
+  const available = projectCodespaceNames(state.data, projectId, project.data?.reclaimableNames);
   const spaces =
     inventory.data?.codespaces.filter(
       (entry) => available.has(entry.name) || entry.name === name,
@@ -135,12 +135,14 @@ export function CodespacesMenuItems({
   codespaceName = null,
   onCodespaceChange,
   locked = false,
+  allowCreate = false,
 }: {
   environmentId: EnvironmentId;
   projectId: ProjectId;
   codespaceName?: string | null | undefined;
   onCodespaceChange?: ((name: string | null) => void) | undefined;
   locked?: boolean;
+  allowCreate?: boolean;
 }) {
   const gt = useGT();
   const messages = useMessages();
@@ -173,7 +175,7 @@ export function CodespacesMenuItems({
           </span>
         </MenuItem>
       ))}
-      {machines === null ? (
+      {!allowCreate ? null : machines === null ? (
         <MenuItem
           closeOnClick={false}
           disabled={!canCreate}
