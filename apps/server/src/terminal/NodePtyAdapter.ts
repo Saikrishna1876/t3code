@@ -50,8 +50,6 @@ export const NodePtyModuleLoaderRef = Context.Reference<NodePtyModuleLoader>(
   { defaultValue: () => loadNodePty },
 );
 
-let didEnsureSpawnHelperExecutable = false;
-
 const resolveNodePtySpawnHelperPath = Effect.gen(function* () {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
@@ -73,23 +71,6 @@ const resolveNodePtySpawnHelperPath = Effect.gen(function* () {
   }
   return null;
 }).pipe(Effect.orElseSucceed(() => null));
-
-const ensureNodePtySpawnHelperExecutable = Effect.fn(function* () {
-  const fs = yield* FileSystem.FileSystem;
-  const platform = yield* HostProcess.Platform;
-  if (platform === "win32") return;
-  if (didEnsureSpawnHelperExecutable) return;
-
-  const helperPath = yield* resolveNodePtySpawnHelperPath;
-  if (!helperPath) return;
-  didEnsureSpawnHelperExecutable = true;
-
-  if (!(yield* fs.exists(helperPath))) {
-    return;
-  }
-
-  yield* fs.chmod(helperPath, 0o755).pipe(Effect.orElseSucceed(() => undefined));
-});
 
 // node-pty has no public readiness event; ready_datapipe sets pid before our listener.
 // Deferred pipe creation: https://github.com/microsoft/node-pty/pull/885
@@ -248,14 +229,25 @@ const make = Effect.fn("NodePtyAdapter.make")(function* () {
       }),
   }).pipe(Effect.orDie);
 
-  const ensureNodePtySpawnHelperExecutableCached = yield* Effect.cached(
-    ensureNodePtySpawnHelperExecutable().pipe(
-      Effect.provideService(FileSystem.FileSystem, fs),
-      Effect.provideService(Path.Path, path),
-      Effect.provideService(HostProcess.Platform, platform),
-      Effect.provideService(HostProcess.Architecture, architecture),
-      Effect.orElseSucceed(() => undefined),
-    ),
+  let didEnsureSpawnHelperExecutable = false;
+  const ensureSpawnHelperExecutable = Effect.gen(function* () {
+    if (platform === "win32" || didEnsureSpawnHelperExecutable) return;
+
+    const helperPath = yield* resolveNodePtySpawnHelperPath;
+    if (helperPath && (yield* fs.exists(helperPath))) {
+      yield* fs.chmod(helperPath, 0o755).pipe(Effect.orElseSucceed(() => undefined));
+    }
+    // A repair interrupted by the spawn deadline must run again on the next spawn.
+    didEnsureSpawnHelperExecutable = true;
+  }).pipe(
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+    Effect.provideService(HostProcess.Platform, platform),
+    Effect.provideService(HostProcess.Architecture, architecture),
+    Effect.orElseSucceed(() => undefined),
+    // Terminal startup runs uninterruptibly; a stalled helper check must not hold its locks.
+    Effect.interruptible,
+    Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.void }),
   );
 
   const credentialService = Option.getOrUndefined(
@@ -339,7 +331,7 @@ const make = Effect.fn("NodePtyAdapter.make")(function* () {
           },
         };
       }
-      yield* ensureNodePtySpawnHelperExecutableCached;
+      yield* ensureSpawnHelperExecutable;
       // ConPTY ignores node-pty's name option for TERM; set it explicitly to avoid missing/16-color values.
       const env =
         platform === "win32" && input.env["TERM"] === undefined

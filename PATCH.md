@@ -18,7 +18,8 @@ Keep project Codespaces work available with the user's existing local provider l
 
 ## Baseline
 
-- Fork/main integrated upstream baseline: stable `v0.1.11`, `59651c1761f6c63e9b6056839067066968e6a406`, landed through PR #24 at `97d2bddc2a`. PR #26 fixed migrations, Codespaces asset routing and selection, Markdown find, and translations. PR #27 scoped the release compatibility tests to their owning packages. Fork release `0.1.11` published 2026-11-20.
+- Fork/main integrated upstream baseline: stable `v0.1.12`, `ca81b7b97a1c4b91e5ac25768d0f6629f37732fd`, landed through PR #28 at `3059c52bb4`. PR #29 selected Xcode 26.3 for Intel Mac packaging. Fork release `0.1.12` published 2026-11-25 from `0471653a774463f3d9148e42141b0dd18de908d4`.
+- Previous integrated upstream baseline: stable `v0.1.11`, `59651c1761f6c63e9b6056839067066968e6a406`, landed through PR #24 at `97d2bddc2a`. PR #26 fixed migrations, Codespaces asset routing and selection, Markdown find, and translations. PR #27 scoped the release compatibility tests to their owning packages. Fork release `0.1.11` published 2026-11-20.
 - Previous integrated upstream baseline: stable `v0.1.10`, `7d32075e3757ded707914e2450c3e392a9665765`, landed through PR #21 at `b19928ff03` with upstream ancestry preserved at `0e1c422794`. PR #20 added the fork updater prompt at `c70267e52a3e7a58ce95c6a731b39d21e0f12f18`; PR #22 installed Chromium for release checks and PR #23 subscribed before the first browser tab opens. Fork release `0.1.10` was published 2026-11-18.
 - Previous integrated upstream baseline: stable `v0.1.9`, `24e77473ecf41bc1f7142529c7911c1c1aae1d76`, landed through PR #19 at `e6b749f8f8b1c51afec50fb508a38a81bff5b7c8`. PR #19 recovered PR #12's reviewed v0.1.7 integration before merging v0.1.9.
 - Compatibility patches, including PR #2, are committed. Superseded local Codespaces drafts were stashed before the 2026-10-13 integration; see Previous update, 2026-10-18.
@@ -124,6 +125,14 @@ Follow AGENTS.md. Use focused checks; no repo-wide suites. Browser/computer use 
 - Prior successful release: 2026-10-07, version `0.0.45`, source `49b07dc3cb8e105c69ed93885ba0e6e80990762b`. DMG and ZIP integrity, packaged Electron `43.6.0`, x64 architecture, and fork feed checks passed. CodeRabbit had zero findings; Greptile's merged review was unavailable because reviews were disabled for the organization.
 
 ## Latest attempt
+
+- 2026-11-27 candidate merges published upstream stable `v0.1.13`, `bc0f04da94f64b5e487c598761a43b4cf06b2ac9`, from fork/main `0471653a774463f3d9148e42141b0dd18de908d4`. Branch `chore/release-v0-1-13`.
+- Electron stays `43.6.0`. Migration IDs 1–118 stay fixed. The new workflow pool and subject migrations use 119–120 in code, filenames, and ledger. Codespace threads keep their pinned checkout in the composer, remote terminal, and file previews.
+- Preserve Xcode 26.3 packaging, native clipboard handling, packaged asset reads, the fork update feed and upstream-release prompt, and Markdown find. Reuse upstream's shared tooltips, terminal snapshot support, and asset response policy.
+
+- Scoped compatibility tests pass (557 passed, one skipped), along with server, desktop, web, and mobile typechecks and locale checks. The agent context test measures 6,196 bytes for Claude, 7,477 for Codex, and 50,240 for the MCP tool list. The 483-file local test batch reached its 15-minute timeout. Other `check:changed` stages passed. GitHub CI covers the full test suites.
+
+## Previous attempt, 2026-11-25
 
 - 2026-11-25 candidate merges published upstream stable `v0.1.12`, `ca81b7b97a1c4b91e5ac25768d0f6629f37732fd`, from fork/main `ecbccec5ae0ced6bc0d4be701ff5832ce84f5cca`.
 - Electron stays `43.6.0`. Existing migration IDs 77–103 stay fixed. Incoming IDs 104–118 match their filenames and migration ledger. Codespace launches and handoffs keep the pinned remote checkout. Upstream multi-repository task folders use the host checkout.

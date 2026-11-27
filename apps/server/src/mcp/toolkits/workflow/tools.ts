@@ -17,7 +17,7 @@ const ExactName = Schema.String.check(
 
 const WorkflowTool = Tool.make("t3_workflow", {
   description:
-    "Durable workflow runs. start(workflow,input,idempotencyKey): reuse key to retry. list(status,tag); read(runId): run and steps; questions(kind); hooks: trigger URLs; store(key prefix); store_set(key,value); store_delete(key). signal(value): runId+wait or workflow+channel; answer with {choice,reason?}. withdraw(runId,wait,reason?): continue as timed out. resume: retry paused run's failed step. cancel(runId).",
+    "start(workflow,input,idempotencyKey): key dedupes. list(status,tag,subject URL/thread ID); read(runId): run+steps; questions(kind); hooks: trigger URLs; store(key prefix); store_set(key,value); store_delete(key); signal(value): runId+wait or workflow+channel, answer {choice,reason?}; withdraw(runId,wait,reason?): time out question; resume: retry failed step; cancel(runId).",
   parameters: Schema.Struct({
     action: Schema.Literals([
       ...WORKFLOW_READ_ACTIONS,
@@ -36,6 +36,7 @@ const WorkflowTool = Tool.make("t3_workflow", {
     runId: Schema.optional(TrimmedNonEmptyString),
     status: Schema.optional(WorkflowRunStatus),
     tag: Schema.optional(ExactName),
+    subject: Schema.optional(ExactName),
     kind: Schema.optional(ExactName),
     wait: Schema.optional(ExactName),
     key: Schema.optional(ExactName),
