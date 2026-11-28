@@ -249,6 +249,56 @@ const make = Effect.gen(function* () {
           : Effect.void,
       ),
     );
+  const projectBindings = Effect.fn("Codespaces.projectBindings")(function* (
+    operations: readonly CodespacesOperation[],
+  ) {
+    const prepared = (yield* workspaces.bindings).map(({ name, projectId }) => ({
+      name,
+      projectId: ProjectId.make(projectId),
+    }));
+    const attached = new Set(prepared.map(({ name }) => name));
+    return [
+      ...prepared,
+      ...operations.flatMap(({ action, name, projectId }) =>
+        action === "create" && name && projectId && !attached.has(name)
+          ? [{ name, projectId }]
+          : [],
+      ),
+    ];
+  });
+  const reclaimableClaims = Effect.fn("Codespaces.reclaimableClaims")(function* (
+    projectId: ProjectId,
+    hostRoot: string,
+    claims: ReadonlyArray<{ projectId: ProjectId; name: string }>,
+  ) {
+    const otherClaims = claims.filter((claim) => claim.projectId !== projectId);
+    if (otherClaims.length === 0) return [];
+    const projects = yield* projectStore
+      .list({
+        projectIds: [...new Set(otherClaims.map((claim) => claim.projectId))],
+        includeDeleted: true,
+      })
+      .pipe(Effect.mapError(() => error("storage", "Could not read Codespace attachments.")));
+    const previous = new Set(
+      projects
+        .filter((row) => row.deletedAt !== null && row.workspaceRoot === hostRoot)
+        .map((row) => row.projectId),
+    );
+    return otherClaims.filter((claim) => previous.has(claim.projectId));
+  });
+  const resolveAttachmentOwner = Effect.fn("Codespaces.resolveAttachmentOwner")(function* (
+    projectId: ProjectId,
+    name: string,
+  ) {
+    const claims = (yield* projectBindings((yield* SubscriptionRef.get(state)).operations)).filter(
+      (claim) => claim.name === name,
+    );
+    if (claims.length === 0 || claims.some((claim) => claim.projectId === projectId)) return null;
+    const hostRoot = yield* projectRoot(projectId);
+    const [previous] = yield* reclaimableClaims(projectId, hostRoot, claims);
+    if (previous) return previous.projectId;
+    return yield* error("conflict", "This Codespace is attached to another project.");
+  });
   const project = Effect.fn("Codespaces.project")(function* (input: {
     projectId: ProjectId;
     name?: string | null;
@@ -281,7 +331,7 @@ const make = Effect.gen(function* () {
           Effect.orElseSucceed(() => ""),
         );
     if (yield* exists(root + "/.devcontainer.json")) paths.unshift(".devcontainer.json");
-    const [origin, ref, target, head] = yield* Effect.all(
+    const [origin, ref, lookup, head] = yield* Effect.all(
       [
         git(["remote", "get-url", "origin"]),
         git(["symbolic-ref", "--short", "HEAD"]),
@@ -292,6 +342,9 @@ const make = Effect.gen(function* () {
       ],
       { concurrency: 3 },
     );
+    const target = lookup?.projectId === input.projectId ? lookup : null;
+    const claims = yield* projectBindings((yield* SubscriptionRef.get(state)).operations);
+    const reclaimable = yield* reclaimableClaims(input.projectId, root, claims);
     const match = /(?:github\.com[:/])([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(origin);
     const repository = match?.[1] ?? "";
     const eligible = head !== "";
@@ -304,6 +357,9 @@ const make = Effect.gen(function* () {
       devcontainerPaths: paths,
       name: input.name ?? target?.name ?? null,
       connected: target?.executor !== null && target?.executor !== undefined,
+      ...(reclaimable.length > 0
+        ? { reclaimableNames: [...new Set(reclaimable.map(({ name }) => name))] }
+        : {}),
       workspacePath: target?.remoteRoot ?? null,
       workspaceRoot:
         target?.localRoot ?? (input.name ? codespaceWorkspaceRoot(root, input.name) : root),
@@ -363,9 +419,10 @@ const make = Effect.gen(function* () {
     }
     const reservationId = `bind:${input.projectId}:${input.name}`;
     yield* workspaces.reserve({ id: reservationId, projectId: input.projectId, name: input.name });
+    const previousProjectId = yield* resolveAttachmentOwner(input.projectId, input.name);
     const saveBinding = (binding: Parameters<typeof workspaces.bind>[0]) =>
       mutex.withPermits(1)(
-        workspaces.bind(binding, reservationId).pipe(
+        workspaces.bind(binding, reservationId, previousProjectId ?? undefined).pipe(
           Effect.tap(() =>
             SubscriptionRef.update(state, (current) => ({
               ...current,
@@ -384,7 +441,7 @@ const make = Effect.gen(function* () {
     );
     if (!environment)
       return yield* error("conflict", "Start and connect this Codespace before adding a project.");
-    const binding = yield* pinned(prepareProject(input.projectId, input.name));
+    const binding = yield* pinned(prepareProject(input.projectId, input.name, previousProjectId));
     yield* saveBinding(binding);
     return yield* project({ projectId: input.projectId, name: input.name });
   }, Effect.scoped);
@@ -616,6 +673,7 @@ const make = Effect.gen(function* () {
   const prepareProject = Effect.fn("Codespaces.prepareProject")(function* (
     projectId: ProjectId,
     name: string,
+    previousProjectId: ProjectId | null,
   ) {
     const hostRoot = yield* projectRoot(projectId);
     const localRoot = codespaceWorkspaceRoot(hostRoot, name);
@@ -629,9 +687,17 @@ const make = Effect.gen(function* () {
       return binding;
     };
     const existing = (yield* workspaces.bindings).find(
-      (binding) => binding.projectId === projectId && binding.name === name && binding.remoteRoot,
+      (binding) => binding.projectId === (previousProjectId ?? projectId) && binding.name === name,
     );
-    if (existing) {
+    const remoteProjectId = existing?.remoteProjectId ?? previousProjectId ?? projectId;
+    const identity = {
+      projectId,
+      localRoot,
+      hostRoot,
+      name,
+      ...(remoteProjectId !== projectId ? { remoteProjectId } : {}),
+    };
+    if (existing?.remoteRoot) {
       const metadata = yield* workspaces
         .call<FilesystemEntryMetadata | null>(existing.localRoot, "files", "getMetadata", [
           { cwd: existing.localRoot, relativePath: "" },
@@ -641,7 +707,7 @@ const make = Effect.gen(function* () {
             error("bootstrap", "Could not check the remote project folder. Reconnect and retry."),
           ),
         );
-      if (metadata?.kind === "directory") return remember({ ...existing, localRoot, hostRoot });
+      if (metadata?.kind === "directory") return remember({ ...existing, ...identity });
     }
     const info = yield* project({ projectId });
     if (!info.eligible) return yield* error("configuration", info.reason);
@@ -652,13 +718,13 @@ const make = Effect.gen(function* () {
         .slice(0, 100) || "project";
     const prepared = yield* host.prepareProject({
       name,
-      projectId,
+      projectId: ProjectId.make(remoteProjectId),
       localRoot: hostRoot,
       folder,
       ref: info.ref,
       ...(info.devcontainerPaths[0] ? { devcontainerPath: info.devcontainerPaths[0] } : {}),
     });
-    return remember({ projectId, localRoot, hostRoot, name, ...prepared });
+    return remember({ ...identity, ...prepared });
   });
   const perform = Effect.fn("Codespaces.perform")(function* (
     input: CodespacesRunInput,
@@ -801,8 +867,9 @@ const make = Effect.gen(function* () {
     }));
     if (input.projectId) {
       yield* assertIdle(input.projectId, name);
-      const binding = yield* prepareProject(input.projectId, name);
-      yield* workspaces.bind(binding, input.clientRequestId);
+      const previousProjectId = yield* resolveAttachmentOwner(input.projectId, name);
+      const binding = yield* prepareProject(input.projectId, name, previousProjectId);
+      yield* workspaces.bind(binding, input.clientRequestId, previousProjectId ?? undefined);
     }
   });
   const run = Effect.fn("Codespaces.run")(function* (
@@ -908,6 +975,13 @@ const make = Effect.gen(function* () {
                 ...(input.projectId ? { projectId: input.projectId } : {}),
                 ...("name" in input ? { name: input.name } : {}),
               });
+              if (
+                input.projectId &&
+                "name" in input &&
+                ["start", "connect", "rebuild"].includes(input.action)
+              ) {
+                yield* resolveAttachmentOwner(input.projectId, input.name);
+              }
               // Reserve first so provider starts cannot pass the idle check during GitHub waits.
               for (const projectId of affected)
                 if ("name" in input) yield* assertIdle(ProjectId.make(projectId), input.name);
@@ -999,29 +1073,36 @@ const make = Effect.gen(function* () {
       const timestamp = DateTime.toEpochMillis(yield* DateTime.now);
       for (const environment of initial.environments) {
         if (environment.account !== login) continue;
-        const binding = (yield* workspaces.bindings).find(
-          (entry) => entry.name === environment.name,
-        );
+        const projectIds = (yield* workspaces.bindings)
+          .filter((entry) => entry.name === environment.name)
+          .map((entry) => ProjectId.make(entry.projectId));
+        const [project] =
+          projectIds.length > 0
+            ? yield* projectStore.list({ projectIds }).pipe(Effect.orElseSucceed(() => []))
+            : [];
         const space = yield* get(environment.name).pipe(Effect.option);
         if (Option.isSome(space) && space.value.state === "Available")
           yield* run({
             action: "connect",
-            ...(binding ? { projectId: ProjectId.make(binding.projectId) } : {}),
+            ...(project ? { projectId: project.projectId } : {}),
             name: environment.name,
             clientRequestId: `restore-${timestamp}-${environment.codespaceId}`,
           }).pipe(Effect.ignore);
       }
     }),
   ).pipe(Effect.ignore, forkParked);
+  const withProjectBindings = (snapshot: CodespacesSnapshot) =>
+    projectBindings(snapshot.operations).pipe(
+      Effect.map((projectBindings) => ({ ...snapshot, projectBindings })),
+    );
   return Codespaces.of({
     authorize: authorization.authorize,
     project,
     bind,
     snapshot: Effect.all([SubscriptionRef.get(state), authorization.snapshot]).pipe(
-      Effect.map(([{ requests: _requests, ...snapshot }, authorization]) => ({
-        ...snapshot,
-        authorization,
-      })),
+      Effect.flatMap(([{ requests: _requests, ...snapshot }, authorization]) =>
+        withProjectBindings({ ...snapshot, authorization }),
+      ),
     ),
     list: pinned(list),
     options: Effect.fn("Codespaces.options")((input) => pinned(options(input))),
@@ -1031,10 +1112,9 @@ const make = Effect.gen(function* () {
     ),
     pair: Effect.fn("Codespaces.pair")((input) => pinned(pair(input))),
     changes: Stream.zipLatest(SubscriptionRef.changes(state), authorization.changes).pipe(
-      Stream.map(([{ requests: _requests, ...snapshot }, authorization]) => ({
-        ...snapshot,
-        authorization,
-      })),
+      Stream.mapEffect(([{ requests: _requests, ...snapshot }, authorization]) =>
+        withProjectBindings({ ...snapshot, authorization }),
+      ),
     ),
   });
 });

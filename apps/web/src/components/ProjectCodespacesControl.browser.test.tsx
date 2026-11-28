@@ -224,6 +224,71 @@ it("creates a blank computer from settings before any project is attached", asyn
   expect(state.run.mock.calls[0]![0].input).not.toHaveProperty("devcontainerPath");
 });
 
+it("creates a dedicated Codespace from Run on when a computer already exists", async () => {
+  setup();
+  await using screen = await render(
+    <Menu>
+      <MenuTrigger render={<Button />}>Run on</MenuTrigger>
+      <MenuPopup>
+        <CodespacesMenuItems environmentId={local} projectId={projectId} allowCreate />
+      </MenuPopup>
+    </Menu>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Run on" }));
+  await expect.element(page.getByRole("menuitem", { name: /Cloud computer/ })).toBeVisible();
+  await userEvent.click(page.getByRole("menuitem", { name: "New Codespace" }));
+  await userEvent.click(page.getByRole("menuitem", { name: "2 cores" }));
+  expect(state.run).not.toHaveBeenCalled();
+  await userEvent.click(page.getByRole("menuitem", { name: "Create Codespace · 2 cores" }));
+  expect(state.run).toHaveBeenCalledWith({
+    environmentId: local,
+    input: expect.objectContaining({ action: "create", projectId, machine: "basicLinux32gb" }),
+  });
+});
+
+it("hides computers attached to other projects from Run on", async () => {
+  setup();
+  state.snapshot = {
+    ...state.snapshot!,
+    projectBindings: [{ name: "computer", projectId: ProjectId.make("other-project") }],
+  };
+  await using screen = await render(
+    <Menu>
+      <MenuTrigger render={<Button />}>Run on</MenuTrigger>
+      <MenuPopup>
+        <CodespacesMenuItems environmentId={local} projectId={projectId} allowCreate />
+      </MenuPopup>
+    </Menu>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Run on" }));
+  await expect
+    .element(page.getByRole("menuitem", { name: /Cloud computer/ }))
+    .not.toBeInTheDocument();
+  await expect.element(page.getByRole("menuitem", { name: "New Codespace" })).toBeEnabled();
+});
+
+it("offers a reclaimable computer in the picker used by scheduled tasks", async () => {
+  setup();
+  state.snapshot = {
+    ...state.snapshot!,
+    projectBindings: [{ name: "computer", projectId: ProjectId.make("removed-project") }],
+  };
+  state.project = { ...state.project!, reclaimableNames: ["computer"] };
+  await using screen = await render(
+    <Menu>
+      <MenuTrigger render={<Button />}>Run on</MenuTrigger>
+      <MenuPopup>
+        <CodespacesMenuItems environmentId={local} projectId={projectId} />
+      </MenuPopup>
+    </Menu>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Run on" }));
+  await expect.element(page.getByRole("menuitem", { name: /Cloud computer/ })).toBeVisible();
+  await expect
+    .element(page.getByRole("menuitem", { name: "New Codespace" }))
+    .not.toBeInTheDocument();
+});
+
 it.each([
   ["Shutdown", false],
   ["Available", false],

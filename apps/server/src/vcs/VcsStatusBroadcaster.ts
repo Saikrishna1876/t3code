@@ -655,7 +655,10 @@ export const make = Effect.gen(function* () {
     const refreshedLocal =
       branch !== currentBranch || cached?.local?.value.refName !== currentBranch;
     // Read before the local refresh: a base that moves after it changes the next poll's stamp.
-    const inputStamp = branch === currentBranch && poll ? yield* poll.inputStampAfterLookup : null;
+    const inputStamp =
+      branch === currentBranch && poll
+        ? yield* workflow.readStatusPollStamp(cwd, branch, poll)
+        : null;
     if (refreshedLocal) {
       yield* refreshLocalStatusCore(cwd);
     }

@@ -6284,7 +6284,10 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         yield* git(cwd, ["worktree", "add", "-b", "feature", linked]);
         const observed = yield* driver.readStatusPoll(linked, "feature", false);
         if (observed === null) return assert.fail("Expected poll inputs for the linked worktree");
-        assert.equal(yield* observed.inputStampAfterLookup, observed.inputStamp);
+        assert.equal(
+          yield* driver.readStatusPollStamp(linked, "feature", observed),
+          observed.inputStamp,
+        );
         const cachedStatus = yield* driver.statusDetailsRemote(cwd, {
           refreshUpstream: false,
         });
@@ -6295,7 +6298,10 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const fresh = yield* driver.readStatusPoll(linked, "feature", false);
         if (fresh === null) return assert.fail("Expected poll inputs after the fetch");
         assert.notEqual(fresh.inputStamp, observed.inputStamp);
-        assert.equal(yield* observed.inputStampAfterLookup, fresh.inputStamp);
+        assert.equal(
+          yield* driver.readStatusPollStamp(linked, "feature", observed),
+          fresh.inputStamp,
+        );
       }),
     );
 

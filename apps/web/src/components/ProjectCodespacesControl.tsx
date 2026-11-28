@@ -1,16 +1,19 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 import { T, useGT, useMessages } from "gt-react";
+import { PlusIcon } from "lucide-react";
 import type {
   EnvironmentId,
   ProjectId,
   CodespacesRunInput,
   CodespacesProject,
+  CodespacesOptions,
 } from "@t3tools/contracts";
 import {
   codespacesSetupPrompt,
   codespaceStateLabel,
   codespacesOperationPresentation,
+  projectCodespaceNames,
 } from "@t3tools/client-runtime/codespaces-presentation";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { codespacesEnvironment } from "~/state/codespaces";
@@ -46,6 +49,7 @@ function useProjectCodespaces(
   );
   const run = useAtomCommand(codespacesEnvironment.run, { reportFailure: false });
   const bind = useAtomCommand(codespacesEnvironment.bind, { reportFailure: false });
+  const loadOptions = useAtomCommand(codespacesEnvironment.options, { reportFailure: false });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const operation = state.data?.operations.findLast(
@@ -54,10 +58,10 @@ function useProjectCodespaces(
   );
   const feedback = operation ? codespacesOperationPresentation(operation, messages) : null;
   const busy = pending || operation?.status === "running";
-  const managed = new Set(state.data?.environments.map((entry) => entry.name));
+  const available = projectCodespaceNames(state.data, projectId, project.data?.reclaimableNames);
   const spaces =
     inventory.data?.codespaces.filter(
-      (entry) => managed.has(entry.name) || entry.name === project.data?.name,
+      (entry) => available.has(entry.name) || entry.name === name,
     ) ?? [];
   const execute = async (
     input: CodespacesRunInput | { name: string | null; dismissSetupWarning?: boolean },
@@ -78,6 +82,17 @@ function useProjectCodespaces(
     setPending(false);
     project.refresh();
     if ("action" in input) inventory.refresh();
+    return result._tag === "Success";
+  };
+  const loadMachines = async () => {
+    setPending(true);
+    setError(null);
+    const result = await loadOptions({ environmentId, input: {} });
+    setPending(false);
+    if (result._tag === "Success") return result.value.machines;
+    const cause = squashAtomCommandFailure(result);
+    setError(cause instanceof Error ? cause.message : gt("Could not load Codespace machines."));
+    return null;
   };
   const select = (name: string, stopped: boolean, reconnect = false) => {
     onSelect?.(name);
@@ -107,6 +122,7 @@ function useProjectCodespaces(
     busy,
     select,
     execute,
+    loadMachines,
     dismissWarning,
     feedback,
     error: error ?? project.error ?? inventory.error ?? state.error,
@@ -119,18 +135,22 @@ export function CodespacesMenuItems({
   codespaceName = null,
   onCodespaceChange,
   locked = false,
+  allowCreate = false,
 }: {
   environmentId: EnvironmentId;
   projectId: ProjectId;
   codespaceName?: string | null | undefined;
   onCodespaceChange?: ((name: string | null) => void) | undefined;
   locked?: boolean;
+  allowCreate?: boolean;
 }) {
   const gt = useGT();
   const messages = useMessages();
   const model = useProjectCodespaces(environmentId, projectId, codespaceName, onCodespaceChange);
-  if (!model.supported || (!model.spaces.length && !model.error && !model.project.data?.name))
-    return null;
+  const [machines, setMachines] = useState<CodespacesOptions["machines"] | null>(null);
+  const [machine, setMachine] = useState<CodespacesOptions["machines"][number] | null>(null);
+  if (!model.supported) return null;
+  const canCreate = !locked && !model.busy && model.canManage && model.project.data?.eligible;
   return (
     <MenuGroup>
       <MenuGroupLabel>
@@ -155,6 +175,76 @@ export function CodespacesMenuItems({
           </span>
         </MenuItem>
       ))}
+      {!allowCreate ? null : machines === null ? (
+        <MenuItem
+          closeOnClick={false}
+          disabled={!canCreate}
+          onClick={() => void model.loadMachines().then(setMachines)}
+        >
+          <PlusIcon className="size-3" />
+          <T>New Codespace</T>
+        </MenuItem>
+      ) : (
+        <>
+          {machine ? (
+            <>
+              <p className="max-w-64 px-2 py-1 text-xs text-muted-foreground">
+                <T>GitHub compute and storage charges may apply.</T>
+              </p>
+              <MenuItem
+                closeOnClick={false}
+                disabled={!canCreate}
+                onClick={async () => {
+                  const accepted = await model.execute({
+                    action: "create",
+                    clientRequestId: randomUUID(),
+                    projectId,
+                    machine: machine.name,
+                    idleTimeoutMinutes: 30,
+                    retentionDays: 1,
+                  });
+                  if (accepted) {
+                    setMachine(null);
+                    setMachines(null);
+                  }
+                }}
+              >
+                <T>Create Codespace</T> · {machine.displayName}
+              </MenuItem>
+            </>
+          ) : (
+            <>
+              <MenuGroupLabel>
+                <T>Choose a machine</T>
+              </MenuGroupLabel>
+              {machines.map((entry) => (
+                <MenuItem
+                  key={entry.name}
+                  closeOnClick={false}
+                  disabled={!canCreate}
+                  onClick={() => setMachine(entry)}
+                >
+                  {entry.displayName}
+                </MenuItem>
+              ))}
+              {machines.length === 0 ? (
+                <p className="px-2 py-1 text-xs text-muted-foreground">
+                  <T>No machines available</T>
+                </p>
+              ) : null}
+            </>
+          )}
+          <MenuItem
+            closeOnClick={false}
+            onClick={() => {
+              if (machine) setMachine(null);
+              else setMachines(null);
+            }}
+          >
+            <T>Cancel</T>
+          </MenuItem>
+        </>
+      )}
       {model.error || model.feedback?.tone === "error" ? (
         <p role="alert" className="px-2 py-1 text-xs text-destructive">
           {model.error ?? model.feedback?.description}
@@ -192,8 +282,8 @@ export function ProjectCodespacesControl({
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
         <T>
-          Add computers in Settings, Environments, Codespaces. Several projects can share one
-          computer. Your provider login and history stay on this T3 host.
+          Create a Codespace from Run on or add a computer in Settings, Environments, Codespaces.
+          Your provider login and history stay on this T3 host.
         </T>
       </p>
       {model.error ? (

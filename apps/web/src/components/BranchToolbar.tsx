@@ -471,6 +471,7 @@ const RunContextSelector = memo(function RunContextSelector({
             codespaceName={codespaceName}
             onCodespaceChange={onCodespaceChange}
             locked={locationLocked}
+            allowCreate
           />
         ) : null}
         {offersWorkspaceModes ? (
